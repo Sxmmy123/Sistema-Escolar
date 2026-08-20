@@ -1,0 +1,154 @@
+﻿rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMainAdmin() {
+      return signedIn() && (
+        request.auth.uid == "6GJAf3WiBaVBXypSDDR1xKLalnq2" ||
+        request.auth.token.email == "smichmev@gmail.com"
+      );
+    }
+
+    function userProfile() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return signedIn() && (
+        isMainAdmin() ||
+        (
+          exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+          userProfile().rol == role &&
+          userProfile().activo == true
+        )
+      );
+    }
+
+    function isAdmin() {
+      return isMainAdmin() || hasRole("admin");
+    }
+
+    function isDocente() {
+      return hasRole("docente");
+    }
+
+    function isDirector() {
+      return hasRole("director");
+    }
+
+    function onlyAccountEmailFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(["authEmail", "correoRecuperacion", "trimestreActivo", "trimestreActivoUpdatedAt", "updatedAt"]);
+    }
+
+    function validAccountPreferences() {
+      return !("trimestreActivo" in request.resource.data) ||
+        request.resource.data.trimestreActivo in ["t1", "t2", "t3"];
+    }
+    function validTeacherPreference(uid) {
+      return request.resource.data.keys().hasOnly(["uid", "trimestreActivo", "trimestreActivoUpdatedAt", "updatedAt"]) &&
+        request.resource.data.uid == uid &&
+        request.resource.data.trimestreActivo in ["t1", "t2", "t3"];
+    }
+
+    match /usuarios/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin() || isDirector());
+      allow create, update, delete: if isAdmin();
+      allow update: if signedIn() && request.auth.uid == uid && onlyAccountEmailFields() && validAccountPreferences();
+    }
+
+    match /usuarios_por_nombre/{usuarioKey} {
+      allow get: if true;
+      allow list: if signedIn();
+      allow create, update, delete: if isAdmin();
+      allow update: if signedIn() && resource.data.uid == request.auth.uid && onlyAccountEmailFields() && validAccountPreferences();
+    }
+
+    match /accesos_alumnos/{usuarioKey} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /cursos/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /materias_escuela/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /materias_por_curso/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /alumnos/{id} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /docentes/{id} {
+      allow read: if isAdmin() || isDirector() || (signedIn() && request.auth.uid == id);
+      allow create, update, delete: if isAdmin();
+      allow update: if signedIn() && request.auth.uid == id && onlyAccountEmailFields() && validAccountPreferences();
+    }
+
+    match /director/{id} {
+      allow read: if isAdmin() || isDirector();
+      allow create, update, delete: if isAdmin();
+      allow update: if signedIn() && request.auth.uid == id && onlyAccountEmailFields() && validAccountPreferences();
+    }
+
+
+    match /preferencias_docente/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin() || isDirector());
+      allow create, update: if signedIn() && request.auth.uid == uid && validTeacherPreference(uid);
+      allow delete: if isAdmin();
+    }
+    match /asignaciones/{id} {
+      allow read: if isAdmin() || isDirector() || isDocente();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /horarios/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /asistencias/{id} {
+      allow read: if true;
+      allow create, update: if isAdmin() || isDocente();
+      allow delete: if isAdmin();
+    }
+
+    match /actividades/{id} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin() || isDocente();
+    }
+
+    match /calificaciones/{id} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin() || isDocente();
+    }
+
+    match /auditoria/{id} {
+      allow read: if isAdmin() || isDirector();
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+
+
