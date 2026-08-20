@@ -1,6 +1,11 @@
 import { appShell } from "../../ui/shell.js";
 import { icon } from "../../ui/dom.js";
 
+function publicAsset(path) {
+  return `${import.meta.env.BASE_URL || "./"}${path}`;
+}
+
+
 function metricCard(label, valueAttr, iconName, accentClass, linkText, href) {
   return `
     <article class="rounded-xl border border-amber-900/10 bg-white px-3 py-2 shadow-soft">
@@ -63,7 +68,7 @@ export function DocenteDashboard() {
 
       <section class="relative overflow-hidden rounded-xl border border-amber-900/10 bg-white px-4 py-3 shadow-soft">
         <div class="absolute inset-y-0 right-0 hidden w-80 bg-gradient-to-l from-school-sky via-school-sky/80 to-transparent lg:block"></div>
-        <img src="/images/logo-nueva-bolivia.png" alt="" class="absolute right-20 top-1/2 hidden h-20 -translate-y-1/2 object-contain opacity-20 lg:block">
+        <img src="${publicAsset("images/logo-nueva-bolivia.png")}" alt="" class="absolute right-20 top-1/2 hidden h-20 -translate-y-1/2 object-contain opacity-20 lg:block">
         <div class="relative flex h-full items-center justify-between gap-4">
           <div class="min-w-0">
             <p class="hidden text-[9px] font-black uppercase tracking-[.18em] text-school-green sm:block">Unidad Educativa Ecologica Nueva Bolivia</p>
@@ -152,3 +157,5 @@ export function DocenteDashboard() {
     </div>
   `);
 }
+
+

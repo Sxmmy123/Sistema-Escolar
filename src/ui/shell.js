@@ -1,7 +1,11 @@
-﻿import { APP_NAME, APP_VERSION } from "../firebase/config.js";
+import { APP_NAME, APP_VERSION } from "../firebase/config.js";
 import { icon } from "./dom.js";
 
-const SCHOOL_LOGO = "/images/logo-nueva-bolivia.png";
+function publicAsset(path) {
+  return `${import.meta.env.BASE_URL || "./"}${path}`;
+}
+
+const SCHOOL_LOGO = publicAsset("images/logo-nueva-bolivia.png");
 
 
 const navItems = {
@@ -238,11 +242,4 @@ export function statCard(label, value, iconName, tone = "bg-white") {
     </article>
   `;
 }
-
-
-
-
-
-
-
 

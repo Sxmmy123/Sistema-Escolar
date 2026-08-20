@@ -1,6 +1,10 @@
 import { icon } from "../../ui/dom.js";
 
-const SCHOOL_LOGO = "/images/logo-nueva-bolivia.png";
+function publicAsset(path) {
+  return `${import.meta.env.BASE_URL || "./"}${path}`;
+}
+
+const SCHOOL_LOGO = publicAsset("images/logo-nueva-bolivia.png");
 
 export const directorNav = [
   ["Dashboard", "#/director", "layout-dashboard"],
@@ -135,3 +139,5 @@ export function directorStat(label, value, detail, iconName, tone = "bg-school-g
     </article>
   `;
 }
+
+

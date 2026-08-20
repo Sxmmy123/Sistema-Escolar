@@ -1,4 +1,4 @@
-﻿import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword } from "firebase/auth";
 import { APP_VERSION } from "../../firebase/config.js";
 import { auth } from "../../firebase/client.js";
 import { authEmailForLogin } from "../../services/users.js";
@@ -6,14 +6,17 @@ import { loginStudentAccess } from "../../services/studentAccess.js";
 import { resolveUserRole } from "../../services/authSession.js";
 import { icon } from "../../ui/dom.js";
 
+function publicAsset(path) {
+  return `${import.meta.env.BASE_URL || "./"}${path}`;
+}
 
 export function LoginView() {
   return `
-    <section class="min-h-screen bg-cover bg-center" style="background-image:linear-gradient(90deg, rgba(7,23,43,.82), rgba(7,23,43,.35)), url('/images/login-fondo.png')">
+    <section class="min-h-screen bg-cover bg-center" style="background-image:linear-gradient(90deg, rgba(7,23,43,.82), rgba(7,23,43,.35)), url('${publicAsset("images/login-fondo.png")}')">
       <div class="flex min-h-screen items-center px-4 py-8">
         <div class="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[1fr_440px] lg:items-center">
           <div class="text-white">
-            <img src="/images/logo-nueva-bolivia.png" alt="Unidad Educativa" class="mb-6 h-24 w-24 rounded-full bg-white object-contain p-2 shadow-soft" />
+            <img src="${publicAsset("images/logo-nueva-bolivia.png")}" alt="Unidad Educativa" class="mb-6 h-24 w-24 rounded-full bg-white object-contain p-2 shadow-soft" />
             <p class="text-sm font-black uppercase tracking-[.28em] text-yellow-300">Sistema escolar</p>
             <h1 class="mt-3 max-w-3xl text-4xl font-black leading-tight md:text-6xl">Unidad Educativa Ecologica Nueva Bolivia</h1>
             <p class="mt-4 max-w-2xl text-lg font-semibold leading-8 text-white/85">Acceso al sistema academico institucional.</p>
@@ -138,8 +141,4 @@ export function bindLogin() {
     }
   });
 }
-
-
-
-
 
