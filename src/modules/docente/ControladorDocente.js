@@ -2247,10 +2247,10 @@ function regularizationStudentCard(student, items, tone = "red") {
       </summary>
       <div class="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
         ${items.map((item) => `
-          <div class="rounded-lg bg-slate-50 px-2.5 py-1.5">
-            <p class="text-[11px] font-semibold text-slate-900">${escapeHtml(item.titulo || "Actividad")}</p>
-            <p class="mt-0.5 text-[10px] font-semibold text-slate-500">${escapeHtml(regularizationActivityLabel(item))}${item.pendienteMotivo ? ` · ${escapeHtml(item.pendienteMotivo)}` : ""}${item.nota ? ` · Nota ${item.nota}` : ""}</p>
-          </div>
+          <button type="button" data-regularization-grade-activity="${item.id}" data-regularization-grade-student="${student.id}" class="block w-full rounded-lg bg-slate-50 px-2.5 py-1.5 text-left transition hover:bg-green-50 hover:ring-1 hover:ring-school-green">
+            <span class="block truncate text-[11px] font-semibold text-slate-900">${escapeHtml(item.titulo || "Actividad")}</span>
+            <span class="mt-0.5 block text-[10px] font-semibold text-slate-500">${escapeHtml(regularizationActivityLabel(item))}${item.pendienteMotivo ? ` · ${escapeHtml(item.pendienteMotivo)}` : ""}${item.nota ? ` · Nota ${item.nota}` : ""}</span>
+          </button>
         `).join("")}
       </div>
     </details>
@@ -3560,6 +3560,7 @@ export async function bindDocentePages(route) {
     setHtml("[data-teacher-page-status]", "Error de carga");
   }
 }
+
 
 
 
