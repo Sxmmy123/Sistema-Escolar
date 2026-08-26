@@ -1,4 +1,4 @@
-﻿import { TRIMESTERS, saveTeacherTrimesterPreference, todayIso } from "../../services/teacherData.js";
+import { TRIMESTERS, saveTeacherTrimesterPreference, todayIso } from "../../services/teacherData.js";
 
 export const teacherState = {
   context: null,
@@ -28,6 +28,7 @@ export const teacherState = {
   gradeStudentId: "",
   gradeIndex: 0,
   gradeMode: sessionStorage.getItem("docenteCalificarModo") || "guiado",
+  gradeIgnoreAttendance: sessionStorage.getItem("docenteCalificarIgnorarAsistencia") === "1",
   gradeModalClosed: true,
   notesCriterionId: "",
   notesCriterionOpen: false,

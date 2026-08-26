@@ -1,4 +1,4 @@
-﻿import { DAYS, findSubject, periodsForCourse } from "../../data/catalog.js";
+import { DAYS, findSubject, periodsForCourse } from "../../data/catalog.js";
 import { icon } from "../../ui/dom.js";
 import { renderBulletin } from "./BoletinDocente.js";
 import { exportNotesToExcel } from "./exportNotasExcel.js";
@@ -1446,11 +1446,13 @@ async function renderDateGrading(context) {
     ])
     : [[], {}, {}];
 
+  const ignoreAttendanceForGrading = Boolean(teacherState.gradeIgnoreAttendance);
+  const attendanceAllowsGrade = (student) => ["presente", "atraso"].includes(attendanceMap[student.id]?.estado);
   const studentsToGrade = activity
-    ? students.filter((student) => ["presente", "atraso"].includes(attendanceMap[student.id]?.estado))
+    ? (ignoreAttendanceForGrading ? students : students.filter(attendanceAllowsGrade))
     : [];
-  const studentsNotEnabled = activity
-    ? students.filter((student) => !["presente", "atraso"].includes(attendanceMap[student.id]?.estado))
+  const studentsNotEnabled = activity && !ignoreAttendanceForGrading
+    ? students.filter((student) => !attendanceAllowsGrade(student))
     : [];
   if (teacherState.gradeStudentId && !studentsToGrade.some((student) => student.id === teacherState.gradeStudentId)) {
     teacherState.gradeStudentId = "";
@@ -1621,6 +1623,10 @@ async function renderDateGrading(context) {
               <button type="button" data-grade-scope="dia" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black transition sm:gap-2 sm:px-4 sm:py-2 sm:text-sm ${gradeScope === "dia" ? "bg-green-600 text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("sun", "h-3.5 w-3.5 sm:h-4 sm:w-4")}Hoy</button>
               <button type="button" data-grade-scope="semana" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black transition sm:gap-2 sm:px-4 sm:py-2 sm:text-sm ${gradeScope === "semana" ? "bg-amber-500 text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("calendar-range", "h-3.5 w-3.5 sm:h-4 sm:w-4")}7 dias</button>
             </div>
+            <button type="button" data-toggle-grade-ignore-attendance class="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black transition sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm ${teacherState.gradeIgnoreAttendance ? "border-school-green bg-green-50 text-school-green" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/40"}">
+              <span class="grid h-4 w-7 place-items-center rounded-full ${teacherState.gradeIgnoreAttendance ? "bg-school-green" : "bg-slate-300"}"><span class="h-3 w-3 rounded-full bg-white transition ${teacherState.gradeIgnoreAttendance ? "translate-x-1.5" : "-translate-x-1.5"}"></span></span>
+              Ignorar asistencia
+            </button>
             <a href="#/docente/tareas" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-school-navy sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">${icon("calendar-plus", "mr-1 inline h-3.5 w-3.5 sm:h-4 sm:w-4")}Agenda</a>
           </div>
         </div>
@@ -1874,6 +1880,13 @@ async function renderDateGrading(context) {
       sessionStorage.setItem("docenteCalificarModo", teacherState.gradeMode);
       renderDateGrading(context);
     });
+  });
+  container.querySelector("[data-toggle-grade-ignore-attendance]")?.addEventListener("click", () => {
+    teacherState.gradeIgnoreAttendance = !teacherState.gradeIgnoreAttendance;
+    sessionStorage.setItem("docenteCalificarIgnorarAsistencia", teacherState.gradeIgnoreAttendance ? "1" : "0");
+    teacherState.gradeStudentId = "";
+    teacherState.gradeIndex = 0;
+    renderDateGrading(context);
   });
   container.querySelectorAll("[data-grade-activity]").forEach((button) => {
     button.addEventListener("click", () => {
