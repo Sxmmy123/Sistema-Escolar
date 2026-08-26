@@ -699,14 +699,14 @@ function cellStateClass(value) {
 }
 
 function historicalDateHeaderHtml(date, index) {
-  return `<th class="min-w-32 border-r border-white/20 px-2 py-2 text-center font-black">
-    <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-center text-xs font-black text-school-green outline-none" data-h-date="${index}" value="${date}">
+  return `<th class="w-12 min-w-12 border-r border-white/20 px-1 py-2 text-center font-black align-bottom">
+    <input class="mx-auto h-24 w-9 rounded-lg border border-white/30 bg-white/95 px-1 py-1 text-center text-[11px] font-black text-school-green outline-none [writing-mode:vertical-rl] [text-orientation:mixed]" data-h-date="${index}" value="${date}">
   </th>`;
 }
 
 function historicalAttendanceCellHtml(index) {
-  return `<td class="border-b border-r border-slate-100 bg-white p-1">
-    <div contenteditable="true" data-h-cell="${index}" class="min-h-8 rounded-lg px-2 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40"></div>
+  return `<td class="w-12 min-w-12 border-b border-r border-slate-100 bg-white p-1">
+    <div contenteditable="true" data-h-cell="${index}" class="min-h-8 rounded-lg px-1 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40"></div>
   </td>`;
 }
 
@@ -752,7 +752,7 @@ async function renderHistoricalGrid() {
   const dates = defaultHistoricalDates(5);
   if (counter) counter.textContent = `${students.length} alumno(s)`;
   grid.innerHTML = `
-    <table class="min-w-[860px] w-full border-separate border-spacing-0 text-left text-xs">
+    <table class="w-full min-w-[620px] border-separate border-spacing-0 text-left text-xs">
       <thead class="sticky top-0 z-10 bg-school-green text-white">
         <tr>
           <th class="w-14 border-r border-white/20 px-3 py-2 font-black">No.</th>
