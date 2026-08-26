@@ -9,9 +9,10 @@
   serverTimestamp,
   setDoc,
   updateDoc,
-  where
+  where,
+  writeBatch
 } from "firebase/firestore";
-import { firestore } from "../firebase/client.js";
+import { auth, firestore } from "../firebase/client.js";
 import { COURSES, SUBJECTS, periodsForCourse } from "../data/catalog.js";
 
 function cleanText(value) {
@@ -20,6 +21,10 @@ function cleanText(value) {
 
 function studentDocId(ci) {
   return String(ci || "").replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
+}
+
+function attendanceDocId(courseId, date, studentId) {
+  return `${date}_${courseId}_${studentId}`.replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
 }
 
 export async function seedSchoolCatalog() {
@@ -186,6 +191,39 @@ export async function importSchedulesPayload(payload) {
 
   await Promise.all(entries.map(([courseId, schedule]) => saveFullSchedule(courseId, schedule)));
   return entries.length;
+}
+
+export async function importHistoricalAttendance({ course, rows, trimestreId }) {
+  if (!course?.id) throw new Error("Selecciona un curso valido.");
+  if (!Array.isArray(rows) || !rows.length) throw new Error("No hay asistencias para guardar.");
+  if (!["t1", "t2", "t3"].includes(trimestreId)) throw new Error("Selecciona un trimestre valido.");
+
+  const chunks = [];
+  for (let index = 0; index < rows.length; index += 450) {
+    chunks.push(rows.slice(index, index + 450));
+  }
+
+  for (const chunk of chunks) {
+    const batch = writeBatch(firestore);
+    chunk.forEach((row) => {
+      const id = attendanceDocId(course.id, row.fecha, row.student.id);
+      batch.set(doc(firestore, "asistencias", id), {
+        cursoId: course.id,
+        alumnoId: row.student.id,
+        fecha: row.fecha,
+        trimestreId,
+        estado: row.estado,
+        observacion: "",
+        origen: "carga_historica",
+        registradoPorUid: auth.currentUser?.uid || "",
+        registradoPor: auth.currentUser?.email || "admin",
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    });
+    await batch.commit();
+  }
+
+  return rows.length;
 }
 
 export async function saveTeacherAssignments(teacherUid, assignments) {

@@ -172,6 +172,56 @@ function schedulePanel() {
   `;
 }
 
+function historicalPanel() {
+  const year = new Date().getFullYear();
+  return `
+    <section class="grid gap-3 xl:grid-cols-[minmax(320px,420px)_1fr] sm:gap-5">
+      <form class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-attendance-form>
+        <p class="text-[10px] font-black uppercase tracking-[.16em] text-school-green sm:text-xs">Carga historica</p>
+        <h2 class="mt-1 text-xl font-black text-slate-900 sm:text-2xl">Asistencias ya registradas</h2>
+        <p class="mt-1 text-xs font-semibold leading-5 text-slate-500 sm:text-sm sm:leading-6">Pega una lista desde Excel. Las celdas vacias se omiten y no se guardan como falta.</p>
+
+        <div class="mt-4 grid gap-3 sm:grid-cols-2">
+          <label class="text-sm font-black text-slate-700">Curso
+            <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="courseId">${courseOptions()}</select>
+          </label>
+          <label class="text-sm font-black text-slate-700">Trimestre
+            <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="trimestreId">
+              <option value="t1">1er trimestre</option>
+              <option value="t2">2do trimestre</option>
+              <option value="t3">3er trimestre</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="mt-3 block text-sm font-black text-slate-700">Gestion
+          <input class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="year" type="number" min="2020" max="2100" value="${year}">
+        </label>
+
+        <label class="mt-3 block text-sm font-black text-slate-700">Tabla pegada
+          <textarea class="mt-1.5 min-h-56 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-mono text-xs outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10 sm:rounded-2xl sm:px-4 sm:py-3" name="records" placeholder="N°&#9;Alumno&#9;01/08/2026&#9;02/08/2026&#9;05/08/2026&#10;1&#9;ALANOCA LINARES ANGEL&#9;P&#9;P&#9;A&#10;2&#9;CAHUANA SALLAMA JUAN&#9;F&#9;P&#9;P&#10;3&#9;CONDORI POMA SHEILY&#9;L&#9;P&#9;"></textarea>
+        </label>
+
+        <div class="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold leading-5 text-amber-800">
+          Usa P = presente, A = atraso, L = licencia/permiso, F = falta.
+        </div>
+        <p class="mt-3 hidden rounded-2xl border px-4 py-3 text-sm font-bold" data-historical-status></p>
+
+        <div class="mt-4 grid gap-2 sm:grid-cols-2">
+          <button class="rounded-xl border border-school-green px-4 py-2.5 text-sm font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:py-3" type="button" data-action="preview-historical-attendance">${icon("eye", "mr-1.5 inline h-4 w-4")}Previsualizar</button>
+          <button class="rounded-xl bg-school-green px-4 py-2.5 text-sm font-black text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 sm:rounded-2xl sm:py-3" type="button" data-action="import-historical-attendance" disabled>${icon("upload", "mr-1.5 inline h-4 w-4")}Guardar asistencia</button>
+        </div>
+      </form>
+
+      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-preview>
+        <div class="flex h-full min-h-60 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">
+          Previsualiza la tabla antes de guardar.
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function auditPanel() {
   const today = new Date().toISOString().slice(0, 10);
   return `
@@ -224,6 +274,7 @@ export function AdminModule(route) {
     "/admin/docentes": ["Docentes", "Asignacion docente", "Crear docentes en Firebase Authentication y guardar su perfil docente en Firestore.", "", userCreatePanel("docente", "Docentes", "Luego se les asignara cursos y materias desde este mismo modulo.")],
     "/admin/director": ["Director", "Usuario director", "Crear o actualizar el usuario visualizador del colegio.", "", userCreatePanel("director", "Director", "El director podra ingresar a reportes, asistencias y auditoria.")],
     "/admin/horarios": ["Horarios", "Horario escolar", "Configurar materias por curso con colores fijos por materia.", "", schedulePanel()],
+    "/admin/carga-historica": ["Carga Historica", "Importar datos ya registrados", "Cargar asistencias anteriores directamente al registro normal.", "", historicalPanel()],
     "/admin/auditoria": ["Auditoria", "Movimientos", "Historial claro de cambios importantes hechos por admin, docente y director.", "", auditPanel()]
   };
   const page = pages[route] || pages["/admin/alumnos"];

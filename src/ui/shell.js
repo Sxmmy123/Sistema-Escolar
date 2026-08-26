@@ -15,6 +15,7 @@ const navItems = {
     ["Docentes", "#/admin/docentes", "presentation"],
     ["Director", "#/admin/director", "eye"],
     ["Horarios", "#/admin/horarios", "calendar-days"],
+    ["Carga Historica", "#/admin/carga-historica", "upload"],
     ["Auditoria", "#/admin/auditoria", "activity"]
   ],
   docente: [

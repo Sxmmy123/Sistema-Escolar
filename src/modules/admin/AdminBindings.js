@@ -1,5 +1,5 @@
 ﻿import { COURSES, DAYS, SUBJECTS, findCourse, findSubject, periodsForCourse } from "../../data/catalog.js";
-import { getAdminCounts, getAllSchedules, getSchedule, importSchedulesPayload, importStudents, listStudents, saveScheduleCell, seedSchoolCatalog, setStudentActive, saveTeacherAssignments } from "../../services/adminData.js";
+import { getAdminCounts, getAllSchedules, getSchedule, importHistoricalAttendance, importSchedulesPayload, importStudents, listStudents, saveScheduleCell, seedSchoolCatalog, setStudentActive, saveTeacherAssignments } from "../../services/adminData.js";
 import { createSystemUser, listUsersByRole } from "../../services/users.js";
 import { ensureStudentLocalAccess, setStudentAccessActive } from "../../services/studentAccess.js";
 import { listAudit, safeAudit } from "../../services/auditData.js";
@@ -8,7 +8,8 @@ const state = {
   studentsCourseId: COURSES[0].id,
   scheduleCourseId: COURSES[0].id,
   selectedSubjectId: "",
-  schedule: null
+  schedule: null,
+  historicalPreview: null
 };
 
 const roleLabels = {
@@ -614,6 +615,219 @@ function closeAuditDetail() {
   modal?.classList.remove("flex");
 }
 
+function normalizeComparable(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function splitHistoricalLine(line) {
+  const raw = String(line || "").trim();
+  if (!raw) return [];
+  if (raw.includes("\t")) return raw.split("\t").map((part) => part.trim());
+  if (raw.includes(";")) return raw.split(";").map((part) => part.trim());
+  if (raw.includes(",")) return raw.split(",").map((part) => part.trim());
+  return raw.split(/\s{2,}/).map((part) => part.trim());
+}
+
+function normalizeHistoricalDate(value, year) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const iso = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (iso) {
+    const yyyy = iso[1];
+    const mm = String(Number(iso[2])).padStart(2, "0");
+    const dd = String(Number(iso[3])).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  const local = text.match(/^(\d{1,2})[-/](\d{1,2})(?:[-/](\d{2,4}))?$/);
+  if (local) {
+    const dd = String(Number(local[1])).padStart(2, "0");
+    const mm = String(Number(local[2])).padStart(2, "0");
+    let yyyy = local[3] || year;
+    if (String(yyyy).length === 2) yyyy = `20${yyyy}`;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return "";
+}
+
+function normalizeHistoricalState(value) {
+  const text = normalizeComparable(value);
+  if (!text) return "";
+  if (["p", "presente", "asistencia", "asistio"].includes(text)) return "presente";
+  if (["a", "atraso", "atrasado", "tarde"].includes(text)) return "atraso";
+  if (["l", "licencia", "permiso", "lic"].includes(text)) return "permiso";
+  if (["f", "falta", "falto", "ausente"].includes(text)) return "falta";
+  return "";
+}
+
+function historicalStateLabel(stateId) {
+  return {
+    presente: "Presente",
+    atraso: "Atraso",
+    permiso: "Permiso",
+    falta: "Falta"
+  }[stateId] || "-";
+}
+
+async function buildHistoricalAttendancePreview() {
+  const form = document.querySelector("[data-historical-form]");
+  if (!form) return null;
+  const data = new FormData(form);
+  const course = findCourse(data.get("courseId"));
+  const trimestreId = data.get("trimestreId") || "t1";
+  const year = data.get("year") || new Date().getFullYear();
+  const rawText = data.get("records");
+  const lines = String(rawText || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) throw new Error("Pega una tabla con encabezados y alumnos.");
+
+  const header = splitHistoricalLine(lines[0]);
+  const dateColumns = header
+    .map((label, index) => ({ index, fecha: normalizeHistoricalDate(label, year), label }))
+    .filter((item) => item.index >= 2 && item.fecha);
+  if (!dateColumns.length) throw new Error("No encontre fechas validas desde la tercera columna.");
+
+  const students = await listStudents(course.id);
+  const byNumber = new Map(students.map((student) => [String(student.numeroLista || "").trim(), student]));
+  const byName = new Map(students.map((student) => [normalizeComparable(student.nombre), student]));
+  const rows = [];
+  const errors = [];
+  const totals = { presente: 0, atraso: 0, permiso: 0, falta: 0 };
+  const touchedStudents = new Set();
+
+  lines.slice(1).forEach((line, rowIndex) => {
+    const cells = splitHistoricalLine(line);
+    if (!cells.length) return;
+    const numberKey = String(cells[0] || "").trim();
+    const nameKey = normalizeComparable(cells[1]);
+    const student = byNumber.get(numberKey) || byName.get(nameKey);
+    if (!student) {
+      errors.push(`Fila ${rowIndex + 2}: no se encontro alumno "${cells[1] || cells[0] || line}".`);
+      return;
+    }
+    touchedStudents.add(student.id);
+    dateColumns.forEach((column) => {
+      const estado = normalizeHistoricalState(cells[column.index]);
+      if (!cells[column.index]) return;
+      if (!estado) {
+        errors.push(`Fila ${rowIndex + 2}, ${column.label}: estado invalido "${cells[column.index]}".`);
+        return;
+      }
+      totals[estado] += 1;
+      rows.push({ student, fecha: column.fecha, estado });
+    });
+  });
+
+  if (!rows.length) throw new Error("No hay registros validos para importar.");
+  return {
+    course,
+    trimestreId,
+    rows,
+    errors,
+    totals,
+    dates: [...new Set(rows.map((row) => row.fecha))].sort(),
+    studentCount: touchedStudents.size
+  };
+}
+
+function renderHistoricalPreview(preview) {
+  const box = document.querySelector("[data-historical-preview]");
+  const button = document.querySelector("[data-action='import-historical-attendance']");
+  if (!box || !button) return;
+  state.historicalPreview = preview;
+  button.disabled = !preview?.rows?.length;
+
+  if (!preview) {
+    box.innerHTML = `<div class="rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-sm font-semibold text-slate-500">Previsualiza la tabla antes de guardar.</div>`;
+    return;
+  }
+
+  const sample = preview.rows.slice(0, 12);
+  box.innerHTML = `
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-soft">
+      <div class="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-4">
+        <div><p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Curso</p><p class="font-black text-slate-900">${escapeHtml(preview.course.nombre)}</p></div>
+        <div><p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Fechas</p><p class="font-black text-slate-900">${preview.dates.length}</p></div>
+        <div><p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Alumnos</p><p class="font-black text-slate-900">${preview.studentCount}</p></div>
+        <div><p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Registros</p><p class="font-black text-school-green">${preview.rows.length}</p></div>
+      </div>
+      <div class="flex flex-wrap gap-2 p-4 text-xs font-black">
+        <span class="rounded-full bg-green-50 px-3 py-1 text-green-700">P: ${preview.totals.presente}</span>
+        <span class="rounded-full bg-yellow-50 px-3 py-1 text-yellow-700">A: ${preview.totals.atraso}</span>
+        <span class="rounded-full bg-purple-50 px-3 py-1 text-purple-700">L: ${preview.totals.permiso}</span>
+        <span class="rounded-full bg-red-50 px-3 py-1 text-red-700">F: ${preview.totals.falta}</span>
+      </div>
+      ${preview.errors.length ? `<div class="mx-4 mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">${preview.errors.slice(0, 5).map(escapeHtml).join("<br>")}${preview.errors.length > 5 ? `<br>... ${preview.errors.length - 5} advertencia(s) mas` : ""}</div>` : ""}
+      <div class="overflow-x-auto">
+        <table class="min-w-[640px] text-left text-xs">
+          <thead class="bg-school-green text-white"><tr><th class="px-3 py-2">Fecha</th><th class="px-3 py-2">No.</th><th class="px-3 py-2">Alumno</th><th class="px-3 py-2">Estado</th></tr></thead>
+          <tbody class="divide-y divide-slate-100">${sample.map((row) => `<tr><td class="px-3 py-2">${row.fecha}</td><td class="px-3 py-2">${row.student.numeroLista || "-"}</td><td class="px-3 py-2">${escapeHtml(row.student.nombre)}</td><td class="px-3 py-2">${historicalStateLabel(row.estado)}</td></tr>`).join("")}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function bindHistoricalPage() {
+  renderHistoricalPreview(null);
+
+  document.querySelector("[data-action='preview-historical-attendance']")?.addEventListener("click", async () => {
+    const status = document.querySelector("[data-historical-status]");
+    try {
+      if (status) {
+        status.className = "rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700";
+        status.textContent = "Revisando tabla...";
+      }
+      const preview = await buildHistoricalAttendancePreview();
+      renderHistoricalPreview(preview);
+      if (status) {
+        status.className = "rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-bold text-green-700";
+        status.textContent = "Tabla lista para importar.";
+      }
+    } catch (error) {
+      state.historicalPreview = null;
+      renderHistoricalPreview(null);
+      if (status) {
+        status.className = "rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
+        status.textContent = error.message || "No se pudo previsualizar.";
+      }
+    }
+  });
+
+  document.querySelector("[data-action='import-historical-attendance']")?.addEventListener("click", async () => {
+    const status = document.querySelector("[data-historical-status]");
+    let preview = state.historicalPreview;
+    try {
+      if (!preview?.rows?.length) preview = await buildHistoricalAttendancePreview();
+      const confirmed = window.confirm(`Se guardaran ${preview.rows.length} registros de asistencia en ${preview.course.nombre}. ¿Continuar?`);
+      if (!confirmed) return;
+      if (status) {
+        status.className = "rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700";
+        status.textContent = "Guardando asistencias...";
+      }
+      const count = await importHistoricalAttendance(preview);
+      await safeAudit({
+        tipo: "asistencia",
+        accion: "carga_historica",
+        detalle: `Importo ${count} asistencias historicas en ${preview.course.nombre}`,
+        datos: { cursoId: preview.course.id, trimestreId: preview.trimestreId, cantidad: count, fechas: preview.dates.length }
+      });
+      if (status) {
+        status.className = "rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-bold text-green-700";
+        status.textContent = `${count} registros guardados correctamente.`;
+      }
+    } catch (error) {
+      if (status) {
+        status.className = "rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
+        status.textContent = error.message || "No se pudo importar.";
+      }
+    }
+  });
+}
+
 async function loadAuditPage() {
   const status = document.querySelector("[data-audit-status]");
   const fecha = document.querySelector("[data-audit-date]")?.value || "";
@@ -661,6 +875,7 @@ export function bindAdminPages(route) {
 
   if (route === "/admin/alumnos") bindStudentsPage();
   if (route === "/admin/horarios") bindSchedulePage();
+  if (route === "/admin/carga-historica") bindHistoricalPage();
   if (route === "/admin") hydrateAdminDashboard();
   if (route === "/admin/auditoria") bindAuditPage();
 }
