@@ -33,6 +33,7 @@ const routes = {
   "/admin/docentes": () => AdminModule("/admin/docentes"),
   "/admin/director": () => AdminModule("/admin/director"),
   "/admin/horarios": () => AdminModule("/admin/horarios"),
+  "/admin/carga-historica": () => AdminModule("/admin/carga-historica"),
   "/admin/auditoria": () => AdminModule("/admin/auditoria"),
   "/docente": () => DocenteDashboard(),
   "/docente/asistencia": () => DocenteModule("/docente/asistencia"),
