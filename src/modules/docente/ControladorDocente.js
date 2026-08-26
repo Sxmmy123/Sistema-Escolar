@@ -1,4 +1,4 @@
-import { DAYS, findSubject, periodsForCourse } from "../../data/catalog.js";
+﻿import { DAYS, findSubject, periodsForCourse } from "../../data/catalog.js";
 import { icon } from "../../ui/dom.js";
 import { renderBulletin } from "./BoletinDocente.js";
 import { exportNotesToExcel } from "./exportNotasExcel.js";
@@ -97,7 +97,7 @@ function renderCourseTabs(context, onSelect) {
   }
 
   holder.innerHTML = context.courses.map((course) => `
-    <button type="button" data-teacher-course-id="${course.id}" class="shrink-0 rounded-2xl border px-4 py-2 text-sm font-black transition ${course.id === teacherState.selectedCourseId ? "border-school-navy bg-school-navy text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-navy/40"}">${escapeHtml(course.corto)}</button>
+    <button type="button" data-teacher-course-id="${course.id}" class="shrink-0 rounded-2xl border px-4 py-2 text-sm font-black transition ${course.id === teacherState.selectedCourseId ? "border-school-navy bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-navy/40"}">${escapeHtml(course.corto)}</button>
   `).join("");
 
   holder.querySelectorAll("[data-teacher-course-id]").forEach((button) => {
@@ -214,12 +214,12 @@ async function renderAttendance(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -229,13 +229,13 @@ async function renderAttendance(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -297,12 +297,12 @@ async function renderAttendance(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -312,13 +312,13 @@ async function renderAttendance(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -357,8 +357,8 @@ async function renderAttendance(context) {
           <div>
             <p class="text-sm font-black text-slate-700">Modo</p>
             <div class="mt-2 rounded-2xl border border-slate-200 bg-slate-50 p-1">
-              <button type="button" data-attendance-mode="lista" class="rounded-xl px-4 py-2 text-sm font-black transition ${listMode ? "bg-school-navy text-white shadow-soft" : "text-slate-600"}">${icon("list", "mr-1 inline h-4 w-4")}Lista</button>
-              <button type="button" data-attendance-mode="guia" class="rounded-xl px-4 py-2 text-sm font-black transition ${!listMode ? "bg-school-navy text-white shadow-soft" : "text-slate-600"}">${icon("user-check", "mr-1 inline h-4 w-4")}Guía</button>
+              <button type="button" data-attendance-mode="lista" class="rounded-xl px-4 py-2 text-sm font-black transition ${listMode ? "bg-school-green text-white shadow-soft" : "text-slate-600"}">${icon("list", "mr-1 inline h-4 w-4")}Lista</button>
+              <button type="button" data-attendance-mode="guia" class="rounded-xl px-4 py-2 text-sm font-black transition ${!listMode ? "bg-school-green text-white shadow-soft" : "text-slate-600"}">${icon("user-check", "mr-1 inline h-4 w-4")}Guía</button>
             </div>
           </div>
         </div>
@@ -664,12 +664,12 @@ async function renderTasks(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -679,13 +679,13 @@ async function renderTasks(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -1536,12 +1536,12 @@ async function renderDateGrading(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -1551,13 +1551,13 @@ async function renderDateGrading(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -1613,34 +1613,34 @@ async function renderDateGrading(context) {
       <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p class="text-[10px] font-black uppercase tracking-[.16em] text-school-green sm:text-xs">Calificar</p>
-            <h2 class="mt-1 text-lg font-black capitalize leading-tight text-slate-900 sm:text-2xl">${escapeHtml(scopeTitle)}</h2>
-            <p class="mt-1 text-xs font-semibold text-slate-500 sm:text-sm">${activities.length} actividad(es) para ${escapeHtml(selectedTrimester().label)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-[.18em] text-school-green">Calificar</p>
+            <h2 class="mt-1 text-lg font-semibold capitalize leading-tight text-slate-900 sm:text-xl">${escapeHtml(scopeTitle)}</h2>
+            <p class="mt-1 text-xs font-medium text-slate-500">${activities.length} actividad(es) para ${escapeHtml(selectedTrimester().label)}</p>
           </div>
           <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <div class="flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
-              <button type="button" data-grade-scope="pendientes" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black transition sm:gap-2 sm:px-4 sm:py-2 sm:text-sm ${gradeScope === "pendientes" ? "bg-school-navy text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("clipboard-clock", "h-3.5 w-3.5 sm:h-4 sm:w-4")}Pendientes</button>
-              <button type="button" data-grade-scope="dia" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black transition sm:gap-2 sm:px-4 sm:py-2 sm:text-sm ${gradeScope === "dia" ? "bg-green-600 text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("sun", "h-3.5 w-3.5 sm:h-4 sm:w-4")}Hoy</button>
-              <button type="button" data-grade-scope="semana" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black transition sm:gap-2 sm:px-4 sm:py-2 sm:text-sm ${gradeScope === "semana" ? "bg-amber-500 text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("calendar-range", "h-3.5 w-3.5 sm:h-4 sm:w-4")}7 dias</button>
+              <button type="button" data-grade-scope="pendientes" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition sm:gap-2 sm:px-4 sm:py-2 ${gradeScope === "pendientes" ? "bg-school-green text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("clipboard-clock", "h-3.5 w-3.5 sm:h-4 sm:w-4")}Pendientes</button>
+              <button type="button" data-grade-scope="dia" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition sm:gap-2 sm:px-4 sm:py-2 ${gradeScope === "dia" ? "bg-school-green text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("sun", "h-3.5 w-3.5 sm:h-4 sm:w-4")}Hoy</button>
+              <button type="button" data-grade-scope="semana" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition sm:gap-2 sm:px-4 sm:py-2 ${gradeScope === "semana" ? "bg-school-green text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("calendar-range", "h-3.5 w-3.5 sm:h-4 sm:w-4")}7 dias</button>
             </div>
-            <button type="button" data-toggle-grade-ignore-attendance class="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black transition sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm ${teacherState.gradeIgnoreAttendance ? "border-school-green bg-green-50 text-school-green" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/40"}">
+            <button type="button" data-toggle-grade-ignore-attendance class="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition sm:rounded-2xl ${teacherState.gradeIgnoreAttendance ? "border-school-green bg-green-50 text-school-green" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/40"}">
               <span class="grid h-4 w-7 place-items-center rounded-full ${teacherState.gradeIgnoreAttendance ? "bg-school-green" : "bg-slate-300"}"><span class="h-3 w-3 rounded-full bg-white transition ${teacherState.gradeIgnoreAttendance ? "translate-x-1.5" : "-translate-x-1.5"}"></span></span>
               Ignorar asistencia
             </button>
-            <a href="#/docente/tareas" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-school-navy sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">${icon("calendar-plus", "mr-1 inline h-3.5 w-3.5 sm:h-4 sm:w-4")}Agenda</a>
+            <a href="#/docente/tareas" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-school-green sm:rounded-2xl">${icon("calendar-plus", "mr-1 inline h-3.5 w-3.5 sm:h-4 sm:w-4")}Agenda</a>
           </div>
         </div>
         <div class="mt-3 overflow-x-auto rounded-2xl border border-slate-200 bg-white sm:mt-5">
           ${activities.length ? `
             <div class="min-w-[470px] md:min-w-[620px] lg:min-w-0">
               <div class="grade-plan-grid bg-school-green text-white" style="--grade-days:${planningDates.length};">
-                <div class="border-r border-white/15 px-1.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[.06em] sm:px-3 sm:text-left sm:text-[11px]"><span class="md:hidden">Mat.</span><span class="hidden md:inline">Materia</span></div>
+                <div class="border-r border-white/15 px-1.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[.05em] sm:px-3 sm:text-left"><span class="md:hidden">Mat.</span><span class="hidden md:inline">Materia</span></div>
                 ${planningDates.map((dateKey) => {
                   const label = planningDayLabel(dateKey);
                   return `
                     <div class="border-r border-white/15 px-2 py-1.5 text-center last:border-r-0 sm:px-3">
-                      <p class="text-[10px] font-medium text-white/85">${escapeHtml(label.date)}</p>
-                      <p class="truncate text-[11px] font-semibold sm:text-xs">${escapeHtml(label.day)}</p>
+                      <p class="text-[10px] font-medium text-white/80">${escapeHtml(label.date)}</p>
+                      <p class="truncate text-[11px] font-semibold">${escapeHtml(label.day)}</p>
                     </div>
                   `;
                 }).join("")}
@@ -1652,8 +1652,8 @@ async function renderDateGrading(context) {
                     <div class="grade-plan-grid min-h-14 border-b border-slate-200 last:border-b-0 sm:min-h-16 ${rowIndex % 2 ? "bg-white" : "bg-slate-50"}" style="--grade-days:${planningDates.length};">
                       <div class="flex min-w-0 items-center justify-center border-r border-slate-200 px-1.5 py-2 md:justify-start md:px-3">
                         <div class="min-w-0">
-                          <p class="truncate text-center text-[9px] font-semibold uppercase leading-tight text-slate-800 md:hidden" title="${escapeHtml(subject?.nombre || subjectId)}">${escapeHtml(compactSubjectName(subjectId, subject?.nombre || subjectId))}</p>
-                          <p class="hidden truncate text-[11px] font-semibold uppercase leading-tight text-slate-800 md:block" title="${escapeHtml(subject?.nombre || subjectId)}">${escapeHtml(subject?.nombre || subjectId)}</p>
+                          <p class="truncate text-center text-[9px] font-medium uppercase leading-tight text-slate-700 md:hidden" title="${escapeHtml(subject?.nombre || subjectId)}">${escapeHtml(compactSubjectName(subjectId, subject?.nombre || subjectId))}</p>
+                          <p class="hidden truncate text-[11px] font-medium uppercase leading-tight text-slate-700 md:block" title="${escapeHtml(subject?.nombre || subjectId)}">${escapeHtml(subject?.nombre || subjectId)}</p>
                         </div>
                       </div>
                       ${planningDates.map((dateKey) => {
@@ -1669,10 +1669,10 @@ async function renderDateGrading(context) {
                                   const accent = showCourse ? courseAccent(item.cursoId) : (subject?.color || "#e2e8f0");
                                   const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
                                   return `
-                                    <button type="button" data-grade-activity="${item.id}" class="group flex w-full items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
+                                    <button type="button" data-grade-activity="${item.id}" class="group flex w-full items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
                                       <span class="min-w-0 flex-1 px-2 py-1">
-                                        <span class="block truncate text-[11px] font-semibold leading-tight text-slate-950" title="${escapeHtml(item.titulo || "Sin titulo")}">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-                                        <span class="block truncate text-[9px] font-medium uppercase tracking-wide text-slate-600">${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+                                        <span class="block truncate text-[11px] font-medium leading-tight text-slate-900" title="${escapeHtml(item.titulo || "Sin titulo")}">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+                                        <span class="block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
                                       </span>
                                       ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
                                     </button>
@@ -2387,12 +2387,12 @@ async function renderRegularization(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -2402,13 +2402,13 @@ async function renderRegularization(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -2500,12 +2500,12 @@ async function renderRegularization(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -2515,13 +2515,13 @@ async function renderRegularization(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -2742,12 +2742,12 @@ async function renderNotes(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -2757,13 +2757,13 @@ async function renderNotes(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -2837,12 +2837,12 @@ async function renderNotes(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -2852,13 +2852,13 @@ async function renderNotes(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -2892,7 +2892,7 @@ async function renderNotes(context) {
           ${availableSubjects.map((subjectId) => {
             const subject = findSubject(subjectId);
             const active = subjectId === teacherState.selectedSubjectId;
-            return `<button type="button" data-note-subject="${subjectId}" class="shrink-0 rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-school-navy bg-school-navy text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-navy/40"}">${escapeHtml(subject?.nombre || subjectId)}</button>`;
+            return `<button type="button" data-note-subject="${subjectId}" class="shrink-0 rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-school-navy bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-navy/40"}">${escapeHtml(subject?.nombre || subjectId)}</button>`;
           }).join("")}
         </div>
       </div>
@@ -3186,12 +3186,12 @@ async function renderSummary(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -3201,13 +3201,13 @@ async function renderSummary(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -3261,12 +3261,12 @@ async function renderSummary(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -3276,13 +3276,13 @@ async function renderSummary(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
@@ -3308,7 +3308,7 @@ async function renderSummary(context) {
             </div>
             <div class="${context.courses.length > 1 ? "flex" : "hidden"} max-w-full gap-2 overflow-x-auto pb-1">
               ${context.courses.map((item) => `
-                <button type="button" data-summary-course="${item.id}" class="shrink-0 rounded-2xl border px-4 py-2 text-sm font-black transition ${item.id === course.id ? "border-school-navy bg-school-navy text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-navy/40"}">${escapeHtml(item.corto || item.nombre)}</button>
+                <button type="button" data-summary-course="${item.id}" class="shrink-0 rounded-2xl border px-4 py-2 text-sm font-black transition ${item.id === course.id ? "border-school-navy bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-navy/40"}">${escapeHtml(item.corto || item.nombre)}</button>
               `).join("")}
             </div>
 
@@ -3399,12 +3399,12 @@ async function renderTeacherSchedule(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-12 ${widthClass} items-stretch overflow-hidden rounded-xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-4 ring-school-green/10" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-2">
-          <span class="block truncate text-[12px] font-semibold leading-tight text-slate-950">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-1 block truncate text-[10px] font-medium uppercase tracking-wide text-slate-600">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+        <span class="min-w-0 flex-1 px-2.5 py-1.5">
+          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
         </span>
-        ${showCourse ? `<span class="grid w-8 shrink-0 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
     `;
   }
@@ -3414,13 +3414,13 @@ async function renderTeacherSchedule(context) {
     if (!dayActivities.length) return "";
     const label = planningDayLabel(dateKey);
     return `
-      <article class="min-w-0 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
           <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
             <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
           </div>
-          <span class="rounded-full bg-school-sky px-2 py-1 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
+          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
         </div>
         <div class="grid gap-1.5">
           ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
