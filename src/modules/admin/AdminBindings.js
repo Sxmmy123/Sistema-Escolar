@@ -698,6 +698,49 @@ function cellStateClass(value) {
   return "bg-white text-slate-500";
 }
 
+function historicalDateHeaderHtml(date, index) {
+  return `<th class="min-w-32 border-r border-white/20 px-2 py-2 text-center font-black">
+    <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-center text-xs font-black text-school-green outline-none" data-h-date="${index}" value="${date}">
+  </th>`;
+}
+
+function historicalAttendanceCellHtml(index) {
+  return `<td class="border-b border-r border-slate-100 bg-white p-1">
+    <div contenteditable="true" data-h-cell="${index}" class="min-h-8 rounded-lg px-2 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40"></div>
+  </td>`;
+}
+
+function ensureHistoricalDateColumns(requiredCount) {
+  const grid = document.querySelector("[data-historical-grid]");
+  const headerRow = grid?.querySelector("thead tr");
+  const rows = grid ? [...grid.querySelectorAll("tbody tr[data-h-student-id]")] : [];
+  if (!grid || !headerRow) return;
+  let current = headerRow.querySelectorAll("[data-h-date]").length;
+  while (current < requiredCount) {
+    const date = defaultHistoricalDates(current + 1).at(-1);
+    headerRow.insertAdjacentHTML("beforeend", historicalDateHeaderHtml(date, current));
+    rows.forEach((row) => row.insertAdjacentHTML("beforeend", historicalAttendanceCellHtml(current)));
+    current += 1;
+  }
+}
+
+function fillHistoricalDatesFromClipboard(startInput, text) {
+  const values = String(text || "")
+    .trim()
+    .split(/\r?\n/)
+    .flatMap((line) => splitHistoricalLine(line))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!startInput || values.length <= 1) return false;
+  const startIndex = Number(startInput.dataset.hDate || 0);
+  ensureHistoricalDateColumns(startIndex + values.length);
+  values.forEach((value, offset) => {
+    const input = document.querySelector(`[data-h-date="${startIndex + offset}"]`);
+    if (input) input.value = value;
+  });
+  return true;
+}
+
 async function renderHistoricalGrid() {
   const grid = document.querySelector("[data-historical-grid]");
   const form = document.querySelector("[data-historical-attendance-form]");
@@ -714,9 +757,7 @@ async function renderHistoricalGrid() {
         <tr>
           <th class="w-14 border-r border-white/20 px-3 py-2 font-black">No.</th>
           <th class="min-w-64 border-r border-white/20 px-3 py-2 font-black">Alumno</th>
-          ${dates.map((date, index) => `<th class="min-w-32 border-r border-white/20 px-2 py-2 text-center font-black">
-            <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-center text-xs font-black text-school-green outline-none" data-h-date="${index}" value="${date}">
-          </th>`).join("")}
+          ${dates.map((date, index) => historicalDateHeaderHtml(date, index)).join("")}
         </tr>
       </thead>
       <tbody>
@@ -724,9 +765,7 @@ async function renderHistoricalGrid() {
           <tr data-h-student-id="${student.id}" data-h-student-name="${escapeHtml(student.nombre)}" data-h-student-number="${student.numeroLista || ""}" class="border-b border-slate-100">
             <td class="border-b border-r border-slate-100 bg-slate-50 px-3 py-2 text-center font-black text-school-green">${student.numeroLista || ""}</td>
             <td class="border-b border-r border-slate-100 bg-white px-3 py-2 font-semibold text-slate-700">${escapeHtml(student.nombre)}</td>
-            ${dates.map((_, index) => `<td class="border-b border-r border-slate-100 bg-white p-1">
-              <div contenteditable="true" data-h-cell="${index}" class="min-h-8 rounded-lg px-2 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40"></div>
-            </td>`).join("")}
+            ${dates.map((_, index) => historicalAttendanceCellHtml(index)).join("")}
           </tr>
         `).join("")}
       </tbody>
@@ -927,21 +966,25 @@ function bindHistoricalPage() {
   });
 
   document.querySelector("[data-action='add-historical-date']")?.addEventListener("click", () => {
-    const grid = document.querySelector("[data-historical-grid]");
-    const table = grid?.querySelector("table");
-    const headerRow = table?.querySelector("thead tr");
-    const rows = table ? [...table.querySelectorAll("tbody tr")] : [];
-    if (!table || !headerRow) return;
-    const index = headerRow.querySelectorAll("[data-h-date]").length;
-    const date = defaultHistoricalDates(index + 1).at(-1);
-    headerRow.insertAdjacentHTML("beforeend", `<th class="min-w-32 border-r border-white/20 px-2 py-2 text-center font-black">
-      <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-center text-xs font-black text-school-green outline-none" data-h-date="${index}" value="${date}">
-    </th>`);
-    rows.forEach((row) => {
-      row.insertAdjacentHTML("beforeend", `<td class="border-b border-r border-slate-100 bg-white p-1">
-        <div contenteditable="true" data-h-cell="${index}" class="min-h-8 rounded-lg px-2 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40"></div>
-      </td>`);
-    });
+    const current = document.querySelectorAll("[data-h-date]").length;
+    ensureHistoricalDateColumns(current + 1);
+    state.historicalPreview = null;
+    renderHistoricalPreview(null);
+  });
+
+  document.querySelector("[data-historical-grid]")?.addEventListener("paste", (event) => {
+    const dateInput = event.target.closest("[data-h-date]");
+    if (!dateInput) return;
+    const text = event.clipboardData?.getData("text/plain") || "";
+    if (!text.includes("\n") && !text.includes("\t")) return;
+    event.preventDefault();
+    fillHistoricalDatesFromClipboard(dateInput, text);
+    state.historicalPreview = null;
+    renderHistoricalPreview(null);
+  });
+
+  document.querySelector("[data-historical-grid]")?.addEventListener("input", (event) => {
+    if (!event.target.closest("[data-h-date]")) return;
     state.historicalPreview = null;
     renderHistoricalPreview(null);
   });
