@@ -175,13 +175,22 @@ function schedulePanel() {
 function historicalPanel() {
   const year = new Date().getFullYear();
   return `
-    <section class="grid gap-3 xl:grid-cols-[minmax(320px,420px)_1fr] sm:gap-5">
+    <section class="space-y-3 sm:space-y-5">
       <form class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-attendance-form>
-        <p class="text-[10px] font-black uppercase tracking-[.16em] text-school-green sm:text-xs">Carga historica</p>
-        <h2 class="mt-1 text-xl font-black text-slate-900 sm:text-2xl">Asistencias ya registradas</h2>
-        <p class="mt-1 text-xs font-semibold leading-5 text-slate-500 sm:text-sm sm:leading-6">Pega una lista desde Excel. Las celdas vacias se omiten y no se guardan como falta.</p>
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p class="text-[10px] font-black uppercase tracking-[.16em] text-school-green sm:text-xs">Carga historica</p>
+            <h2 class="mt-1 text-xl font-black text-slate-900 sm:text-2xl">Asistencias ya registradas</h2>
+            <p class="mt-1 text-xs font-semibold leading-5 text-slate-500 sm:text-sm sm:leading-6">Rellena como tabla: fechas arriba y P/A/L/F en cada alumno.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="add-historical-date">${icon("plus", "mr-1.5 inline h-4 w-4")}Fecha</button>
+            <button class="rounded-xl border border-school-green px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="preview-historical-attendance">${icon("eye", "mr-1.5 inline h-4 w-4")}Previsualizar</button>
+            <button class="rounded-xl bg-school-green px-3 py-2 text-xs font-black text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="import-historical-attendance" disabled>${icon("upload", "mr-1.5 inline h-4 w-4")}Guardar</button>
+          </div>
+        </div>
 
-        <div class="mt-4 grid gap-3 sm:grid-cols-2">
+        <div class="mt-4 grid gap-3 md:grid-cols-[1fr_180px_120px]">
           <label class="text-sm font-black text-slate-700">Curso
             <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="courseId">${courseOptions()}</select>
           </label>
@@ -192,31 +201,30 @@ function historicalPanel() {
               <option value="t3">3er trimestre</option>
             </select>
           </label>
+          <label class="text-sm font-black text-slate-700">Gestion
+            <input class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="year" type="number" min="2020" max="2100" value="${year}">
+          </label>
         </div>
-
-        <label class="mt-3 block text-sm font-black text-slate-700">Gestion
-          <input class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="year" type="number" min="2020" max="2100" value="${year}">
-        </label>
-
-        <label class="mt-3 block text-sm font-black text-slate-700">Tabla pegada
-          <textarea class="mt-1.5 min-h-56 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-mono text-xs outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10 sm:rounded-2xl sm:px-4 sm:py-3" name="records" placeholder="N°&#9;Alumno&#9;01/08/2026&#9;02/08/2026&#9;05/08/2026&#10;1&#9;ALANOCA LINARES ANGEL&#9;P&#9;P&#9;A&#10;2&#9;CAHUANA SALLAMA JUAN&#9;F&#9;P&#9;P&#10;3&#9;CONDORI POMA SHEILY&#9;L&#9;P&#9;"></textarea>
-        </label>
 
         <div class="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold leading-5 text-amber-800">
-          Usa P = presente, A = atraso, L = licencia/permiso, F = falta.
+          Puedes copiar desde Excel y pegar encima de la tabla. Usa P = presente, A = atraso, L = licencia/permiso, F = falta. Celda vacia = no guardar.
         </div>
         <p class="mt-3 hidden rounded-2xl border px-4 py-3 text-sm font-bold" data-historical-status></p>
-
-        <div class="mt-4 grid gap-2 sm:grid-cols-2">
-          <button class="rounded-xl border border-school-green px-4 py-2.5 text-sm font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:py-3" type="button" data-action="preview-historical-attendance">${icon("eye", "mr-1.5 inline h-4 w-4")}Previsualizar</button>
-          <button class="rounded-xl bg-school-green px-4 py-2.5 text-sm font-black text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 sm:rounded-2xl sm:py-3" type="button" data-action="import-historical-attendance" disabled>${icon("upload", "mr-1.5 inline h-4 w-4")}Guardar asistencia</button>
-        </div>
       </form>
 
-      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-preview>
-        <div class="flex h-full min-h-60 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">
-          Previsualiza la tabla antes de guardar.
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+        <div class="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
+          <div>
+            <p class="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Tabla editable</p>
+            <h3 class="text-base font-black text-slate-900">Pega o rellena asistencias</h3>
+          </div>
+          <span class="rounded-full bg-green-50 px-3 py-1 text-xs font-black text-green-700" data-historical-grid-count>0 alumnos</span>
         </div>
+        <div class="max-h-[62vh] overflow-auto" data-historical-grid></div>
+      </div>
+
+      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-preview>
+        <div class="flex min-h-36 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">Previsualiza la tabla antes de guardar.</div>
       </div>
     </section>
   `;

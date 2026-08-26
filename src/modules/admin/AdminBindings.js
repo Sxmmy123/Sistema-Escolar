@@ -673,8 +673,147 @@ function historicalStateLabel(stateId) {
   }[stateId] || "-";
 }
 
+function formatHistoricalDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function defaultHistoricalDates(count = 5) {
+  const today = new Date();
+  const dates = [];
+  let cursor = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  while (dates.length < count) {
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) dates.push(formatHistoricalDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+function cellStateClass(value) {
+  const state = normalizeHistoricalState(value);
+  if (state === "presente") return "bg-green-50 text-green-700";
+  if (state === "atraso") return "bg-yellow-50 text-yellow-700";
+  if (state === "permiso") return "bg-purple-50 text-purple-700";
+  if (state === "falta") return "bg-red-50 text-red-700";
+  return "bg-white text-slate-500";
+}
+
+async function renderHistoricalGrid() {
+  const grid = document.querySelector("[data-historical-grid]");
+  const form = document.querySelector("[data-historical-attendance-form]");
+  const counter = document.querySelector("[data-historical-grid-count]");
+  if (!grid || !form) return;
+  const data = new FormData(form);
+  const course = findCourse(data.get("courseId"));
+  const students = course?.id ? await listStudents(course.id) : [];
+  const dates = defaultHistoricalDates(5);
+  if (counter) counter.textContent = `${students.length} alumno(s)`;
+  grid.innerHTML = `
+    <table class="min-w-[860px] w-full border-separate border-spacing-0 text-left text-xs">
+      <thead class="sticky top-0 z-10 bg-school-green text-white">
+        <tr>
+          <th class="w-14 border-r border-white/20 px-3 py-2 font-black">No.</th>
+          <th class="min-w-64 border-r border-white/20 px-3 py-2 font-black">Alumno</th>
+          ${dates.map((date, index) => `<th class="min-w-32 border-r border-white/20 px-2 py-2 text-center font-black">
+            <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-center text-xs font-black text-school-green outline-none" data-h-date="${index}" value="${date}">
+          </th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${students.map((student) => `
+          <tr data-h-student-id="${student.id}" data-h-student-name="${escapeHtml(student.nombre)}" data-h-student-number="${student.numeroLista || ""}" class="border-b border-slate-100">
+            <td class="border-b border-r border-slate-100 bg-slate-50 px-3 py-2 text-center font-black text-school-green">${student.numeroLista || ""}</td>
+            <td class="border-b border-r border-slate-100 bg-white px-3 py-2 font-semibold text-slate-700">${escapeHtml(student.nombre)}</td>
+            ${dates.map((_, index) => `<td class="border-b border-r border-slate-100 bg-white p-1">
+              <div contenteditable="true" data-h-cell="${index}" class="min-h-8 rounded-lg px-2 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40"></div>
+            </td>`).join("")}
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function collectHistoricalRowsFromGrid() {
+  const form = document.querySelector("[data-historical-attendance-form]");
+  const grid = document.querySelector("[data-historical-grid]");
+  if (!form || !grid) return null;
+  const data = new FormData(form);
+  const course = findCourse(data.get("courseId"));
+  const trimestreId = data.get("trimestreId") || "t1";
+  const year = data.get("year") || new Date().getFullYear();
+  const dates = [...grid.querySelectorAll("[data-h-date]")]
+    .map((input, index) => ({ index, fecha: normalizeHistoricalDate(input.value, year), label: input.value }))
+    .filter((item) => item.fecha);
+  if (!course?.id) throw new Error("Selecciona un curso valido.");
+  if (!dates.length) throw new Error("Escribe al menos una fecha valida.");
+
+  const rows = [];
+  const errors = [];
+  const totals = { presente: 0, atraso: 0, permiso: 0, falta: 0 };
+  const touchedStudents = new Set();
+  grid.querySelectorAll("tbody tr[data-h-student-id]").forEach((tr) => {
+    const student = {
+      id: tr.dataset.hStudentId,
+      nombre: tr.dataset.hStudentName,
+      numeroLista: tr.dataset.hStudentNumber
+    };
+    dates.forEach((column) => {
+      const cell = tr.querySelector(`[data-h-cell="${column.index}"]`);
+      const raw = String(cell?.textContent || "").trim();
+      if (!raw) return;
+      const estado = normalizeHistoricalState(raw);
+      if (!estado) {
+        errors.push(`${student.nombre}, ${column.label}: estado invalido "${raw}".`);
+        return;
+      }
+      totals[estado] += 1;
+      touchedStudents.add(student.id);
+      rows.push({ student, fecha: column.fecha, estado });
+    });
+  });
+  if (!rows.length) throw new Error("No hay registros validos para importar.");
+  return {
+    course,
+    trimestreId,
+    rows,
+    errors,
+    totals,
+    dates: [...new Set(rows.map((row) => row.fecha))].sort(),
+    studentCount: touchedStudents.size
+  };
+}
+
+function fillHistoricalGridFromClipboard(startCell, text) {
+  const grid = document.querySelector("[data-historical-grid]");
+  if (!grid || !startCell) return false;
+  const table = String(text || "").trim();
+  if (!table) return false;
+  const matrix = table.split(/\r?\n/).map((line) => splitHistoricalLine(line));
+  const startRow = startCell.closest("tr");
+  const startColumn = Number(startCell.dataset.hCell || 0);
+  const rows = [...grid.querySelectorAll("tbody tr[data-h-student-id]")];
+  const rowIndex = rows.indexOf(startRow);
+  if (rowIndex < 0) return false;
+
+  matrix.forEach((line, rOffset) => {
+    const targetRow = rows[rowIndex + rOffset];
+    if (!targetRow) return;
+    line.forEach((value, cOffset) => {
+      const target = targetRow.querySelector(`[data-h-cell="${startColumn + cOffset}"]`);
+      if (target) {
+        target.textContent = String(value || "").trim().toUpperCase();
+        target.className = `min-h-8 rounded-lg px-2 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40 ${cellStateClass(value)}`;
+      }
+    });
+  });
+  return true;
+}
+
 async function buildHistoricalAttendancePreview() {
-  const form = document.querySelector("[data-historical-form]");
+  const gridPreview = collectHistoricalRowsFromGrid();
+  if (gridPreview) return gridPreview;
+  const form = document.querySelector("[data-historical-attendance-form]");
   if (!form) return null;
   const data = new FormData(form);
   const course = findCourse(data.get("courseId"));
@@ -773,6 +912,59 @@ function renderHistoricalPreview(preview) {
 
 function bindHistoricalPage() {
   renderHistoricalPreview(null);
+  renderHistoricalGrid().catch(() => {});
+
+  document.querySelector("[data-historical-attendance-form] select[name='courseId']")?.addEventListener("change", () => {
+    state.historicalPreview = null;
+    renderHistoricalPreview(null);
+    renderHistoricalGrid().catch((error) => {
+      const status = document.querySelector("[data-historical-status]");
+      if (status) {
+        status.className = "rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
+        status.textContent = error.message || "No se pudo cargar alumnos.";
+      }
+    });
+  });
+
+  document.querySelector("[data-action='add-historical-date']")?.addEventListener("click", () => {
+    const grid = document.querySelector("[data-historical-grid]");
+    const table = grid?.querySelector("table");
+    const headerRow = table?.querySelector("thead tr");
+    const rows = table ? [...table.querySelectorAll("tbody tr")] : [];
+    if (!table || !headerRow) return;
+    const index = headerRow.querySelectorAll("[data-h-date]").length;
+    const date = defaultHistoricalDates(index + 1).at(-1);
+    headerRow.insertAdjacentHTML("beforeend", `<th class="min-w-32 border-r border-white/20 px-2 py-2 text-center font-black">
+      <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-center text-xs font-black text-school-green outline-none" data-h-date="${index}" value="${date}">
+    </th>`);
+    rows.forEach((row) => {
+      row.insertAdjacentHTML("beforeend", `<td class="border-b border-r border-slate-100 bg-white p-1">
+        <div contenteditable="true" data-h-cell="${index}" class="min-h-8 rounded-lg px-2 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40"></div>
+      </td>`);
+    });
+    state.historicalPreview = null;
+    renderHistoricalPreview(null);
+  });
+
+  document.querySelector("[data-historical-grid]")?.addEventListener("input", (event) => {
+    const cell = event.target.closest("[data-h-cell]");
+    if (!cell) return;
+    cell.textContent = String(cell.textContent || "").trim().slice(0, 1).toUpperCase();
+    cell.className = `min-h-8 rounded-lg px-2 py-1.5 text-center font-black uppercase outline-none focus:ring-2 focus:ring-school-green/40 ${cellStateClass(cell.textContent)}`;
+    state.historicalPreview = null;
+    renderHistoricalPreview(null);
+  });
+
+  document.querySelector("[data-historical-grid]")?.addEventListener("paste", (event) => {
+    const cell = event.target.closest("[data-h-cell]");
+    if (!cell) return;
+    const text = event.clipboardData?.getData("text/plain") || "";
+    if (!text.includes("\n") && !text.includes("\t")) return;
+    event.preventDefault();
+    fillHistoricalGridFromClipboard(cell, text);
+    state.historicalPreview = null;
+    renderHistoricalPreview(null);
+  });
 
   document.querySelector("[data-action='preview-historical-attendance']")?.addEventListener("click", async () => {
     const status = document.querySelector("[data-historical-status]");
