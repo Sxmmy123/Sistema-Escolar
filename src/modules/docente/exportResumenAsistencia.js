@@ -82,12 +82,15 @@ function stateTotalForDate(students, byStudent, date, state) {
   }, 0);
 }
 
-function studentRows(students = [], byStudent = {}, dates = []) {
-  const rows = [...students].sort((a, b) => {
-    const aNumber = Number(a.numeroLista || 9999);
-    const bNumber = Number(b.numeroLista || 9999);
-    return aNumber - bNumber || String(a.nombre || "").localeCompare(String(b.nombre || ""));
+function sortStudentsByName(students = []) {
+  return [...students].sort((a, b) => {
+    const nameOrder = String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" });
+    return nameOrder || Number(a.numeroLista || 9999) - Number(b.numeroLista || 9999);
   });
+}
+
+function studentRows(students = [], byStudent = {}, dates = []) {
+  const rows = sortStudentsByName(students);
   const padded = [...rows];
   while (padded.length < 40) padded.push({ empty: true, numeroLista: padded.length + 1, nombre: "" });
 
@@ -100,7 +103,7 @@ function studentRows(students = [], byStudent = {}, dates = []) {
     }).join("");
     return `
       <tr>
-        <td class="number-cell">${student.numeroLista || index + 1}</td>
+        <td class="number-cell">${index + 1}</td>
         <td class="student-cell">${escapeHtml(student.nombre || "")}</td>
         <td class="activity-cell"></td>
         ${cells}
@@ -299,9 +302,9 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
           .number-col { width: 0.18in; }
           .student-col { width: 2.26in; }
           .activity-col { width: 0.1in; }
-          .date-col { width: 0.125in; }
-          .summary-col { width: 0.1in; }
-          .worked-col { width: 0.12in; }
+          .date-col { width: 0.118in; }
+          .summary-col { width: 0.085in; }
+          .worked-col { width: 0.11in; }
           th, td {
             border: 1px solid #111;
             padding: 0;
@@ -375,30 +378,30 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
             letter-spacing: 0;
           }
           .date-number, .attendance-cell {
-            width: 0.125in;
+            width: 0.118in;
             height: 0.15in;
             text-align: center;
-            font-size: 9px;
+            font-size: 8.4px;
             font-weight: 700;
           }
           .attendance-cell { color: #082a7a; }
           .total-letter, .total-cell {
-            width: 0.1in;
+            width: 0.085in;
             text-align: center;
-            font-size: 7px;
+            font-size: 6.6px;
             font-weight: 700;
           }
           .totals-vertical {
-            width: 0.1in;
-            font-size: 6.7px;
+            width: 0.085in;
+            font-size: 6.2px;
             letter-spacing: 0;
           }
           .worked-vertical {
-            width: 0.12in;
-            font-size: 6.4px;
+            width: 0.11in;
+            font-size: 6px;
             letter-spacing: 0;
           }
-          .worked-cell { width: 0.12in; text-align: center; font-size: 7px; font-weight: 700; }
+          .worked-cell { width: 0.11in; text-align: center; font-size: 6.6px; font-weight: 700; }
           .bottom-table {
             width: calc(100% - 1.08in);
             margin-left: 1.08in;

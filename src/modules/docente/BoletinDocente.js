@@ -29,6 +29,13 @@ function average(values = []) {
   return Math.round(valid.reduce((total, value) => total + Number(value), 0) / valid.length);
 }
 
+function sortStudentsByName(students = []) {
+  return [...students].sort((a, b) => {
+    const nameOrder = String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" });
+    return nameOrder || Number(a.numeroLista || 9999) - Number(b.numeroLista || 9999);
+  });
+}
+
 function gradeCell(value) {
   if (value === "" || value == null) return `<td class="px-1 py-1 text-center text-slate-300">-</td>`;
   return `<td class="px-1 py-1 text-center ${gradeTone(value)}">${value}</td>`;
@@ -77,7 +84,7 @@ function subjectHeaderCells() {
 }
 
 function renderBulletinTable({ course, students, snapshotsByTerm, cacheMetas }) {
-  const rows = students.map((student, index) => {
+  const rows = sortStudentsByName(students).map((student, index) => {
     const termAverages = [];
     const termCells = TRIMESTERS.map((trimester) => {
       const snapshot = snapshotsByTerm[trimester.id];
@@ -89,7 +96,7 @@ function renderBulletinTable({ course, students, snapshotsByTerm, cacheMetas }) 
     const annualAverage = average(termAverages);
     return `
       <tr class="border-b border-slate-100 hover:bg-slate-50">
-        <td class="sticky left-0 z-10 border-r border-slate-200 bg-white px-1 py-1.5 text-center text-[10px] font-semibold text-school-green">${escapeHtml(student.numeroLista || index + 1)}</td>
+        <td class="sticky left-0 z-10 border-r border-slate-200 bg-white px-1 py-1.5 text-center text-[10px] font-semibold text-school-green">${index + 1}</td>
         <td class="sticky left-8 z-10 min-w-48 border-r border-slate-200 bg-white px-2 py-1.5 text-left text-[10px] font-normal uppercase text-slate-800">${escapeHtml(student.nombre)}</td>
         ${termCells}
         <td class="border-l border-slate-200 px-2 py-1.5 text-center text-[11px] font-semibold ${annualAverage !== "" && annualAverage <= 50 ? "bg-red-50 text-red-700" : annualAverage !== "" ? "bg-green-50 text-green-800" : "bg-slate-50 text-slate-400"}">${annualAverage || "-"}</td>

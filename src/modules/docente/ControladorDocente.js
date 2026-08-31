@@ -79,6 +79,13 @@ import {
 
 let regularizationSearchTimer = null;
 
+function sortStudentsByName(students = []) {
+  return [...students].sort((a, b) => {
+    const nameOrder = String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" });
+    return nameOrder || Number(a.numeroLista || 9999) - Number(b.numeroLista || 9999);
+  });
+}
+
 function selectedCourse(context = teacherState.context) {
   return context?.courses?.find((course) => course.id === teacherState.selectedCourseId) || context?.courses?.[0] || null;
 }
@@ -147,7 +154,7 @@ function guidedAttendanceModal(course, students, attendanceMap) {
           <div class="p-5">
             <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-center">
               <p class="text-xs font-black uppercase tracking-[.18em] text-slate-400">Alumno ${teacherState.guidedIndex + 1} de ${students.length}</p>
-              <div class="mx-auto mt-3 grid h-16 w-16 place-items-center rounded-2xl bg-school-sky text-2xl font-black text-school-navy">${guidedStudent.numeroLista || teacherState.guidedIndex + 1}</div>
+              <div class="mx-auto mt-3 grid h-16 w-16 place-items-center rounded-2xl bg-school-sky text-2xl font-black text-school-navy">${teacherState.guidedIndex + 1}</div>
               <h4 class="mt-4 text-2xl font-black text-slate-900">${escapeHtml(guidedStudent.nombre)}</h4>
               <p class="mt-2 text-sm font-black text-slate-500">Actual: ${attendanceLabel(guidedState)} (${attendanceShort(guidedState)})</p>
             </div>
@@ -268,10 +275,11 @@ async function renderAttendance(context) {
     return;
   }
 
-  const [students, attendanceMap] = await Promise.all([
+  const [studentsRaw, attendanceMap] = await Promise.all([
     getTeacherStudents(course.id),
     listAttendanceForCourseDate(course.id, teacherState.attendanceDate, teacherState.trimesterId)
   ]);
+  const students = sortStudentsByName(studentsRaw);
 
   const totals = attendanceStates.reduce((acc, state) => ({ ...acc, [state.id]: 0 }), {});
   students.forEach((student) => {
@@ -368,13 +376,13 @@ async function renderAttendance(context) {
         ${attendanceStates.map((state) => `<span class="rounded-full border px-2.5 py-1 text-[11px] font-black sm:text-xs ${state.tone}">${state.label}: ${totals[state.id] || 0}</span>`).join("")}
       </div>
       <div class="space-y-1 p-2.5 pt-0">
-        ${students.map((student) => {
+        ${students.map((student, index) => {
           const record = attendanceMap[student.id] || {};
           const estado = record.estado || "falta";
           return `
             <article class="overflow-hidden rounded-xl border border-slate-200 bg-white transition hover:border-school-navy/40 hover:shadow-soft" data-attendance-card="${student.id}">
               <button type="button" class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left" data-attendance-open="${student.id}">
-                <span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-school-sky text-xs font-black text-school-navy">${student.numeroLista || "-"}</span>
+                <span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-school-sky text-xs font-black text-school-navy">${index + 1}</span>
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-sm font-semibold text-slate-900 sm:text-[15px]">${escapeHtml(student.nombre)}</span>
                 </span>
@@ -954,7 +962,7 @@ async function renderTasks(context) {
             <div class="p-5">
               <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-center">
                 <p class="text-xs font-black uppercase tracking-[.18em] text-slate-400">Alumno ${teacherState.gradeIndex + 1} de ${studentsToGrade.length}</p>
-                <div class="mx-auto mt-3 grid h-16 w-16 place-items-center rounded-2xl bg-school-sky text-2xl font-black text-school-navy">${currentStudent.numeroLista || teacherState.gradeIndex + 1}</div>
+                <div class="mx-auto mt-3 grid h-16 w-16 place-items-center rounded-2xl bg-school-sky text-2xl font-black text-school-navy">${teacherState.gradeIndex + 1}</div>
                 <h4 class="mt-4 text-2xl font-black text-slate-900">${escapeHtml(currentStudent.nombre)}</h4>
                 <p class="mt-2 text-sm font-black text-slate-500">Nota maxima: ${activity.maximo || 100}</p>
               </div>
@@ -1446,6 +1454,7 @@ async function renderDateGrading(context) {
       listAttendanceForCourseDate(activity.cursoId, activity.fecha, teacherState.trimesterId)
     ])
     : [[], {}, {}];
+  const studentOrderMap = new Map(students.map((student, index) => [student.id, index + 1]));
 
   const ignoreAttendanceForGrading = Boolean(teacherState.gradeIgnoreAttendance);
   const attendanceAllowsGrade = (student) => ["presente", "atraso"].includes(attendanceMap[student.id]?.estado);
@@ -1728,7 +1737,7 @@ async function renderDateGrading(context) {
             <details class="mx-3 mt-3 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs font-bold text-amber-800 sm:mx-4 sm:text-sm">
               <summary class="cursor-pointer font-black">${studentsNotEnabled.length} alumno(s) ausentes. Clic para ver.</summary>
               <div class="mt-2 grid gap-1.5 sm:grid-cols-2">
-                ${studentsNotEnabled.map((student) => `<div class="rounded-lg bg-white/70 px-2.5 py-1.5">${escapeHtml(student.numeroLista || "-")}. ${escapeHtml(student.nombre)} · ${attendanceLabel(attendanceMap[student.id]?.estado || "falta")}</div>`).join("")}
+                ${studentsNotEnabled.map((student) => `<div class="rounded-lg bg-white/70 px-2.5 py-1.5">${escapeHtml(studentOrderMap.get(student.id) || "-")}. ${escapeHtml(student.nombre)} · ${attendanceLabel(attendanceMap[student.id]?.estado || "falta")}</div>`).join("")}
               </div>
             </details>
           ` : ""}
@@ -1754,7 +1763,7 @@ async function renderDateGrading(context) {
                           ? "bg-red-600 text-white"
                           : "bg-green-600 text-white";
                       return `<button type="button" data-open-student-grade="${student.id}" class="inline-flex items-center gap-1.5 rounded-lg border px-1.5 py-1.5 text-[11px] font-black lg:w-full ${tone}">
-                        <span class="grid h-6 w-6 place-items-center rounded-md ${badgeTone}">${escapeHtml(student.numeroLista || "-")}</span>
+                        <span class="grid h-6 w-6 place-items-center rounded-md ${badgeTone}">${escapeHtml(studentOrderMap.get(student.id) || "-")}</span>
                         <span class="hidden min-w-0 flex-1 truncate text-left lg:block">${escapeHtml(student.nombre)}</span>
                         <span>${didNotSubmit ? "Ø" : (result?.nota ?? "-")}</span>
                       </button>`;
@@ -1767,6 +1776,7 @@ async function renderDateGrading(context) {
                   <div class="grade-list-shell min-h-0 ${listPickerStudent ? "has-picker" : ""}">
                     <div class="grade-list-rows min-h-0 space-y-1.5 overflow-y-auto sm:space-y-2">
                       ${studentsToGrade.map((student) => {
+                        const studentOrder = studentOrderMap.get(student.id) || "-";
                         const grade = gradesMap[student.id];
                         const result = grade ? normalizeGrade(grade.valor, activity.maximo) : null;
                         const didNotSubmit = grade && Number(grade.valor || 0) === 0;
@@ -1778,7 +1788,7 @@ async function renderDateGrading(context) {
                         const selected = listPickerStudent?.id === student.id;
                         return `
                           <button type="button" data-list-student-grade="${student.id}" class="grid w-full items-center gap-1.5 rounded-xl border bg-white p-1.5 text-left transition-all duration-500 hover:border-school-navy/40 hover:bg-school-sky/40 sm:gap-2 sm:p-2 ${selected ? "border-school-navy ring-4 ring-school-navy/10" : "border-slate-200"} ${listPickerStudent ? "grid-cols-[28px_1fr_auto]" : "grid-cols-[34px_1fr_auto]"}">
-                            <span class="grid place-items-center rounded-lg ${grade ? "bg-green-600 text-white" : "bg-school-sky text-school-navy"} text-xs font-black sm:text-sm ${listPickerStudent ? "h-7 w-7" : "h-8 w-8"}">${escapeHtml(student.numeroLista || "-")}</span>
+                            <span class="grid place-items-center rounded-lg ${grade ? "bg-green-600 text-white" : "bg-school-sky text-school-navy"} text-xs font-black sm:text-sm ${listPickerStudent ? "h-7 w-7" : "h-8 w-8"}">${escapeHtml(studentOrder)}</span>
                             <div class="min-w-0">
                               <p class="truncate text-[11px] font-bold text-slate-900 sm:text-sm">${escapeHtml(listPickerStudent ? compactName : student.nombre)}</p>
                               <p class="text-[10px] font-bold text-slate-400 ${listPickerStudent ? "hidden" : ""}">${grade ? "Tocar para cambiar" : "Tocar para calificar"}</p>
@@ -1811,7 +1821,7 @@ async function renderDateGrading(context) {
                                 <p class="text-[10px] font-black uppercase tracking-[.12em] text-slate-400">Alumno</p>
                                 <h5 class="truncate text-base font-black text-slate-900">${escapeHtml(listPickerStudent.nombre)}</h5>
                               </div>
-                              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-school-sky text-lg font-black text-school-navy">${escapeHtml(listPickerStudent.numeroLista || "-")}</span>
+                              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-school-sky text-lg font-black text-school-navy">${escapeHtml(studentOrderMap.get(listPickerStudent.id) || "-")}</span>
                             </div>
                             <p class="mt-3 text-center text-xs font-black text-slate-500">Puntaje sobre ${activity.maximo || 100}</p>
                             <div class="mt-3 grid max-h-[44vh] grid-cols-5 gap-2 overflow-y-auto pr-1 sm:grid-cols-8 lg:grid-cols-6 xl:grid-cols-8">
@@ -1835,7 +1845,7 @@ async function renderDateGrading(context) {
                 ` : currentStudent ? `
                   <div class="text-center">
                     <div class="flex items-center justify-center gap-3">
-                      <div class="grid h-12 w-12 place-items-center rounded-xl bg-school-sky text-xl font-black text-school-navy">${escapeHtml(currentStudent.numeroLista || teacherState.gradeIndex + 1)}</div>
+                      <div class="grid h-12 w-12 place-items-center rounded-xl bg-school-sky text-xl font-black text-school-navy">${escapeHtml(studentOrderMap.get(currentStudent.id) || teacherState.gradeIndex + 1)}</div>
                       <div class="min-w-0 text-left">
                         <p class="text-[11px] font-black uppercase tracking-[.12em] text-slate-400">Alumno ${teacherState.gradeIndex + 1} de ${studentsToGrade.length}</p>
                         <h4 class="truncate text-lg font-black text-slate-900 sm:text-2xl">${escapeHtml(currentStudent.nombre)}</h4>
@@ -2180,7 +2190,7 @@ function notesGradeModal({ activity, student, currentGrade, totalStudents = 0, c
             <div>
               <p class="text-[11px] font-black uppercase tracking-[.18em] text-school-green">${isAuto ? "Autoevaluacion" : "SER"}</p>
               <p class="mt-1 text-sm font-semibold text-slate-500">${escapeHtml(activity.titulo || "Nota")}</p>
-              <h3 class="mt-1 text-2xl font-black leading-tight text-slate-950">${escapeHtml(student.numeroLista || currentIndex + 1)}. ${escapeHtml(student.nombre)}</h3>
+              <h3 class="mt-1 text-2xl font-black leading-tight text-slate-950">${escapeHtml(currentIndex + 1)}. ${escapeHtml(student.nombre)}</h3>
             </div>
             <button type="button" data-close-notes-modal class="grid h-10 w-10 place-items-center rounded-2xl bg-slate-100 text-slate-600 hover:bg-slate-200">${icon("x", "h-5 w-5")}</button>
           </div>
@@ -2237,7 +2247,7 @@ function regularizationCourseTabs(context, course) {
   `;
 }
 
-function regularizationStudentCard(student, items, tone = "red") {
+function regularizationStudentCard(student, items, tone = "red", displayNumber = "-") {
   const toneClass = tone === "amber"
     ? "border-amber-200 bg-amber-50 text-amber-800"
     : "border-red-200 bg-red-50 text-red-800";
@@ -2250,7 +2260,7 @@ function regularizationStudentCard(student, items, tone = "red") {
       <summary class="flex cursor-pointer list-none items-center justify-between gap-2">
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
-            <span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-school-sky text-[10px] font-black text-school-navy">${escapeHtml(student.numeroLista || "-")}</span>
+            <span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-school-sky text-[10px] font-black text-school-navy">${escapeHtml(displayNumber)}</span>
             <h4 class="truncate text-xs font-semibold text-slate-900">${escapeHtml(student.nombre)}</h4>
           </div>
           <div class="mt-1 flex flex-wrap gap-1">
@@ -2271,7 +2281,7 @@ function regularizationStudentCard(student, items, tone = "red") {
   `;
 }
 
-function regularizationPendingTable(rows) {
+function regularizationPendingTable(rows, studentOrderMap = new Map()) {
   if (!rows.length) {
     return `<div class="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-4 text-center text-[11px] font-bold text-slate-400 sm:rounded-2xl sm:text-xs">Sin alumnos</div>`;
   }
@@ -2290,10 +2300,11 @@ function regularizationPendingTable(rows) {
             const firstSubject = findSubject(items[0]?.materiaId);
             const hasAbsent = items.some((item) => item.pendienteMotivo === "Ausente");
             const numberTone = hasAbsent ? "bg-amber-50 text-amber-700" : "bg-green-50 text-school-green";
+            const displayNumber = studentOrderMap.get(student.id) || "-";
             return `
               <tr class="hover:bg-slate-50">
                 <td class="px-1.5 py-1.5 align-top sm:px-3 sm:py-2">
-                  <span class="grid h-6 w-6 place-items-center rounded-md ${numberTone} font-black sm:h-7 sm:w-7 sm:rounded-lg">${escapeHtml(student.numeroLista || "-")}</span>
+                  <span class="grid h-6 w-6 place-items-center rounded-md ${numberTone} font-black sm:h-7 sm:w-7 sm:rounded-lg">${escapeHtml(displayNumber)}</span>
                 </td>
                 <td class="min-w-0 px-1.5 py-1.5 sm:px-2 sm:py-2">
                   <details>
@@ -2323,7 +2334,7 @@ function regularizationPendingTable(rows) {
   `;
 }
 
-function regularizationGradeModal({ activity, student, currentGrade }) {
+function regularizationGradeModal({ activity, student, currentGrade, displayNumber = "" }) {
   if (!activity || !student) return "";
   const subject = findSubject(activity.materiaId);
   const max = Math.max(1, Math.min(100, Number(activity.maximo || 100)));
@@ -2336,7 +2347,7 @@ function regularizationGradeModal({ activity, student, currentGrade }) {
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="text-[10px] font-black uppercase tracking-[.16em] text-white/75">Regularizacion</p>
-              <h3 class="mt-0.5 truncate text-lg font-black">${escapeHtml(student.numeroLista || "")}. ${escapeHtml(student.nombre)}</h3>
+              <h3 class="mt-0.5 truncate text-lg font-black">${escapeHtml(displayNumber)}. ${escapeHtml(student.nombre)}</h3>
               <p class="mt-1 truncate text-xs font-bold text-white/80">${escapeHtml(subject?.nombre || activity.materiaId)} · ${escapeHtml(activity.titulo || "Actividad")}</p>
             </div>
             <button type="button" data-close-regularization-grade class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/10 text-white hover:bg-white/20">${icon("x", "h-5 w-5")}</button>
@@ -2439,6 +2450,8 @@ async function renderRegularization(context) {
   }
 
   const { students = [], activities = [], gradesList = [], attendanceRows = [] } = snapshot;
+  const studentsByName = sortStudentsByName(students);
+  const regularizationOrderMap = new Map(studentsByName.map((student, index) => [student.id, index + 1]));
   const gradesMap = gradeByActivityAndStudent(gradesList);
   const currentDate = todayIso();
   const lowLimit = Math.max(35, Math.min(100, Number(teacherState.regularizationLowLimit || 50)));
@@ -2451,7 +2464,7 @@ async function renderRegularization(context) {
 
   const pendingByStudent = [];
   const lowByStudent = [];
-  students.forEach((student) => {
+  studentsByName.forEach((student) => {
     const pending = [];
     const low = [];
     activitiesToReview.forEach((activity) => {
@@ -2472,8 +2485,8 @@ async function renderRegularization(context) {
     if (low.length) lowByStudent.push({ student, items: low });
   });
 
-  pendingByStudent.sort((a, b) => b.items.length - a.items.length || Number(a.student.numeroLista || 999) - Number(b.student.numeroLista || 999));
-  lowByStudent.sort((a, b) => b.items.length - a.items.length || Number(a.student.numeroLista || 999) - Number(b.student.numeroLista || 999));
+  pendingByStudent.sort((a, b) => b.items.length - a.items.length || (regularizationOrderMap.get(a.student.id) || 999) - (regularizationOrderMap.get(b.student.id) || 999));
+  lowByStudent.sort((a, b) => b.items.length - a.items.length || (regularizationOrderMap.get(a.student.id) || 999) - (regularizationOrderMap.get(b.student.id) || 999));
   const alertedStudents = new Set([...pendingByStudent.map((item) => item.student.id), ...lowByStudent.map((item) => item.student.id)]);
   const pendingTotal = pendingByStudent.reduce((total, item) => total + item.items.length, 0);
   const lowTotal = lowByStudent.reduce((total, item) => total + item.items.length, 0);
@@ -2488,7 +2501,7 @@ async function renderRegularization(context) {
   const responsiveColumnCount = window.innerWidth < 768 ? 1 : window.innerWidth < 1280 ? 2 : 3;
   const pendingColumns = Array.from({ length: responsiveColumnCount }, (_, column) => filteredPending.filter((_, index) => index % responsiveColumnCount === column));
   const selectedRegularizationActivity = activitiesToReview.find((item) => item.id === teacherState.regularizationGradeActivityId) || null;
-  const selectedRegularizationStudent = students.find((item) => item.id === teacherState.regularizationGradeStudentId) || null;
+  const selectedRegularizationStudent = studentsByName.find((item) => item.id === teacherState.regularizationGradeStudentId) || null;
   const selectedRegularizationGrade = selectedRegularizationActivity && selectedRegularizationStudent
     ? gradesMap[selectedRegularizationActivity.id]?.[selectedRegularizationStudent.id]
     : null;
@@ -2558,7 +2571,7 @@ async function renderRegularization(context) {
                 <p class="mt-0.5 text-[9px] font-bold leading-tight text-slate-600 sm:text-xs">${pendingTotal} pend.</p>
               </div>
             </div>
-            <div class="mt-1.5 h-0.5 rounded-full bg-red-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-red-600 sm:h-1.5" style="width:${Math.min(100, (pendingByStudent.length / Math.max(students.length, 1)) * 100)}%"></div></div>
+            <div class="mt-1.5 h-0.5 rounded-full bg-red-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-red-600 sm:h-1.5" style="width:${Math.min(100, (pendingByStudent.length / Math.max(studentsByName.length, 1)) * 100)}%"></div></div>
           </div>
           <div class="rounded-lg border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-2 sm:rounded-2xl sm:p-4">
             <div class="flex items-center gap-1.5 sm:gap-4">
@@ -2568,17 +2581,17 @@ async function renderRegularization(context) {
                 <p class="mt-0.5 text-[9px] font-bold leading-tight text-slate-600 sm:text-xs">&lt; ${lowLimit}: ${lowTotal}</p>
               </div>
             </div>
-            <div class="mt-1.5 h-0.5 rounded-full bg-amber-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-amber-500 sm:h-1.5" style="width:${Math.min(100, (lowByStudent.length / Math.max(students.length, 1)) * 100)}%"></div></div>
+            <div class="mt-1.5 h-0.5 rounded-full bg-amber-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-amber-500 sm:h-1.5" style="width:${Math.min(100, (lowByStudent.length / Math.max(studentsByName.length, 1)) * 100)}%"></div></div>
           </div>
           <div class="rounded-lg border border-green-100 bg-gradient-to-br from-green-50 to-white p-2 sm:rounded-2xl sm:p-4">
             <div class="flex items-center gap-1.5 sm:gap-4">
               <span class="hidden h-9 w-9 shrink-0 place-items-center rounded-xl bg-green-100 text-school-green sm:grid sm:h-12 sm:w-12 sm:rounded-2xl">${icon("bell", "h-5 w-5 sm:h-6 sm:w-6")}</span>
               <div>
-                <p class="text-sm font-black leading-none text-school-green sm:text-2xl">${Math.max(0, students.length - alertedStudents.size)} <span class="hidden text-xs text-slate-700 sm:inline sm:text-sm">alumno(s)</span></p>
+                <p class="text-sm font-black leading-none text-school-green sm:text-2xl">${Math.max(0, studentsByName.length - alertedStudents.size)} <span class="hidden text-xs text-slate-700 sm:inline sm:text-sm">alumno(s)</span></p>
                 <p class="mt-0.5 text-[9px] font-bold leading-tight text-slate-600 sm:text-xs">Sin alerta</p>
               </div>
             </div>
-            <div class="mt-1.5 h-0.5 rounded-full bg-green-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-school-green sm:h-1.5" style="width:${Math.min(100, (Math.max(0, students.length - alertedStudents.size) / Math.max(students.length, 1)) * 100)}%"></div></div>
+            <div class="mt-1.5 h-0.5 rounded-full bg-green-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-school-green sm:h-1.5" style="width:${Math.min(100, (Math.max(0, studentsByName.length - alertedStudents.size) / Math.max(studentsByName.length, 1)) * 100)}%"></div></div>
           </div>
         </div>
       </div>
@@ -2606,7 +2619,7 @@ async function renderRegularization(context) {
           </div>
         </div>
         <div class="mt-2 grid gap-1.5 md:grid-cols-2 xl:mt-4 xl:grid-cols-3 xl:gap-3">
-          ${filteredPending.length ? pendingColumns.map((column) => regularizationPendingTable(column)).join("") : emptyState("Sin resultados", "No hay alumnos pendientes con el filtro seleccionado.")}
+          ${filteredPending.length ? pendingColumns.map((column) => regularizationPendingTable(column, regularizationOrderMap)).join("") : emptyState("Sin resultados", "No hay alumnos pendientes con el filtro seleccionado.")}
         </div>
       </div>
 
@@ -2628,14 +2641,15 @@ async function renderRegularization(context) {
         </div>
         ${teacherState.regularizationShowLow ? `
           <div class="mt-2 grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">
-            ${lowByStudent.length ? lowByStudent.map(({ student, items }) => regularizationStudentCard(student, items, "amber")).join("") : emptyState("Sin bajas notas", "No hay calificaciones bajas registradas en las actividades revisadas.")}
+            ${lowByStudent.length ? lowByStudent.map(({ student, items }) => regularizationStudentCard(student, items, "amber", regularizationOrderMap.get(student.id) || "-")).join("") : emptyState("Sin bajas notas", "No hay calificaciones bajas registradas en las actividades revisadas.")}
           </div>
         ` : ""}
       </div>
       ${regularizationGradeModal({
         activity: selectedRegularizationActivity,
         student: selectedRegularizationStudent,
-        currentGrade: selectedRegularizationGrade
+        currentGrade: selectedRegularizationGrade,
+        displayNumber: selectedRegularizationStudent ? regularizationOrderMap.get(selectedRegularizationStudent.id) || "" : ""
       })}
     </section>
   `;
@@ -2793,6 +2807,7 @@ async function renderNotes(context) {
     return;
   }
   const { students = [], activities = [], gradesList = [], attendanceRows = [] } = notesSnapshot;
+  const studentsByName = sortStudentsByName(students);
   const visibleActivities = activities.filter((item) => course.materias.includes(item.materiaId));
   const availableSubjects = course.materias.filter(Boolean);
   if (!availableSubjects.includes(teacherState.selectedSubjectId)) {
@@ -2826,8 +2841,8 @@ async function renderNotes(context) {
   const selectedGradeActivity = teacherState.notesGradeKind === "auto"
     ? autoGradeActivity
     : serCriteria.find((item) => item.id === teacherState.notesGradeActivityId);
-  const selectedGradeStudent = students.find((item) => item.id === teacherState.notesGradeStudentId) || null;
-  const selectedGradeIndex = selectedGradeStudent ? students.findIndex((item) => item.id === selectedGradeStudent.id) : 0;
+  const selectedGradeStudent = studentsByName.find((item) => item.id === teacherState.notesGradeStudentId) || null;
+  const selectedGradeIndex = selectedGradeStudent ? studentsByName.findIndex((item) => item.id === selectedGradeStudent.id) : 0;
   const currentNotesGrade = selectedGradeActivity?.id && selectedGradeStudent ? gradesMap[selectedGradeActivity.id]?.[selectedGradeStudent.id] : null;
   const sectionBorder = "border-l-2 border-l-slate-300";
   const sectionHeaderBorder = "border-l-2 border-l-white/60";
@@ -2946,14 +2961,14 @@ async function renderNotes(context) {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            ${students.map((student, index) => {
+            ${studentsByName.map((student, index) => {
               const serExtraValues = serCriteria.map((item) => studentActivityGrade(item, student.id, gradesMap));
               const autoGradeRecord = autoActivity ? gradesMap[autoActivity.id]?.[student.id] : null;
               const autoGrade = autoGradeRecord?.nota ?? null;
               const calc = calculateStudentTerm(student, subjectActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
               return `
                 <tr class="hover:bg-slate-50">
-                  <td class="px-1 py-1.5 font-medium text-school-navy">${student.numeroLista || index + 1}</td>
+                  <td class="px-1 py-1.5 font-medium text-school-navy">${index + 1}</td>
                   <td class="px-2 py-1.5 text-left font-normal text-slate-800">${escapeHtml(student.nombre)}</td>
                   <td class="${sectionBorder} px-1 py-1.5 ${gradeTone(calc.asistencia100)}">${calc.asistencia100}</td>
                   <td class="px-1 py-1.5 ${gradeTone(calc.puntualidad100)}">${calc.puntualidad100}</td>
@@ -2995,7 +3010,7 @@ async function renderNotes(context) {
       </div>
 
       ${notesCriterionModal(selectedCriterion)}
-      ${notesGradeModal({ activity: selectedGradeActivity, student: selectedGradeStudent, currentGrade: currentNotesGrade, totalStudents: students.length, currentIndex: selectedGradeIndex })}
+      ${notesGradeModal({ activity: selectedGradeActivity, student: selectedGradeStudent, currentGrade: currentNotesGrade, totalStudents: studentsByName.length, currentIndex: selectedGradeIndex })}
     </section>
   `;
 
@@ -3023,7 +3038,7 @@ async function renderNotes(context) {
       course,
       selectedSubject,
       selectedTrimesterLabel: selectedTrimester().label,
-      students,
+      students: studentsByName,
       subjectActivities,
       serCriteria,
       autoActivity,
@@ -3157,8 +3172,8 @@ async function renderNotes(context) {
         if (!activity) throw new Error("No se encontro la columna de nota.");
         await saveGrade({ activity, student, value });
         await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
-        const nextIndex = students.findIndex((item) => item.id === student.id) + 1;
-        const nextStudent = students[nextIndex] || null;
+        const nextIndex = studentsByName.findIndex((item) => item.id === student.id) + 1;
+        const nextStudent = studentsByName[nextIndex] || null;
         if (teacherState.notesGradeGuided && nextStudent) {
           teacherState.notesGradeActivityId = activity.id;
           teacherState.notesGradeStudentId = nextStudent.id;
@@ -3247,6 +3262,7 @@ async function renderSummary(context) {
     return;
   }
   const { students = [], records = [] } = summarySnapshot;
+  const studentsByName = sortStudentsByName(students);
   const dates = [...new Set(records.map((item) => item.fecha))].sort();
   const monthGroups = dates.reduce((groups, date) => {
     const key = String(date || "").slice(0, 7);
@@ -3340,22 +3356,22 @@ async function renderSummary(context) {
               <th colspan="4" class="border-l border-white/20 px-3 py-2 text-center">Totales</th>
             </tr>
             <tr>
-              ${dates.map((date) => `<th class="min-w-10 border-l border-white/10 px-2 py-2 text-center">${escapeHtml(String(date).slice(8, 10))}</th>`).join("")}
-              <th class="border-l border-white/20 px-2 py-2 text-center">P</th>
-              <th class="px-2 py-2 text-center">A</th>
-              <th class="px-2 py-2 text-center">L</th>
-              <th class="px-2 py-2 text-center">F</th>
+              ${dates.map((date) => `<th class="min-w-7 border-l border-white/10 px-1 py-2 text-center">${escapeHtml(String(date).slice(8, 10))}</th>`).join("")}
+              <th class="w-7 border-l border-white/20 px-1 py-2 text-center">P</th>
+              <th class="w-7 px-1 py-2 text-center">A</th>
+              <th class="w-7 px-1 py-2 text-center">L</th>
+              <th class="w-7 px-1 py-2 text-center">F</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            ${students.map((student) => {
+            ${studentsByName.map((student, index) => {
               const totals = { presente: 0, atraso: 0, permiso: 0, falta: 0 };
               const cells = dates.map((date) => {
                 const state = byStudent[student.id]?.[date] || "falta";
                 totals[state] = (totals[state] || 0) + 1;
-                return `<td class="px-2 py-2 text-center"><span class="inline-grid h-7 w-7 place-items-center rounded-lg border text-xs font-black ${attendanceTone(state)}">${attendanceShort(state)}</span></td>`;
+                return `<td class="px-1 py-1 text-center"><span class="inline-grid h-5 w-5 place-items-center rounded-md border text-[10px] font-semibold ${attendanceTone(state)}">${attendanceShort(state)}</span></td>`;
               }).join("");
-              return `<tr class="hover:bg-school-sky/40"><td class="sticky left-0 z-10 bg-white px-3 py-2 text-center font-black">${student.numeroLista || "-"}</td><td class="sticky left-11 z-10 min-w-56 bg-white px-3 py-2 font-bold text-slate-800">${escapeHtml(student.nombre)}</td>${dates.length ? cells : `<td class="px-4 py-3 text-center font-bold text-slate-400">-</td>`}<td class="px-3 py-2 text-center font-black">${totals.presente}</td><td class="px-3 py-2 text-center font-black">${totals.atraso}</td><td class="px-3 py-2 text-center font-black">${totals.permiso}</td><td class="px-3 py-2 text-center font-black">${totals.falta}</td></tr>`;
+              return `<tr class="hover:bg-school-sky/40"><td class="sticky left-0 z-10 bg-white px-3 py-2 text-center font-black">${index + 1}</td><td class="sticky left-11 z-10 min-w-56 bg-white px-3 py-2 font-semibold text-slate-800">${escapeHtml(student.nombre)}</td>${dates.length ? cells : `<td class="px-4 py-3 text-center font-bold text-slate-400">-</td>`}<td class="w-7 px-1 py-1 text-center font-semibold">${totals.presente}</td><td class="w-7 px-1 py-1 text-center font-semibold">${totals.atraso}</td><td class="w-7 px-1 py-1 text-center font-semibold">${totals.permiso}</td><td class="w-7 px-1 py-1 text-center font-semibold">${totals.falta}</td></tr>`;
             }).join("") || `<tr><td colspan="${dates.length + 6}" class="px-4 py-5 font-bold text-slate-500">Sin alumnos.</td></tr>`}
           </tbody>
         </table>
@@ -3383,7 +3399,7 @@ async function renderSummary(context) {
       course,
       trimesterLabel: selectedTrimester().label,
       teacherName: context.profile?.nombre || context.profile?.usuario || "Docente",
-      students,
+      students: studentsByName,
       records
     });
   });

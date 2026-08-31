@@ -152,7 +152,7 @@ export function exportNotesToExcel({
             const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota : null;
             const calc = calculateStudentTerm(student, subjectActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
             return `<tr>
-              ${valueCell(student.numeroLista || index + 1)}
+              ${valueCell(index + 1)}
               ${valueCell(student.nombre, "name")}
               ${valueCell(calc.asistencia100, "ser-cell")}
               ${valueCell(calc.puntualidad100, "ser-cell")}

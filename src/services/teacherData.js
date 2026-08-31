@@ -203,7 +203,12 @@ export async function getTeacherContext(uid = currentUid()) {
 export async function getTeacherStudents(courseId) {
   if (!courseId) return [];
   const students = await listStudents(courseId);
-  return students.filter((student) => student.activo !== false);
+  return students
+    .filter((student) => student.activo !== false)
+    .sort((a, b) => {
+      const nameOrder = String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" });
+      return nameOrder || Number(a.numeroLista || 9999) - Number(b.numeroLista || 9999);
+    });
 }
 
 function rowsFromSchedules(context, schedules = {}, dayId = null) {
