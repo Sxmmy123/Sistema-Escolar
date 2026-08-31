@@ -1,4 +1,4 @@
-﻿import { icon } from "../../ui/dom.js";
+import { icon } from "../../ui/dom.js";
 import { appShell, statCard } from "../../ui/shell.js";
 import { COURSES, DAYS, SUBJECTS, periodsForCourse } from "../../data/catalog.js";
 
@@ -14,6 +14,10 @@ function hero(kicker, title, text) {
 
 function courseOptions() {
   return COURSES.map((course) => `<option value="${course.id}">${course.nombre}</option>`).join("");
+}
+
+function subjectOptions() {
+  return SUBJECTS.map((subject) => `<option value="${subject.id}">${subject.nombre}</option>`).join("");
 }
 
 function courseTabs(action = "select-course") {
@@ -176,60 +180,123 @@ function historicalPanel() {
   const year = new Date().getFullYear();
   return `
     <section class="space-y-3 sm:space-y-5">
-      <form class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-attendance-form>
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p class="text-[10px] font-black uppercase tracking-[.16em] text-school-green sm:text-xs">Carga historica</p>
-            <h2 class="mt-1 text-xl font-black text-slate-900 sm:text-2xl">Asistencias ya registradas</h2>
-            <p class="mt-1 text-xs font-semibold leading-5 text-slate-500 sm:text-sm sm:leading-6">Rellena como tabla: fechas arriba y P/A/L/F en cada alumno.</p>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <button class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="add-historical-date">${icon("plus", "mr-1.5 inline h-4 w-4")}Fecha</button>
-            <button class="rounded-xl border border-school-green px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="preview-historical-attendance">${icon("eye", "mr-1.5 inline h-4 w-4")}Previsualizar</button>
-            <button class="rounded-xl bg-school-green px-3 py-2 text-xs font-black text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="import-historical-attendance" disabled>${icon("upload", "mr-1.5 inline h-4 w-4")}Guardar</button>
-          </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:p-4">
+        <div class="flex flex-wrap gap-2">
+          <button type="button" data-historical-tab="attendance" class="rounded-xl bg-school-green px-4 py-2 text-sm font-black text-white">${icon("clipboard-check", "mr-1.5 inline h-4 w-4")}Asistencia</button>
+          <button type="button" data-historical-tab="grades" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-school-green hover:bg-green-50">${icon("notebook-tabs", "mr-1.5 inline h-4 w-4")}Notas</button>
         </div>
-
-        <div class="mt-4 grid gap-3 md:grid-cols-[1fr_180px_120px]">
-          <label class="text-sm font-black text-slate-700">Curso
-            <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="courseId">${courseOptions()}</select>
-          </label>
-          <label class="text-sm font-black text-slate-700">Trimestre
-            <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="trimestreId">
-              <option value="t1">1er trimestre</option>
-              <option value="t2">2do trimestre</option>
-              <option value="t3">3er trimestre</option>
-            </select>
-          </label>
-          <label class="text-sm font-black text-slate-700">Gestion
-            <input class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="year" type="number" min="2020" max="2100" value="${year}">
-          </label>
-        </div>
-
-        <div class="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold leading-5 text-amber-800">
-          Puedes copiar desde Excel y pegar encima de la tabla. Usa P = presente, A = atraso, L = licencia/permiso, F = falta. Celda vacia = no guardar.
-        </div>
-        <p class="mt-3 hidden rounded-2xl border px-4 py-3 text-sm font-bold" data-historical-status></p>
-      </form>
-
-      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-        <div class="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
-          <div>
-            <p class="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Tabla editable</p>
-            <h3 class="text-base font-black text-slate-900">Pega o rellena asistencias</h3>
-          </div>
-          <span class="rounded-full bg-green-50 px-3 py-1 text-xs font-black text-green-700" data-historical-grid-count>0 alumnos</span>
-        </div>
-        <div class="max-h-[62vh] overflow-auto" data-historical-grid></div>
       </div>
 
-      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-preview>
-        <div class="flex min-h-36 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">Previsualiza la tabla antes de guardar.</div>
+      <div data-historical-section="attendance">
+        <form class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-attendance-form>
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p class="text-[10px] font-black uppercase tracking-[.16em] text-school-green sm:text-xs">Carga historica</p>
+              <h2 class="mt-1 text-xl font-black text-slate-900 sm:text-2xl">Asistencias ya registradas</h2>
+              <p class="mt-1 text-xs font-semibold leading-5 text-slate-500 sm:text-sm sm:leading-6">Rellena como tabla: fechas arriba y P/A/L/F en cada alumno.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="add-historical-date">${icon("plus", "mr-1.5 inline h-4 w-4")}Fecha</button>
+              <button class="rounded-xl border border-school-green px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="preview-historical-attendance">${icon("eye", "mr-1.5 inline h-4 w-4")}Previsualizar</button>
+              <button class="rounded-xl bg-school-green px-3 py-2 text-xs font-black text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="import-historical-attendance" disabled>${icon("upload", "mr-1.5 inline h-4 w-4")}Guardar</button>
+            </div>
+          </div>
+
+          <div class="mt-4 grid gap-3 md:grid-cols-[1fr_180px_120px]">
+            <label class="text-sm font-black text-slate-700">Curso
+              <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="courseId">${courseOptions()}</select>
+            </label>
+            <label class="text-sm font-black text-slate-700">Trimestre
+              <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="trimestreId">
+                <option value="t1">1er trimestre</option>
+                <option value="t2">2do trimestre</option>
+                <option value="t3">3er trimestre</option>
+              </select>
+            </label>
+            <label class="text-sm font-black text-slate-700">Gestion
+              <input class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="year" type="number" min="2020" max="2100" value="${year}">
+            </label>
+          </div>
+
+          <div class="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold leading-5 text-amber-800">
+            Puedes copiar desde Excel y pegar encima de la tabla. Usa P = presente, A = atraso, L = licencia/permiso, F = falta. Celda vacia = no guardar.
+          </div>
+          <p class="mt-3 hidden rounded-2xl border px-4 py-3 text-sm font-bold" data-historical-status></p>
+        </form>
+
+        <div class="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+          <div class="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
+            <div>
+              <p class="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Tabla editable</p>
+              <h3 class="text-base font-black text-slate-900">Pega o rellena asistencias</h3>
+            </div>
+            <span class="rounded-full bg-green-50 px-3 py-1 text-xs font-black text-green-700" data-historical-grid-count>0 alumnos</span>
+          </div>
+          <div class="max-h-[62vh] overflow-auto" data-historical-grid></div>
+        </div>
+
+        <div class="mt-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-preview>
+          <div class="flex min-h-36 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">Previsualiza la tabla antes de guardar.</div>
+        </div>
+      </div>
+
+      <div class="hidden" data-historical-section="grades">
+        <form class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-grades-form>
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p class="text-[10px] font-black uppercase tracking-[.16em] text-school-green sm:text-xs">Carga historica</p>
+              <h2 class="mt-1 text-xl font-black text-slate-900 sm:text-2xl">Notas ya registradas</h2>
+              <p class="mt-1 text-xs font-semibold leading-5 text-slate-500 sm:text-sm sm:leading-6">Solo HACER y SABER. Cada columna es una actividad que luego se refleja en Notas.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="add-historical-grade-column">${icon("plus", "mr-1.5 inline h-4 w-4")}Actividad</button>
+              <button class="rounded-xl border border-school-green px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-50 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="preview-historical-grades">${icon("eye", "mr-1.5 inline h-4 w-4")}Previsualizar</button>
+              <button class="rounded-xl bg-school-green px-3 py-2 text-xs font-black text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 sm:rounded-2xl sm:px-4 sm:text-sm" type="button" data-action="import-historical-grades" disabled>${icon("upload", "mr-1.5 inline h-4 w-4")}Guardar</button>
+            </div>
+          </div>
+
+          <div class="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_160px_120px]">
+            <label class="text-sm font-black text-slate-700">Curso
+              <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="courseId">${courseOptions()}</select>
+            </label>
+            <label class="text-sm font-black text-slate-700">Materia
+              <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="materiaId">${subjectOptions()}</select>
+            </label>
+            <label class="text-sm font-black text-slate-700">Trimestre
+              <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="trimestreId">
+                <option value="t1">1er trimestre</option>
+                <option value="t2">2do trimestre</option>
+                <option value="t3">3er trimestre</option>
+              </select>
+            </label>
+            <label class="text-sm font-black text-slate-700">Tipo
+              <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="tipo">
+                <option value="tarea">HACER</option>
+                <option value="examen">SABER</option>
+              </select>
+            </label>
+          </div>
+          <p class="mt-3 hidden rounded-2xl border px-4 py-3 text-sm font-bold" data-historical-grades-status></p>
+        </form>
+
+        <div class="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+          <div class="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
+            <div>
+              <p class="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">Tabla editable</p>
+              <h3 class="text-base font-black text-slate-900">Pega o rellena notas</h3>
+            </div>
+            <span class="rounded-full bg-green-50 px-3 py-1 text-xs font-black text-green-700" data-historical-grades-count>0 alumnos</span>
+          </div>
+          <div class="max-h-[62vh] overflow-auto" data-historical-grades-grid></div>
+        </div>
+
+        <div class="mt-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" data-historical-grades-preview>
+          <div class="flex min-h-36 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">Previsualiza las notas antes de guardar.</div>
+        </div>
       </div>
     </section>
   `;
 }
-
 function auditPanel() {
   const today = new Date().toISOString().slice(0, 10);
   return `
@@ -268,7 +335,7 @@ function auditPanel() {
         <div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
           <div class="flex items-center justify-between border-b border-slate-100 p-4 sm:p-5">
             <h3 class="text-lg font-black text-slate-900 sm:text-xl">Detalle de auditoria</h3>
-            <button class="grid h-10 w-10 place-items-center rounded-2xl bg-slate-100 text-slate-600" data-action="close-audit-modal">×</button>
+            <button class="grid h-10 w-10 place-items-center rounded-2xl bg-slate-100 text-slate-600" data-action="close-audit-modal">�</button>
           </div>
           <div class="space-y-4 p-4 sm:p-5" data-audit-detail></div>
         </div>

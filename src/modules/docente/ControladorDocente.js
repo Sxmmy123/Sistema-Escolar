@@ -2,6 +2,7 @@
 import { icon } from "../../ui/dom.js";
 import { renderBulletin } from "./BoletinDocente.js";
 import { exportNotesToExcel } from "./exportNotasExcel.js";
+import { printAttendanceSummaryByMonth } from "./exportResumenAsistencia.js";
 import { renderDashboard } from "./PanelDocente.js";
 import {
   loadSavedTrimester,
@@ -2828,6 +2829,13 @@ async function renderNotes(context) {
   const selectedGradeStudent = students.find((item) => item.id === teacherState.notesGradeStudentId) || null;
   const selectedGradeIndex = selectedGradeStudent ? students.findIndex((item) => item.id === selectedGradeStudent.id) : 0;
   const currentNotesGrade = selectedGradeActivity?.id && selectedGradeStudent ? gradesMap[selectedGradeActivity.id]?.[selectedGradeStudent.id] : null;
+  const sectionBorder = "border-l-2 border-l-slate-300";
+  const sectionHeaderBorder = "border-l-2 border-l-white/60";
+  const serHeaderCell = `${sectionBorder} bg-emerald-50/80`;
+  const saberHeaderCell = `${sectionBorder} bg-amber-50/80`;
+  const hacerHeaderCell = `${sectionBorder} bg-green-50/70`;
+  const autoHeaderCell = `${sectionBorder} bg-slate-100/80`;
+  const finalHeaderCell = `${sectionBorder} bg-emerald-100/80`;
 
   function compactGradeActivityButton(item, widthClass = "") {
     const subject = findSubject(item.materiaId);
@@ -2903,38 +2911,38 @@ async function renderNotes(context) {
             <tr class="bg-school-navy text-white">
               <th class="w-9 px-1 py-2 font-semibold">No.</th>
               <th class="w-44 px-2 py-2 text-left font-semibold">Alumno</th>
-              <th colspan="${serColspan}" class="px-1 py-2 font-semibold">
+              <th colspan="${serColspan}" class="${sectionHeaderBorder} px-1 py-2 font-semibold">
                 <span class="inline-flex items-center justify-center gap-1.5">
                   SER 10
                   <button type="button" data-add-ser-criterion class="grid h-6 w-6 place-items-center rounded-md bg-white text-school-navy shadow-sm transition hover:bg-school-gold" title="Agregar nota SER">${icon("plus", "h-4 w-4")}</button>
                 </span>
               </th>
-              <th colspan="${(exams.length || 1) + 2}" class="px-1 py-2 font-semibold">SABER 45</th>
-              <th colspan="${(tasks.length || 1) + 2}" class="px-1 py-2 font-semibold">HACER 40</th>
-              <th colspan="2" class="px-1 py-2 font-semibold">Auto 5</th>
-              <th colspan="2" class="px-1 py-2 font-semibold">Final</th>
+              <th colspan="${(exams.length || 1) + 2}" class="${sectionHeaderBorder} px-1 py-2 font-semibold">SABER 45</th>
+              <th colspan="${(tasks.length || 1) + 2}" class="${sectionHeaderBorder} px-1 py-2 font-semibold">HACER 40</th>
+              <th colspan="2" class="${sectionHeaderBorder} px-1 py-2 font-semibold">Auto 5</th>
+              <th colspan="2" class="${sectionHeaderBorder} px-1 py-2 font-semibold">Final</th>
             </tr>
             <tr class="border-b border-slate-200 bg-slate-50 text-[10px] font-medium text-slate-700">
               <th class="px-1 py-1"></th>
               <th class="px-2 py-1 text-left"></th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Asistencia</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Puntualidad</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Responsabilidad</th>
-              ${serCriteria.map((item) => `<th class="h-24 px-1 py-1">
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${serHeaderCell}">Asistencia</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-50/80">Puntualidad</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-50/80">Responsabilidad</th>
+              ${serCriteria.map((item) => `<th class="h-24 px-1 py-1 bg-emerald-50/80">
                 <button type="button" data-edit-ser-criterion="${item.id}" class="h-full w-full rounded-lg px-1 py-1 text-[10px] font-medium transition [writing-mode:vertical-rl] hover:bg-school-gold/30">${escapeHtml(item.titulo)}</button>
               </th>`).join("")}
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Promedio</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Puntaje</th>
-              ${exams.length ? exams.map((item) => `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">${escapeHtml(item.titulo)}</th>`).join("") : `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Sin examenes</th>`}
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Promedio</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Puntaje</th>
-              ${tasks.length ? tasks.map((item) => `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">${escapeHtml(item.titulo)}</th>`).join("") : `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Sin tareas</th>`}
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Promedio</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Puntaje</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Nota</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Puntaje</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Nota final</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl]">Situacion</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-50/80">Promedio</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-50/80">Puntaje</th>
+              ${exams.length ? exams.map((item, itemIndex) => `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-amber-50/80 ${itemIndex === 0 ? sectionBorder : ""}">${escapeHtml(item.titulo)}</th>`).join("") : `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${saberHeaderCell}">Sin examenes</th>`}
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-amber-50/80">Promedio</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-amber-50/80">Puntaje</th>
+              ${tasks.length ? tasks.map((item, itemIndex) => `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-green-50/70 ${itemIndex === 0 ? sectionBorder : ""}">${escapeHtml(item.titulo)}</th>`).join("") : `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${hacerHeaderCell}">Sin tareas</th>`}
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-green-50/70">Promedio</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-green-50/70">Puntaje</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${autoHeaderCell}">Nota</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-slate-100/80">Puntaje</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${finalHeaderCell}">Nota final</th>
+              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-100/80">Situacion</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -2947,7 +2955,7 @@ async function renderNotes(context) {
                 <tr class="hover:bg-slate-50">
                   <td class="px-1 py-1.5 font-medium text-school-navy">${student.numeroLista || index + 1}</td>
                   <td class="px-2 py-1.5 text-left font-normal text-slate-800">${escapeHtml(student.nombre)}</td>
-                  <td class="px-1 py-1.5 ${gradeTone(calc.asistencia100)}">${calc.asistencia100}</td>
+                  <td class="${sectionBorder} px-1 py-1.5 ${gradeTone(calc.asistencia100)}">${calc.asistencia100}</td>
                   <td class="px-1 py-1.5 ${gradeTone(calc.puntualidad100)}">${calc.puntualidad100}</td>
                   <td class="px-1 py-1.5 ${gradeTone(calc.responsabilidad100)}">${calc.responsabilidad100}</td>
                   ${serCriteria.map((item) => {
@@ -2961,21 +2969,23 @@ async function renderNotes(context) {
                   <td class="px-1 py-1.5 bg-blue-50 font-medium text-school-navy">${calc.ser10}</td>
                   ${exams.length ? exams.map((item) => {
                     const value = studentActivityGrade(item, student.id, gradesMap);
-                    return `<td class="px-1 py-1.5 ${gradeTone(value)}">${value}</td>`;
-                  }).join("") : `<td class="px-1 py-1.5 text-slate-400">35</td>`}
+                    const firstExam = item.id === exams[0]?.id;
+                    return `<td class="${firstExam ? sectionBorder : ""} px-1 py-1.5 ${gradeTone(value)}">${value}</td>`;
+                  }).join("") : `<td class="${sectionBorder} px-1 py-1.5 text-slate-400">35</td>`}
                   <td class="px-1 py-1.5 ${gradeTone(calc.saber100)}">${calc.saber100}</td>
                   <td class="px-1 py-1.5 bg-blue-50 font-medium text-school-navy">${calc.saber45}</td>
                   ${tasks.length ? tasks.map((item) => {
                     const value = studentActivityGrade(item, student.id, gradesMap);
-                    return `<td class="px-1 py-1.5 ${gradeTone(value)}">${value}</td>`;
-                  }).join("") : `<td class="px-1 py-1.5 text-slate-400">35</td>`}
+                    const firstTask = item.id === tasks[0]?.id;
+                    return `<td class="${firstTask ? sectionBorder : ""} px-1 py-1.5 ${gradeTone(value)}">${value}</td>`;
+                  }).join("") : `<td class="${sectionBorder} px-1 py-1.5 text-slate-400">35</td>`}
                   <td class="px-1 py-1.5 ${gradeTone(calc.hacer100)}">${calc.hacer100}</td>
                   <td class="px-1 py-1.5 bg-blue-50 font-medium text-school-navy">${calc.hacer40}</td>
-                  <td class="px-1 py-1.5">
+                  <td class="${sectionBorder} px-1 py-1.5">
                     <button type="button" data-auto-grade="${student.id}" class="mx-auto min-w-8 rounded-lg px-2 py-1 text-[10px] font-medium transition hover:ring-2 hover:ring-school-green ${autoGradeRecord ? gradeTone(calc.auto100) : "bg-slate-100 text-slate-500"}">${autoGradeRecord ? calc.auto100 : "+"}</button>
                   </td>
                   <td class="px-1 py-1.5 bg-blue-50 font-medium text-school-navy">${calc.auto5}</td>
-                  <td class="px-1 py-1.5 text-xs font-semibold ${calc.final <= 50 ? "bg-red-600 text-white" : "bg-green-700 text-white"}">${calc.final}</td>
+                  <td class="${sectionBorder} px-1 py-1.5 text-xs font-semibold ${calc.final <= 50 ? "bg-red-600 text-white" : "bg-green-700 text-white"}">${calc.final}</td>
                   <td class="px-1 py-1.5 font-medium ${calc.final <= 50 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}">${calc.final <= 50 ? "Reprobado" : "Aprobado"}</td>
                 </tr>
               `;
@@ -3300,9 +3310,14 @@ async function renderSummary(context) {
             <p class="font-semibold text-slate-500">${escapeHtml(selectedTrimester().label)} · ${dates.length} fecha(s) registradas</p>
           </div>
           <div class="flex flex-col gap-3 xl:items-end">
-            <button type="button" data-refresh-summary-cache class="inline-flex items-center justify-center gap-2 rounded-2xl bg-school-navy px-4 py-2 text-sm font-black text-white shadow-soft transition hover:bg-school-green">
-              ${icon("refresh-cw", "h-4 w-4")} Actualizar resumen
-            </button>
+            <div class="flex flex-wrap gap-2 xl:justify-end">
+              <button type="button" data-print-summary-attendance class="inline-flex items-center justify-center gap-2 rounded-2xl border border-school-green bg-white px-4 py-2 text-sm font-black text-school-green shadow-sm transition hover:bg-green-50">
+                ${icon("printer", "h-4 w-4")} Imprimir
+              </button>
+              <button type="button" data-refresh-summary-cache class="inline-flex items-center justify-center gap-2 rounded-2xl bg-school-navy px-4 py-2 text-sm font-black text-white shadow-soft transition hover:bg-school-green">
+                ${icon("refresh-cw", "h-4 w-4")} Actualizar resumen
+              </button>
+            </div>
             <div class="rounded-2xl bg-school-sky px-4 py-2 text-xs font-black text-school-navy">
               ${summaryCacheMeta ? `Copia local: ${escapeHtml(summaryCacheMeta.label)}` : "Sin copia local"}
             </div>
@@ -3362,6 +3377,15 @@ async function renderSummary(context) {
     button.textContent = "Actualizando...";
     await refreshTeacherSummarySnapshot(context, course, teacherState.trimesterId);
     await renderSummary(context);
+  });
+  container.querySelector("[data-print-summary-attendance]")?.addEventListener("click", () => {
+    printAttendanceSummaryByMonth({
+      course,
+      trimesterLabel: selectedTrimester().label,
+      teacherName: context.profile?.nombre || context.profile?.usuario || "Docente",
+      students,
+      records
+    });
   });
   refreshIcons();
 }

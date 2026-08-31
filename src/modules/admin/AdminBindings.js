@@ -1,5 +1,5 @@
 ﻿import { COURSES, DAYS, SUBJECTS, findCourse, findSubject, periodsForCourse } from "../../data/catalog.js";
-import { getAdminCounts, getAllSchedules, getSchedule, importHistoricalAttendance, importSchedulesPayload, importStudents, listStudents, saveScheduleCell, seedSchoolCatalog, setStudentActive, saveTeacherAssignments } from "../../services/adminData.js";
+import { getAdminCounts, getAllSchedules, getSchedule, importHistoricalAttendance, importHistoricalGrades, importSchedulesPayload, importStudents, listStudents, saveScheduleCell, seedSchoolCatalog, setStudentActive, saveTeacherAssignments } from "../../services/adminData.js";
 import { createSystemUser, listUsersByRole } from "../../services/users.js";
 import { ensureStudentLocalAccess, setStudentAccessActive } from "../../services/studentAccess.js";
 import { listAudit, safeAudit } from "../../services/auditData.js";
@@ -9,7 +9,8 @@ const state = {
   scheduleCourseId: COURSES[0].id,
   selectedSubjectId: "",
   schedule: null,
-  historicalPreview: null
+  historicalPreview: null,
+  historicalGradesPreview: null
 };
 
 const roleLabels = {
@@ -849,6 +850,186 @@ function fillHistoricalGridFromClipboard(startCell, text) {
   return true;
 }
 
+function gradeActivityHeaderHtml(index) {
+  const next = index + 1;
+  return `<th class="min-w-36 border-r border-white/20 px-2 py-2 align-top">
+    <div class="space-y-1">
+      <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-[11px] font-black text-school-green outline-none" data-g-title="${index}" value="Actividad ${next}" placeholder="Titulo">
+      <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-[11px] font-semibold text-slate-700 outline-none" data-g-date="${index}" value="${formatHistoricalDate(new Date())}" placeholder="Fecha">
+      <input class="w-full rounded-lg border border-white/30 bg-white/95 px-2 py-1 text-center text-[11px] font-semibold text-slate-700 outline-none" data-g-max="${index}" type="number" min="1" value="100" placeholder="Max">
+    </div>
+  </th>`;
+}
+
+function gradeValueCellHtml(index) {
+  return `<td class="min-w-24 border-b border-r border-slate-100 bg-white p-1">
+    <div contenteditable="true" data-g-cell="${index}" class="min-h-8 rounded-lg px-1 py-1.5 text-center font-semibold outline-none focus:ring-2 focus:ring-school-green/40"></div>
+  </td>`;
+}
+
+function gradeCellClass(value, maximo = 100) {
+  const raw = Number(value);
+  const max = Math.max(Number(maximo) || 100, 1);
+  if (String(value || "").trim() === "" || Number.isNaN(raw)) return "bg-white text-slate-500";
+  const percent = Math.max(0, Math.min(100, Math.round((raw / max) * 100)));
+  return percent < 50 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700";
+}
+
+function ensureHistoricalGradeColumns(requiredCount) {
+  const grid = document.querySelector("[data-historical-grades-grid]");
+  const headerRow = grid?.querySelector("thead tr");
+  const rows = grid ? [...grid.querySelectorAll("tbody tr[data-g-student-id]")] : [];
+  if (!grid || !headerRow) return;
+  let current = headerRow.querySelectorAll("[data-g-title]").length;
+  while (current < requiredCount) {
+    headerRow.insertAdjacentHTML("beforeend", gradeActivityHeaderHtml(current));
+    rows.forEach((row) => row.insertAdjacentHTML("beforeend", gradeValueCellHtml(current)));
+    current += 1;
+  }
+}
+
+async function renderHistoricalGradesGrid() {
+  const grid = document.querySelector("[data-historical-grades-grid]");
+  const form = document.querySelector("[data-historical-grades-form]");
+  const counter = document.querySelector("[data-historical-grades-count]");
+  if (!grid || !form) return;
+  const data = new FormData(form);
+  const course = findCourse(data.get("courseId"));
+  const students = course?.id ? await listStudents(course.id) : [];
+  if (counter) counter.textContent = `${students.length} alumno(s)`;
+  const columns = 4;
+  grid.innerHTML = `
+    <table class="w-full min-w-[760px] border-separate border-spacing-0 text-left text-xs">
+      <thead class="sticky top-0 z-10 bg-school-green text-white">
+        <tr>
+          <th class="w-14 border-r border-white/20 px-3 py-2 font-black">No.</th>
+          <th class="min-w-64 border-r border-white/20 px-3 py-2 font-black">Alumno</th>
+          ${Array.from({ length: columns }, (_, index) => gradeActivityHeaderHtml(index)).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${students.map((student) => `
+          <tr data-g-student-id="${student.id}" data-g-student-name="${escapeHtml(student.nombre)}" data-g-student-number="${student.numeroLista || ""}">
+            <td class="border-b border-r border-slate-100 bg-slate-50 px-3 py-2 text-center font-black text-school-green">${student.numeroLista || ""}</td>
+            <td class="border-b border-r border-slate-100 bg-white px-3 py-2 font-semibold text-slate-700">${escapeHtml(student.nombre)}</td>
+            ${Array.from({ length: columns }, (_, index) => gradeValueCellHtml(index)).join("")}
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function collectHistoricalGradesFromGrid() {
+  const form = document.querySelector("[data-historical-grades-form]");
+  const grid = document.querySelector("[data-historical-grades-grid]");
+  if (!form || !grid) return null;
+  const data = new FormData(form);
+  const course = findCourse(data.get("courseId"));
+  const materiaId = data.get("materiaId") || "";
+  const trimestreId = data.get("trimestreId") || "t1";
+  const tipo = data.get("tipo") || "tarea";
+  const activities = [...grid.querySelectorAll("[data-g-title]")].map((input, index) => {
+    const title = String(input.value || "").trim();
+    const dateInput = grid.querySelector(`[data-g-date="${index}"]`);
+    const maxInput = grid.querySelector(`[data-g-max="${index}"]`);
+    return {
+      key: String(index),
+      titulo: title,
+      fecha: normalizeHistoricalDate(dateInput?.value, new Date().getFullYear()) || "",
+      maximo: Number(maxInput?.value || 100),
+      tipo
+    };
+  });
+
+  const used = new Set();
+  const rows = [];
+  const errors = [];
+  grid.querySelectorAll("tbody tr[data-g-student-id]").forEach((tr) => {
+    const student = {
+      id: tr.dataset.gStudentId,
+      nombre: tr.dataset.gStudentName,
+      numeroLista: tr.dataset.gStudentNumber
+    };
+    activities.forEach((activity, index) => {
+      const cell = tr.querySelector(`[data-g-cell="${index}"]`);
+      const raw = String(cell?.textContent || "").trim();
+      if (!raw) return;
+      if (!activity.titulo) {
+        errors.push(`Actividad ${index + 1}: falta titulo.`);
+        return;
+      }
+      if (Number.isNaN(Number(raw))) {
+        errors.push(`${student.nombre}, ${activity.titulo}: nota invalida "${raw}".`);
+        return;
+      }
+      used.add(activity.key);
+      rows.push({ student, activityKey: activity.key, valor: Number(raw) });
+    });
+  });
+
+  const usedActivities = activities.filter((activity) => used.has(activity.key));
+  if (!course?.id) throw new Error("Selecciona un curso valido.");
+  if (!materiaId) throw new Error("Selecciona una materia.");
+  if (!usedActivities.length || !rows.length) throw new Error("No hay notas validas para importar.");
+  return {
+    course,
+    materiaId,
+    trimestreId,
+    activities: usedActivities,
+    rows,
+    errors,
+    studentCount: new Set(rows.map((row) => row.student.id)).size
+  };
+}
+
+function renderHistoricalGradesPreview(preview) {
+  const box = document.querySelector("[data-historical-grades-preview]");
+  const button = document.querySelector("[data-action='import-historical-grades']");
+  if (!box || !button) return;
+  state.historicalGradesPreview = preview;
+  button.disabled = !preview?.rows?.length;
+  if (!preview) {
+    box.innerHTML = `<div class="flex min-h-36 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">Previsualiza las notas antes de guardar.</div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-soft">
+      <div class="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-4">
+        <div><p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Curso</p><p class="font-black text-slate-900">${escapeHtml(preview.course.nombre)}</p></div>
+        <div><p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Materia</p><p class="font-black text-slate-900">${escapeHtml(findSubject(preview.materiaId)?.nombre || preview.materiaId)}</p></div>
+        <div><p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Actividades</p><p class="font-black text-slate-900">${preview.activities.length}</p></div>
+        <div><p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Notas</p><p class="font-black text-school-green">${preview.rows.length}</p></div>
+      </div>
+      ${preview.errors.length ? `<div class="m-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">${[...new Set(preview.errors)].slice(0, 6).map(escapeHtml).join("<br>")}</div>` : ""}
+    </div>
+  `;
+}
+
+function fillHistoricalGradesFromClipboard(startCell, text) {
+  const grid = document.querySelector("[data-historical-grades-grid]");
+  if (!grid || !startCell) return false;
+  const matrix = String(text || "").trim().split(/\r?\n/).map((line) => splitHistoricalLine(line));
+  const startRow = startCell.closest("tr");
+  const startColumn = Number(startCell.dataset.gCell || 0);
+  const rows = [...grid.querySelectorAll("tbody tr[data-g-student-id]")];
+  const rowIndex = rows.indexOf(startRow);
+  if (rowIndex < 0) return false;
+  ensureHistoricalGradeColumns(startColumn + Math.max(...matrix.map((line) => line.length), 1));
+  matrix.forEach((line, rOffset) => {
+    const targetRow = rows[rowIndex + rOffset];
+    if (!targetRow) return;
+    line.forEach((value, cOffset) => {
+      const target = targetRow.querySelector(`[data-g-cell="${startColumn + cOffset}"]`);
+      const max = document.querySelector(`[data-g-max="${startColumn + cOffset}"]`)?.value || 100;
+      if (target) {
+        target.textContent = String(value || "").trim();
+        target.className = `min-h-8 rounded-lg px-1 py-1.5 text-center font-semibold outline-none focus:ring-2 focus:ring-school-green/40 ${gradeCellClass(value, max)}`;
+      }
+    });
+  });
+  return true;
+}
 async function buildHistoricalAttendancePreview() {
   const gridPreview = collectHistoricalRowsFromGrid();
   if (gridPreview) return gridPreview;
@@ -1032,6 +1213,138 @@ function bindHistoricalPage() {
     }
   });
 
+  const setHistoricalTab = (tab) => {
+    document.querySelectorAll("[data-historical-tab]").forEach((button) => {
+      const active = button.dataset.historicalTab === tab;
+      button.className = active
+        ? "rounded-xl bg-school-green px-4 py-2 text-sm font-black text-white"
+        : "rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-school-green hover:bg-green-50";
+    });
+    document.querySelectorAll("[data-historical-section]").forEach((section) => {
+      section.classList.toggle("hidden", section.dataset.historicalSection !== tab);
+    });
+    if (tab === "grades") {
+      renderHistoricalGradesPreview(null);
+      renderHistoricalGradesGrid().catch((error) => {
+        const status = document.querySelector("[data-historical-grades-status]");
+        if (status) {
+          status.className = "mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
+          status.textContent = error.message || "No se pudo cargar alumnos.";
+          status.classList.remove("hidden");
+        }
+      });
+    }
+  };
+
+  document.querySelectorAll("[data-historical-tab]").forEach((button) => {
+    button.addEventListener("click", () => setHistoricalTab(button.dataset.historicalTab || "attendance"));
+  });
+
+  document.querySelector("[data-historical-grades-form] select[name='courseId']")?.addEventListener("change", () => {
+    state.historicalGradesPreview = null;
+    renderHistoricalGradesPreview(null);
+    renderHistoricalGradesGrid().catch(() => {});
+  });
+
+  document.querySelector("[data-historical-grades-form] select[name='materiaId']")?.addEventListener("change", () => {
+    state.historicalGradesPreview = null;
+    renderHistoricalGradesPreview(null);
+  });
+
+  document.querySelector("[data-historical-grades-form] select[name='trimestreId']")?.addEventListener("change", () => {
+    state.historicalGradesPreview = null;
+    renderHistoricalGradesPreview(null);
+  });
+
+  document.querySelector("[data-historical-grades-form] select[name='tipo']")?.addEventListener("change", () => {
+    state.historicalGradesPreview = null;
+    renderHistoricalGradesPreview(null);
+  });
+
+  document.querySelector("[data-action='add-historical-grade-column']")?.addEventListener("click", () => {
+    const current = document.querySelectorAll("[data-g-title]").length;
+    ensureHistoricalGradeColumns(current + 1);
+    state.historicalGradesPreview = null;
+    renderHistoricalGradesPreview(null);
+  });
+
+  document.querySelector("[data-historical-grades-grid]")?.addEventListener("input", (event) => {
+    const cell = event.target.closest("[data-g-cell]");
+    const headerInput = event.target.closest("[data-g-title], [data-g-date], [data-g-max]");
+    if (cell) {
+      const max = document.querySelector(`[data-g-max="${cell.dataset.gCell}"]`)?.value || 100;
+      cell.className = `min-h-8 rounded-lg px-1 py-1.5 text-center font-semibold outline-none focus:ring-2 focus:ring-school-green/40 ${gradeCellClass(cell.textContent, max)}`;
+    }
+    if (cell || headerInput) {
+      state.historicalGradesPreview = null;
+      renderHistoricalGradesPreview(null);
+    }
+  });
+
+  document.querySelector("[data-historical-grades-grid]")?.addEventListener("paste", (event) => {
+    const cell = event.target.closest("[data-g-cell]");
+    if (!cell) return;
+    const text = event.clipboardData?.getData("text/plain") || "";
+    if (!text.includes("\n") && !text.includes("\t")) return;
+    event.preventDefault();
+    fillHistoricalGradesFromClipboard(cell, text);
+    state.historicalGradesPreview = null;
+    renderHistoricalGradesPreview(null);
+  });
+
+  document.querySelector("[data-action='preview-historical-grades']")?.addEventListener("click", () => {
+    const status = document.querySelector("[data-historical-grades-status]");
+    try {
+      const preview = collectHistoricalGradesFromGrid();
+      renderHistoricalGradesPreview(preview);
+      if (status) {
+        status.className = "mt-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-bold text-green-700";
+        status.textContent = "Notas listas para importar.";
+        status.classList.remove("hidden");
+      }
+    } catch (error) {
+      state.historicalGradesPreview = null;
+      renderHistoricalGradesPreview(null);
+      if (status) {
+        status.className = "mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
+        status.textContent = error.message || "No se pudo previsualizar.";
+        status.classList.remove("hidden");
+      }
+    }
+  });
+
+  document.querySelector("[data-action='import-historical-grades']")?.addEventListener("click", async () => {
+    const status = document.querySelector("[data-historical-grades-status]");
+    let preview = state.historicalGradesPreview;
+    try {
+      if (!preview?.rows?.length) preview = collectHistoricalGradesFromGrid();
+      const confirmed = window.confirm(`Se guardaran ${preview.rows.length} notas y ${preview.activities.length} actividades en ${preview.course.nombre}. ¿Continuar?`);
+      if (!confirmed) return;
+      if (status) {
+        status.className = "mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700";
+        status.textContent = "Guardando notas...";
+        status.classList.remove("hidden");
+      }
+      const result = await importHistoricalGrades(preview);
+      await safeAudit({
+        tipo: "calificaciones",
+        accion: "carga_historica",
+        detalle: `Importo ${result.grades} notas historicas de ${result.subject} en ${preview.course.nombre}`,
+        datos: { cursoId: preview.course.id, materiaId: preview.materiaId, trimestreId: preview.trimestreId, actividades: result.activities, notas: result.grades }
+      });
+      if (status) {
+        status.className = "mt-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-bold text-green-700";
+        status.textContent = `${result.grades} notas guardadas correctamente.`;
+        status.classList.remove("hidden");
+      }
+    } catch (error) {
+      if (status) {
+        status.className = "mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
+        status.textContent = error.message || "No se pudo importar notas.";
+        status.classList.remove("hidden");
+      }
+    }
+  });
   document.querySelector("[data-action='import-historical-attendance']")?.addEventListener("click", async () => {
     const status = document.querySelector("[data-historical-status]");
     let preview = state.historicalPreview;
@@ -1114,3 +1427,4 @@ export function bindAdminPages(route) {
   if (route === "/admin") hydrateAdminDashboard();
   if (route === "/admin/auditoria") bindAuditPage();
 }
+

@@ -1,4 +1,4 @@
-﻿import {
+import {
   collection,
   deleteField,
   doc,
@@ -25,6 +25,24 @@ function studentDocId(ci) {
 
 function attendanceDocId(courseId, date, studentId) {
   return `${date}_${courseId}_${studentId}`.replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
+}
+
+function activityDocId(courseId, subjectId, date, title) {
+  const clean = String(title || "actividad").replace(/[^a-z0-9]+/gi, "_").slice(0, 32).toLowerCase();
+  return `${date || "sin_fecha"}_${courseId}_${subjectId}_${clean}`.replace(/_+/g, "_").toLowerCase();
+}
+
+function gradeDocId(activityId, studentId) {
+  return `${activityId}_${studentId}`.replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
+}
+
+function normalizeGrade(value, maximo = 100) {
+  const raw = Number(value);
+  const max = Math.max(Number(maximo) || 100, 1);
+  if (Number.isNaN(raw)) return null;
+  const percent = Math.max(0, Math.min(100, Math.round((raw / max) * 100)));
+  const nota = percent <= 0 ? 35 : Math.max(35, percent);
+  return { valor: raw, porcentaje: percent, nota };
 }
 
 export async function seedSchoolCatalog() {
@@ -224,6 +242,79 @@ export async function importHistoricalAttendance({ course, rows, trimestreId }) 
   }
 
   return rows.length;
+}
+
+export async function importHistoricalGrades({ course, materiaId, rows, activities, trimestreId }) {
+  if (!course?.id) throw new Error("Selecciona un curso valido.");
+  if (!materiaId) throw new Error("Selecciona una materia.");
+  if (!["t1", "t2", "t3"].includes(trimestreId)) throw new Error("Selecciona un trimestre valido.");
+  if (!Array.isArray(activities) || !activities.length) throw new Error("No hay actividades para guardar.");
+  if (!Array.isArray(rows) || !rows.length) throw new Error("No hay notas para guardar.");
+
+  const subject = SUBJECTS.find((item) => item.id === materiaId);
+  const activityMap = new Map();
+  activities.forEach((activity) => {
+    const id = activityDocId(course.id, materiaId, activity.fecha, activity.titulo);
+    activityMap.set(activity.key, {
+      id,
+      cursoId: course.id,
+      materiaId,
+      trimestreId,
+      fecha: activity.fecha || "",
+      titulo: String(activity.titulo || "").trim(),
+      tipo: activity.tipo || "tarea",
+      maximo: Number(activity.maximo || 100),
+      creadoPorUid: auth.currentUser?.uid || "",
+      creadoPor: auth.currentUser?.email || "admin",
+      origen: "carga_historica",
+      activo: true,
+      updatedAt: serverTimestamp()
+    });
+  });
+
+  const writes = [];
+  activityMap.forEach((activity) => {
+    writes.push({ ref: doc(firestore, "actividades", activity.id), data: activity });
+  });
+
+  rows.forEach((row) => {
+    const activity = activityMap.get(row.activityKey);
+    const normalized = normalizeGrade(row.valor, activity?.maximo);
+    if (!activity || !normalized) return;
+    writes.push({
+      ref: doc(firestore, "calificaciones", gradeDocId(activity.id, row.student.id)),
+      data: {
+        actividadId: activity.id,
+        cursoId: course.id,
+        materiaId,
+        trimestreId,
+        alumnoId: row.student.id,
+        valor: normalized.valor,
+        porcentaje: normalized.porcentaje,
+        nota: normalized.nota,
+        maximo: activity.maximo,
+        fecha: activity.fecha || "",
+        tipo: activity.tipo,
+        origen: "carga_historica",
+        calificadoPorUid: auth.currentUser?.uid || "",
+        calificadoPor: auth.currentUser?.email || "admin",
+        updatedAt: serverTimestamp()
+      }
+    });
+  });
+
+  const chunks = [];
+  for (let index = 0; index < writes.length; index += 450) {
+    chunks.push(writes.slice(index, index + 450));
+  }
+
+  for (const chunk of chunks) {
+    const batch = writeBatch(firestore);
+    chunk.forEach((item) => batch.set(item.ref, item.data, { merge: true }));
+    await batch.commit();
+  }
+
+  return { activities: activityMap.size, grades: rows.length, subject: subject?.nombre || materiaId };
 }
 
 export async function saveTeacherAssignments(teacherUid, assignments) {
