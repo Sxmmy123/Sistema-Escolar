@@ -2,6 +2,7 @@
 import { icon } from "../../ui/dom.js";
 import { renderBulletin } from "./BoletinDocente.js";
 import { exportNotesToExcel } from "./exportNotasExcel.js";
+import { openTeacherNotesPrintModal } from "./imprimirNotasDocente.js";
 import { printAttendanceSummaryByMonth } from "./exportResumenAsistencia.js";
 import { renderDashboard } from "./PanelDocente.js";
 import {
@@ -2905,6 +2906,9 @@ async function renderNotes(context) {
           </div>
           <div class="flex flex-col gap-2 sm:items-end">
             <div class="flex flex-wrap justify-end gap-2">
+              <button type="button" data-print-notes class="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-school-green ring-1 ring-school-green/25 shadow-soft transition hover:bg-school-green hover:text-white">
+                ${icon("printer", "h-4 w-4")} Imprimir
+              </button>
               <button type="button" data-export-notes-excel class="inline-flex items-center justify-center gap-2 rounded-xl bg-school-green px-3 py-2 text-xs font-semibold text-white shadow-soft transition hover:bg-school-navy">
                 ${icon("file-spreadsheet", "h-4 w-4")} Excel
               </button>
@@ -3037,6 +3041,20 @@ async function renderNotes(context) {
     button.textContent = "Actualizando...";
     await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
     await renderNotes(context);
+  });
+  container.querySelector("[data-print-notes]")?.addEventListener("click", () => {
+    openTeacherNotesPrintModal({
+      course,
+      selectedSubject,
+      selectedTrimesterLabel: selectedTrimester().label,
+      availableSubjects,
+      students: studentsByName,
+      activities: visibleActivities,
+      gradesList,
+      attendanceRows,
+      calculateStudentTerm,
+      teacherName: context?.teacher?.nombre || context?.profile?.nombre || context?.user?.displayName || ""
+    });
   });
   container.querySelector("[data-export-notes-excel]")?.addEventListener("click", () => {
     exportNotesToExcel({
@@ -3620,6 +3638,9 @@ export async function bindDocentePages(route) {
     setHtml("[data-teacher-page-status]", "Error de carga");
   }
 }
+
+
+
 
 
 
