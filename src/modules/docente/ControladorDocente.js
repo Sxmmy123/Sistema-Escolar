@@ -2753,8 +2753,9 @@ async function renderNotes(context) {
     return;
   }
 
-  const notesCacheMeta = getTeacherDataCacheMeta(context, "notas", course.id, teacherState.trimesterId);
-  const notesSnapshot = await getTeacherNotesSnapshot(context, course, teacherState.trimesterId);
+  const activeTrimesterId = teacherState.trimesterId || selectedTrimester().id || "t1";
+  const notesCacheMeta = getTeacherDataCacheMeta(context, "notas", course.id, activeTrimesterId);
+  const notesSnapshot = await getTeacherNotesSnapshot(context, course, activeTrimesterId);
   if (!notesSnapshot) {
     function compactGradeActivityButton(item, widthClass = "") {
     const subject = findSubject(item.materiaId);
@@ -2807,7 +2808,7 @@ async function renderNotes(context) {
       const button = event.currentTarget;
       button.disabled = true;
       button.textContent = "Cargando notas...";
-      await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
+      await refreshTeacherNotesSnapshot(context, course, activeTrimesterId);
       await renderNotes(context);
     });
     refreshIcons();
@@ -2839,7 +2840,7 @@ async function renderNotes(context) {
     id: "",
     cursoId: course.id,
     materiaId: teacherState.selectedSubjectId,
-    trimestreId: teacherState.trimesterId,
+    trimestreId: activeTrimesterId,
     titulo: "Autoevaluacion",
     tipo: "auto",
     maximo: 5,
@@ -3134,7 +3135,7 @@ async function renderNotes(context) {
           titulo,
           tipo: "ser",
           maximo,
-          trimestreId: teacherState.trimesterId
+          trimestreId: activeTrimesterId
         });
       } else {
         savedActivity = await saveInternalActivity({
@@ -3143,7 +3144,7 @@ async function renderNotes(context) {
           titulo,
           tipo: "ser",
           maximo,
-          trimestreId: teacherState.trimesterId
+          trimestreId: activeTrimesterId
         });
       }
       upsertTeacherNotesSnapshotActivity(context, savedActivity);
@@ -3190,7 +3191,7 @@ async function renderNotes(context) {
             titulo: "Autoevaluacion",
             tipo: "auto",
             maximo: 5,
-            trimestreId: teacherState.trimesterId
+            trimestreId: activeTrimesterId
           });
           upsertTeacherNotesSnapshotActivity(context, activity);
         }
