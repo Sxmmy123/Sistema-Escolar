@@ -80,6 +80,46 @@ function writeTeacherDataCache(context = {}, type = "datos", courseId = "", trim
   }
 }
 
+function teacherContextCacheKey(uid = currentUid()) {
+  return `docente_contexto_sesion_${uid || "docente"}`;
+}
+
+function readTeacherContextCache(uid = currentUid()) {
+  try {
+    const raw = sessionStorage.getItem(teacherContextCacheKey(uid));
+    if (!raw) return null;
+    const context = JSON.parse(raw);
+    if (!context?.uid || !Array.isArray(context.courses) || !Array.isArray(context.subjectIds)) return null;
+    return context;
+  } catch {
+    return null;
+  }
+}
+
+function writeTeacherContextCache(context = {}) {
+  try {
+    if (!context.uid) return;
+    sessionStorage.setItem(teacherContextCacheKey(context.uid), JSON.stringify({
+      ...context,
+      cachedAt: Date.now()
+    }));
+  } catch {
+    // Si el navegador no permite sessionStorage, solo se vuelve a consultar el perfil.
+  }
+}
+
+function updateTeacherContextTrimesterCache(uid = currentUid(), trimesterId = "t1") {
+  const context = readTeacherContextCache(uid);
+  if (!context) return;
+  writeTeacherContextCache({
+    ...context,
+    profile: {
+      ...(context.profile || {}),
+      trimestreActivo: trimesterId
+    }
+  });
+}
+
 export function getTeacherDataCacheMeta(context = {}, type = "datos", courseId = "", trimesterId = "") {
   const cache = readTeacherDataCache(context, type, courseId, trimesterId);
   if (!cache) return null;
@@ -156,10 +196,14 @@ export async function saveTeacherTrimesterPreference(uid = currentUid(), trimest
     trimestreActivoUpdatedAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   }, { merge: true });
+  updateTeacherContextTrimesterCache(safeUid, trimesterId);
 }
 
-export async function getTeacherContext(uid = currentUid()) {
+export async function getTeacherContext(uid = currentUid(), options = {}) {
   if (!uid) return { uid: "", profile: null, courses: [], subjectIds: [] };
+
+  const cachedContext = options.forceRemote ? null : readTeacherContextCache(uid);
+  if (cachedContext) return cachedContext;
 
   const [userSnap, profileSnap, assignmentSnap] = await Promise.all([
     getDoc(doc(firestore, "usuarios", uid)),
@@ -192,12 +236,14 @@ export async function getTeacherContext(uid = currentUid()) {
     .filter((course, index, list) => list.findIndex((item) => item.id === course.id) === index)
     .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
 
-  return {
+  const context = {
     uid,
     profile,
     courses: assignedCourses,
     subjectIds: [...new Set(assignedCourses.flatMap((course) => course.materias))]
   };
+  writeTeacherContextCache(context);
+  return context;
 }
 
 export async function getTeacherStudents(courseId) {
@@ -295,8 +341,40 @@ export async function getTeacherNotesSnapshot(context, course, trimesterId = "t1
   if (options.forceRemote) return refreshTeacherNotesSnapshot(context, course, trimesterId);
   return null;
 }
+function updateTeacherNotesSnapshotCache(context, activity, updater) {
+  if (!activity?.cursoId) return;
+  const trimesterId = activity.trimestreId || "t1";
+  const cache = readTeacherDataCache(context, "notas", activity.cursoId, trimesterId);
+  if (!cache?.data) return;
+  const nextData = updater(cache.data) || cache.data;
+  writeTeacherDataCache(context, "notas", activity.cursoId, trimesterId, nextData);
+}
+
+export function upsertTeacherNotesSnapshotActivity(context, activity) {
+  updateTeacherNotesSnapshotCache(context, activity, (data) => {
+    const activities = Array.isArray(data.activities) ? [...data.activities] : [];
+    const activityIndex = activities.findIndex((item) => item.id === activity.id);
+    const normalizedActivity = { ...activity, trimestreId: activity.trimestreId || "t1" };
+    if (activityIndex >= 0) activities[activityIndex] = { ...activities[activityIndex], ...normalizedActivity };
+    else activities.push(normalizedActivity);
+    return { ...data, activities };
+  });
+}
+
+export function removeTeacherNotesSnapshotActivity(context, activity) {
+  updateTeacherNotesSnapshotCache(context, activity, (data) => ({
+    ...data,
+    activities: (Array.isArray(data.activities) ? data.activities : []).filter((item) => item.id !== activity.id),
+    gradesList: (Array.isArray(data.gradesList) ? data.gradesList : []).filter((item) => item.actividadId !== activity.id)
+  }));
+}
+
 export function upsertTeacherNotesSnapshotGrade(context, activity, grade) {
-  if (!activity?.cursoId || !grade?.id) return;
+  if (!activity?.cursoId) return;
+  if (!grade?.id) {
+    upsertTeacherNotesSnapshotActivity(context, activity);
+    return;
+  }
   const trimesterId = activity.trimestreId || grade.trimestreId || "t1";
   const cache = readTeacherDataCache(context, "notas", activity.cursoId, trimesterId);
   if (!cache?.data) return;

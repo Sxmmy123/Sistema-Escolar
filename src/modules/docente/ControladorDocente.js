@@ -72,7 +72,10 @@ import {
   saveGrade,
   saveInternalActivity,
   todayIso,
-  updateActivity
+  updateActivity,
+  upsertTeacherNotesSnapshotActivity,
+  upsertTeacherNotesSnapshotGrade,
+  removeTeacherNotesSnapshotActivity
 } from "../../services/teacherData.js";
 
 
@@ -197,9 +200,12 @@ async function renderAttendance(context) {
       attendanceCourses = [];
     } else {
       try {
-        const rowsForDay = await getTeacherScheduleRows(context, attendanceDayId, { forceRemote: true });
+        const scheduleCache = getTeacherScheduleCacheMeta(context);
+        const rowsForDay = await getTeacherScheduleRows(context, attendanceDayId, { cacheOnly: true });
         const courseIdsForDay = [...new Set(rowsForDay.map((row) => row.cursoId).filter(Boolean))];
-        attendanceCourses = context.courses.filter((item) => courseIdsForDay.includes(item.id));
+        attendanceCourses = courseIdsForDay.length
+          ? context.courses.filter((item) => courseIdsForDay.includes(item.id))
+          : (scheduleCache ? [] : context.courses);
       } catch (error) {
         console.warn("No se pudo filtrar asistencia por horario", error);
         attendanceCourses = context.courses;
@@ -2711,11 +2717,11 @@ async function renderRegularization(context) {
       status.textContent = "Guardando nota...";
     }
     try {
-      await saveGrade({ activity: selectedRegularizationActivity, student: selectedRegularizationStudent, value });
+      const savedGrade = await saveGrade({ activity: selectedRegularizationActivity, student: selectedRegularizationStudent, value });
+      upsertTeacherNotesSnapshotGrade(context, selectedRegularizationActivity, savedGrade);
       if (status) status.textContent = "Nota guardada";
       teacherState.regularizationGradeActivityId = "";
       teacherState.regularizationGradeStudentId = "";
-      await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
       await renderRegularization(context);
     } catch (error) {
       if (status) {
@@ -3022,7 +3028,6 @@ async function renderNotes(context) {
       closeNotesModals();
       sessionStorage.setItem("docenteMateriaId", teacherState.selectedSubjectId);
       button.disabled = true;
-      await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId).catch(() => null);
       await renderNotes(context);
     });
   });
@@ -3101,8 +3106,9 @@ async function renderNotes(context) {
     const submit = form.querySelector('button[type="submit"]');
     if (submit) submit.disabled = true;
     try {
+      let savedActivity = null;
       if (selectedCriterion) {
-        await updateActivity({
+        savedActivity = await updateActivity({
           activity: selectedCriterion,
           course,
           materiaId: teacherState.selectedSubjectId,
@@ -3113,7 +3119,7 @@ async function renderNotes(context) {
           trimestreId: teacherState.trimesterId
         });
       } else {
-        await saveInternalActivity({
+        savedActivity = await saveInternalActivity({
           course,
           materiaId: teacherState.selectedSubjectId,
           titulo,
@@ -3122,8 +3128,8 @@ async function renderNotes(context) {
           trimestreId: teacherState.trimesterId
         });
       }
+      upsertTeacherNotesSnapshotActivity(context, savedActivity);
       closeNotesModals();
-      await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
       await renderNotes(context);
     } catch (error) {
       alert(error?.code === "permission-denied" ? "Sin permiso para guardar nota SER." : error.message);
@@ -3135,8 +3141,8 @@ async function renderNotes(context) {
     if (!confirm(`Esta seguro que desea eliminar "${selectedCriterion.titulo}"?`)) return;
     try {
       await deleteActivity(selectedCriterion);
+      removeTeacherNotesSnapshotActivity(context, selectedCriterion);
       closeNotesModals();
-      await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
       await renderNotes(context);
     } catch (error) {
       alert(error?.code === "permission-denied" ? "Sin permiso para eliminar nota SER." : error.message);
@@ -3168,10 +3174,11 @@ async function renderNotes(context) {
             maximo: 5,
             trimestreId: teacherState.trimesterId
           });
+          upsertTeacherNotesSnapshotActivity(context, activity);
         }
         if (!activity) throw new Error("No se encontro la columna de nota.");
-        await saveGrade({ activity, student, value });
-        await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
+        const savedGrade = await saveGrade({ activity, student, value });
+        upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
         const nextIndex = studentsByName.findIndex((item) => item.id === student.id) + 1;
         const nextStudent = studentsByName[nextIndex] || null;
         if (teacherState.notesGradeGuided && nextStudent) {
