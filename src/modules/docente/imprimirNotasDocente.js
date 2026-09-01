@@ -42,8 +42,12 @@ function splitColumns(items, minimum, _maximum, prefix) {
   return clean;
 }
 
-function verticalLabel(text) {
-  return `<span class="vertical-text">${escapeHtml(text || "")}</span>`;
+function verticalLabel(text, className = "") {
+  const length = String(text || "").length;
+  const density = className.includes("activity-title")
+    ? length > 34 ? " long-title" : length > 22 ? " medium-title" : ""
+    : "";
+  return `<span class="vertical-text ${className}${density}" title="${escapeHtml(text || "")}">${escapeHtml(text || "")}</span>`;
 }
 
 function gradeCell(value) {
@@ -138,13 +142,13 @@ function subjectSheet({
             <th class="vertical ser-col section-start">${verticalLabel("Asistencia")}</th>
             <th class="vertical ser-col">${verticalLabel("Puntualidad")}</th>
             <th class="vertical ser-col">${verticalLabel("Responsabilidad")}</th>
-            ${serColumns.map((item) => `<th class="vertical ser-col">${verticalLabel(item.titulo || "")}</th>`).join("")}
+            ${serColumns.map((item) => `<th class="vertical activity-head ser-col">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
             <th class="vertical ser-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical ser-col prom">${verticalLabel("Puntaje")}</th>
-            ${saberColumns.map((item, index) => `<th class="vertical saber-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "")}</th>`).join("")}
+            ${saberColumns.map((item, index) => `<th class="vertical activity-head saber-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
             <th class="vertical saber-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical saber-col prom">${verticalLabel("Puntaje")}</th>
-            ${hacerColumns.map((item, index) => `<th class="vertical hacer-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "")}</th>`).join("")}
+            ${hacerColumns.map((item, index) => `<th class="vertical activity-head hacer-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
             <th class="vertical hacer-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical hacer-col prom">${verticalLabel("Puntaje")}</th>
             <th class="vertical auto-col section-start">${verticalLabel("Nota")}</th>
@@ -217,13 +221,13 @@ function printDocument(payload, subjects) {
         <meta charset="UTF-8">
         <title>Registro de evaluacion</title>
         <style>
-          @page { size: letter landscape; margin: 5mm; }
+          @page { size: letter portrait; margin: 4mm; }
           * { box-sizing: border-box; }
           html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: "Arial Narrow", Arial, sans-serif; }
           .print-page {
-            width: 269mm;
-            height: 205mm;
-            max-height: 205mm;
+            width: 207.9mm;
+            height: 271.4mm;
+            max-height: 271.4mm;
             overflow: hidden;
             page-break-after: always;
             break-after: page;
@@ -234,22 +238,22 @@ function printDocument(payload, subjects) {
           }
           .print-page:last-child { page-break-after: auto; break-after: auto; }
           .notes-print-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-          th, td { border: 1px solid #202020; padding: 0 1px; height: 11px; text-align: center; vertical-align: middle; font-size: 7.8px; font-weight: 400; line-height: 1; }
-          th { font-size: 7.5px; }
-          .col-num { width: 2.1%; }
-          .col-name { width: 27%; }
-          .col-note { width: calc((100% - 2.1% - 27% - 2.6% - 2.6% - 5.2%) / var(--regular-note-count)); }
-          .col-total { width: 2.6%; }
-          .col-status { width: 5.2%; }
-          .brand-top { background: #087B2B; color: #fff; font-size: 12px; font-weight: 700; text-align: left; padding-left: 6px; letter-spacing: .02em; }
+          th, td { border: 1px solid #202020; padding: 0 1px; height: 12px; text-align: center; vertical-align: middle; font-size: 7.2px; font-weight: 400; line-height: 1; }
+          th { font-size: 6.9px; }
+          .col-num { width: 2.6%; }
+          .col-name { width: 28.5%; }
+          .col-note { width: calc((100% - 2.6% - 28.5% - 3% - 3% - 5.9%) / var(--regular-note-count)); }
+          .col-total { width: 3%; }
+          .col-status { width: 5.9%; }
+          .brand-top { background: #087B2B; color: #fff; font-size: 10.5px; font-weight: 700; text-align: left; padding-left: 5px; letter-spacing: .02em; }
           .top-fill { background: #cce8c8; border-left: 0; }
           .meta-label, .meta-cell { font-weight: 700; text-align: right; background: #fff; }
           .meta-value { font-weight: 400; background: #fff; }
-          .parallel { font-size: 18px; font-weight: 400; }
-          .school-block { height: 76px; background: #fff; }
-          .school-block img { display: block; width: 45px; height: 45px; object-fit: contain; margin: 1px auto; }
-          .school-title { font-size: 7.5px; font-weight: 700; }
-          .school-name { margin-top: 1px; font-size: 11px; font-weight: 700; }
+          .parallel { font-size: 16px; font-weight: 400; }
+          .school-block { height: 72px; background: #fff; }
+          .school-block img { display: block; width: 40px; height: 40px; object-fit: contain; margin: 1px auto; }
+          .school-title { font-size: 7px; font-weight: 700; }
+          .school-name { margin-top: 1px; font-size: 9.5px; font-weight: 700; }
           .group { font-weight: 700; color: #111; }
           .ser-group, .ser-col { background: #fff; }
           .saber-group { background: #f8dfc2; }
@@ -261,40 +265,65 @@ function printDocument(payload, subjects) {
           .total-col { background: #f8dfc2; }
           .status-col { background: #e7f2ff; }
           .section-start { border-left-width: 2px; }
-          .vertical { height: 78px; padding: 0; overflow: hidden; }
-          .vertical-text { display: inline-block; max-width: 72px; transform: rotate(-90deg); transform-origin: center; white-space: nowrap; font-size: 7px; font-weight: 400; }
+          .vertical { height: 82px; padding: 0; overflow: hidden; }
+          .vertical-text {
+            display: inline-block;
+            max-height: 78px;
+            max-width: 100%;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+            white-space: nowrap;
+            overflow: hidden;
+            font-size: 6.4px;
+            font-weight: 400;
+            line-height: 1;
+            letter-spacing: 0;
+          }
+          .activity-head { height: 122px; }
+          .activity-title { max-height: 116px; font-size: 6px; }
+          .activity-title.medium-title { max-height: 116px; font-size: 5.5px; }
+          .activity-title.long-title { max-height: 116px; font-size: 5px; }
           .prom .vertical-text { font-weight: 700; }
           .thin-header { height: 9px; background: #f8f8f8; }
-          .col-header { font-size: 7.6px; font-weight: 700; background: #fff; }
-          .student-name { text-align: left; white-space: nowrap; overflow: hidden; font-size: 7.8px; font-weight: 400; }
+          .col-header { font-size: 7px; font-weight: 700; background: #fff; }
+          .student-name { text-align: left; white-space: nowrap; overflow: hidden; font-size: 7.2px; font-weight: 400; }
           .low-note { color: #d91f26; }
           .score { background: #fef3c7; }
           .total-score { background: #fde8d1; }
           .final-ok { background: #e7f7df; color: #111; }
           .final-low { background: #fde7e7; color: #d91f26; }
-          .status-ok { background: #edf8ff; color: #166534; font-size: 6.5px; }
-          .status-low { background: #edf8ff; color: #d91f26; font-size: 6.5px; }
-          .signatures { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 60px; padding: 7px 80px 0; text-align: center; font-size: 7px; }
-          .signatures span { display: block; border-top: 1px solid #111; margin: 0 auto 2px; width: 180px; }
-          .signatures strong { display: block; font-size: 7px; font-weight: 700; }
-          .signatures small { display: block; font-size: 6px; }
-          .print-dense th, .print-dense td { height: 10px; font-size: 7.1px; }
-          .print-dense th { font-size: 6.9px; }
-          .print-dense .vertical { height: 70px; }
-          .print-dense .vertical-text { max-width: 66px; font-size: 6.4px; }
-          .print-dense .student-name { font-size: 7.1px; }
-          .print-dense .school-block { height: 68px; }
-          .print-dense .school-block img { width: 38px; height: 38px; }
+          .status-ok { background: #edf8ff; color: #166534; font-size: 5.9px; }
+          .status-low { background: #edf8ff; color: #d91f26; font-size: 5.9px; }
+          .signatures { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 8px 34px 0; text-align: center; font-size: 6.6px; }
+          .signatures span { display: block; border-top: 1px solid #111; margin: 0 auto 2px; width: 145px; }
+          .signatures strong { display: block; font-size: 6.6px; font-weight: 700; }
+          .signatures small { display: block; font-size: 5.6px; }
+          .print-dense th, .print-dense td { height: 11px; font-size: 6.4px; }
+          .print-dense th { font-size: 6.1px; }
+          .print-dense .vertical { height: 76px; }
+          .print-dense .vertical-text { max-height: 72px; font-size: 5.8px; }
+          .print-dense .activity-head { height: 114px; }
+          .print-dense .activity-title { max-height: 108px; font-size: 5.4px; }
+          .print-dense .activity-title.medium-title { max-height: 108px; font-size: 5px; }
+          .print-dense .activity-title.long-title { max-height: 108px; font-size: 4.6px; }
+          .print-dense .student-name { font-size: 6.4px; }
+          .print-dense .school-block { height: 64px; }
+          .print-dense .school-block img { width: 34px; height: 34px; }
           .print-dense .signatures { padding-top: 5px; }
-          .print-ultra th, .print-ultra td { height: 9px; font-size: 6.4px; }
-          .print-ultra th { font-size: 6.2px; }
-          .print-ultra .vertical { height: 62px; }
-          .print-ultra .vertical-text { max-width: 58px; font-size: 5.8px; }
-          .print-ultra .student-name { font-size: 6.4px; }
-          .print-ultra .school-block { height: 60px; }
-          .print-ultra .school-block img { width: 32px; height: 32px; }
-          .print-ultra .brand-top { font-size: 10px; }
-          .print-ultra .school-name { font-size: 9px; }
+          .print-ultra th, .print-ultra td { height: 10px; font-size: 5.8px; }
+          .print-ultra th { font-size: 5.6px; }
+          .print-ultra .vertical { height: 70px; }
+          .print-ultra .vertical-text { max-height: 66px; font-size: 5.2px; }
+          .print-ultra .activity-head { height: 108px; }
+          .print-ultra .activity-title { max-height: 102px; font-size: 4.9px; }
+          .print-ultra .activity-title.medium-title { max-height: 102px; font-size: 4.5px; }
+          .print-ultra .activity-title.long-title { max-height: 102px; font-size: 4.2px; }
+          .print-ultra .student-name { font-size: 5.8px; }
+          .print-ultra .school-block { height: 58px; }
+          .print-ultra .school-block img { width: 30px; height: 30px; }
+          .print-ultra .brand-top { font-size: 9px; }
+          .print-ultra .school-name { font-size: 8px; }
           .print-ultra .signatures { padding-top: 4px; }
         </style>
       </head>
@@ -311,7 +340,7 @@ function printDocument(payload, subjects) {
       </body>
     </html>
   `;
-  const printWindow = window.open("", "_blank", "width=1200,height=800");
+  const printWindow = window.open("", "_blank", "width=900,height=1200");
   if (!printWindow) {
     alert("El navegador bloqueo la ventana de impresion. Permite ventanas emergentes e intenta nuevamente.");
     return;
@@ -363,7 +392,7 @@ export function openTeacherNotesPrintModal(payload) {
           `).join("")}
         </div>
       </div>
-      <p class="mt-3 text-xs leading-5 text-slate-500">Se imprimira en hoja carta horizontal, una hoja por materia seleccionada.</p>
+      <p class="mt-3 text-xs leading-5 text-slate-500">Se imprimira en hoja carta vertical, una hoja por materia seleccionada.</p>
       <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <button type="button" data-close-notes-print class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancelar</button>
         <button type="button" data-print-selected-notes class="rounded-2xl bg-school-green px-4 py-2 text-sm font-semibold text-white shadow-soft hover:bg-school-navy">Imprimir</button>
