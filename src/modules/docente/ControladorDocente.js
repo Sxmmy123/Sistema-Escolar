@@ -2852,6 +2852,22 @@ async function renderNotes(context) {
   const selectedGradeStudent = studentsByName.find((item) => item.id === teacherState.notesGradeStudentId) || null;
   const selectedGradeIndex = selectedGradeStudent ? studentsByName.findIndex((item) => item.id === selectedGradeStudent.id) : 0;
   const currentNotesGrade = selectedGradeActivity?.id && selectedGradeStudent ? gradesMap[selectedGradeActivity.id]?.[selectedGradeStudent.id] : null;
+
+  async function ensureNotesGradeActivity() {
+    if (teacherState.notesGradeKind !== "auto") return selectedGradeActivity || null;
+    if (autoActivity?.id) return autoActivity;
+    const createdActivity = await saveInternalActivity({
+      course,
+      materiaId: teacherState.selectedSubjectId,
+      titulo: "Autoevaluacion",
+      tipo: "auto",
+      maximo: 5,
+      trimestreId: activeTrimesterId
+    });
+    upsertTeacherNotesSnapshotActivity(context, createdActivity);
+    return createdActivity;
+  }
+
   const sectionBorder = "border-l-2 border-l-slate-300";
   const sectionHeaderBorder = "border-l-2 border-l-white/60";
   const serHeaderCell = `${sectionBorder} bg-emerald-50/80`;
@@ -3040,7 +3056,7 @@ async function renderNotes(context) {
     const button = event.currentTarget;
     button.disabled = true;
     button.textContent = "Actualizando...";
-    await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
+    await refreshTeacherNotesSnapshot(context, course, activeTrimesterId);
     await renderNotes(context);
   });
   container.querySelector("[data-print-notes]")?.addEventListener("click", () => {
@@ -3174,7 +3190,6 @@ async function renderNotes(context) {
   container.querySelectorAll("[data-note-grade-value]").forEach((button) => {
     button.addEventListener("click", async () => {
       const value = button.dataset.noteGradeValue;
-      let activity = teacherState.notesGradeKind === "auto" ? autoActivity : selectedGradeActivity;
       const student = selectedGradeStudent;
       if (!student) return;
       const status = container.querySelector("[data-notes-grade-status]");
@@ -3184,17 +3199,7 @@ async function renderNotes(context) {
         status.classList.remove("hidden");
       }
       try {
-        if (!activity && teacherState.notesGradeKind === "auto") {
-          activity = await saveInternalActivity({
-            course,
-            materiaId: teacherState.selectedSubjectId,
-            titulo: "Autoevaluacion",
-            tipo: "auto",
-            maximo: 5,
-            trimestreId: activeTrimesterId
-          });
-          upsertTeacherNotesSnapshotActivity(context, activity);
-        }
+        const activity = await ensureNotesGradeActivity();
         if (!activity) throw new Error("No se encontro la columna de nota.");
         const savedGrade = await saveGrade({ activity, student, value });
         upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);

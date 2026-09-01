@@ -1,5 +1,5 @@
 ﻿const CACHE_PREFIX = "ue-ecologica-nb";
-const CACHE_VERSION = "v1.0.2";
+const CACHE_VERSION = "v1.0.3";
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 
 const APP_SHELL = [
