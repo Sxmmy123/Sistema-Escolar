@@ -2836,14 +2836,15 @@ async function renderNotes(context) {
   const exams = subjectActivities.filter((item) => item.tipo === "examen");
   const serColspan = 5 + serCriteria.length;
   const selectedCriterion = serCriteria.find((item) => item.id === teacherState.notesCriterionId) || null;
-  const autoGradeActivity = autoActivity || {
-    id: "",
-    cursoId: course.id,
-    materiaId: teacherState.selectedSubjectId,
-    trimestreId: activeTrimesterId,
-    titulo: "Autoevaluacion",
-    tipo: "auto",
-    maximo: 5,
+  const autoGradeActivity = {
+    ...(autoActivity || {}),
+    id: autoActivity?.id || "",
+    cursoId: autoActivity?.cursoId || course.id,
+    materiaId: autoActivity?.materiaId || teacherState.selectedSubjectId,
+    trimestreId: autoActivity?.trimestreId || activeTrimesterId,
+    titulo: autoActivity?.titulo || "Autoevaluacion",
+    tipo: autoActivity?.tipo || "auto",
+    maximo: Number(autoActivity?.maximo || 5),
     interno: true
   };
   const selectedGradeActivity = teacherState.notesGradeKind === "auto"
@@ -2855,7 +2856,18 @@ async function renderNotes(context) {
 
   async function ensureNotesGradeActivity() {
     if (teacherState.notesGradeKind !== "auto") return selectedGradeActivity || null;
-    if (autoActivity?.id) return autoActivity;
+    if (autoActivity?.id) {
+      return {
+        ...autoActivity,
+        cursoId: autoActivity.cursoId || course.id,
+        materiaId: autoActivity.materiaId || teacherState.selectedSubjectId,
+        trimestreId: autoActivity.trimestreId || activeTrimesterId,
+        titulo: autoActivity.titulo || "Autoevaluacion",
+        tipo: autoActivity.tipo || "auto",
+        maximo: Number(autoActivity.maximo || 5),
+        interno: true
+      };
+    }
     const createdActivity = await saveInternalActivity({
       course,
       materiaId: teacherState.selectedSubjectId,
@@ -2990,7 +3002,7 @@ async function renderNotes(context) {
           <tbody class="divide-y divide-slate-100">
             ${studentsByName.map((student, index) => {
               const serExtraValues = serCriteria.map((item) => studentActivityGrade(item, student.id, gradesMap));
-              const autoGradeRecord = autoActivity ? gradesMap[autoActivity.id]?.[student.id] : null;
+              const autoGradeRecord = autoGradeActivity.id ? gradesMap[autoGradeActivity.id]?.[student.id] : null;
               const autoGrade = autoGradeRecord?.nota ?? null;
               const calc = calculateStudentTerm(student, subjectActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
               return `
@@ -3117,7 +3129,7 @@ async function renderNotes(context) {
   });
   container.querySelectorAll("[data-auto-grade]").forEach((button) => {
     button.addEventListener("click", () => {
-      teacherState.notesGradeActivityId = autoActivity?.id || "";
+      teacherState.notesGradeActivityId = autoGradeActivity.id || "";
       teacherState.notesGradeStudentId = button.dataset.autoGrade || "";
       teacherState.notesGradeKind = "auto";
       teacherState.notesCriterionOpen = false;
@@ -3187,35 +3199,60 @@ async function renderNotes(context) {
     teacherState.notesGradeGuided = !teacherState.notesGradeGuided;
     renderNotes(context);
   });
+  const setNotesGradeStatus = (message, type = "ok") => {
+    const status = container.querySelector("[data-notes-grade-status]");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.remove("hidden", "border-green-200", "bg-green-50", "text-green-700", "border-red-200", "bg-red-50", "text-red-700");
+    if (type === "error") {
+      status.classList.add("border-red-200", "bg-red-50", "text-red-700");
+    } else {
+      status.classList.add("border-green-200", "bg-green-50", "text-green-700");
+    }
+  };
+  const setNotesGradeButtonsDisabled = (disabled) => {
+    container.querySelectorAll("[data-note-grade-value]").forEach((item) => {
+      item.disabled = disabled;
+      item.classList.toggle("opacity-60", disabled);
+    });
+  };
   container.querySelectorAll("[data-note-grade-value]").forEach((button) => {
     button.addEventListener("click", async () => {
       const value = button.dataset.noteGradeValue;
       const student = selectedGradeStudent;
       if (!student) return;
-      const status = container.querySelector("[data-notes-grade-status]");
-      container.querySelectorAll("[data-note-grade-value]").forEach((item) => { item.disabled = true; });
-      if (status) {
-        status.textContent = "Guardando nota...";
-        status.classList.remove("hidden");
-      }
+      setNotesGradeButtonsDisabled(true);
+      setNotesGradeStatus("Guardando nota...");
+      let activity = null;
+      let savedGrade = null;
       try {
-        const activity = await ensureNotesGradeActivity();
+        activity = await ensureNotesGradeActivity();
         if (!activity) throw new Error("No se encontro la columna de nota.");
-        const savedGrade = await saveGrade({ activity, student, value });
-        upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
-        const nextIndex = studentsByName.findIndex((item) => item.id === student.id) + 1;
-        const nextStudent = studentsByName[nextIndex] || null;
-        if (teacherState.notesGradeGuided && nextStudent) {
-          teacherState.notesGradeActivityId = activity.id;
-          teacherState.notesGradeStudentId = nextStudent.id;
-          await renderNotes(context);
-          return;
-        }
+        savedGrade = await saveGrade({ activity, student, value });
+      } catch (error) {
+        console.error("No se pudo guardar nota en el modulo Notas", error);
+        setNotesGradeStatus(error?.code === "permission-denied" ? "Sin permiso para guardar nota." : (error.message || "No se pudo guardar la nota."), "error");
+        setNotesGradeButtonsDisabled(false);
+        return;
+      }
+
+      upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
+      setNotesGradeStatus("Nota guardada");
+      const nextIndex = studentsByName.findIndex((item) => item.id === student.id) + 1;
+      const nextStudent = studentsByName[nextIndex] || null;
+      if (teacherState.notesGradeGuided && nextStudent) {
+        teacherState.notesGradeActivityId = activity.id;
+        teacherState.notesGradeStudentId = nextStudent.id;
+      } else {
         closeNotesModals();
+      }
+
+      try {
         await renderNotes(context);
       } catch (error) {
-        alert(error?.code === "permission-denied" ? "Sin permiso para guardar nota." : error.message);
-        await renderNotes(context);
+        console.error("La nota se guardo, pero no se pudo refrescar la vista de Notas", error);
+        setNotesGradeStatus("Nota guardada. Actualiza notas si no se refleja.");
+        setNotesGradeButtonsDisabled(false);
       }
     });
   });

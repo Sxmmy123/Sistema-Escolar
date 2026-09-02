@@ -382,7 +382,7 @@ export function upsertTeacherNotesSnapshotGrade(context, activity, grade) {
   const activities = Array.isArray(cache.data.activities) ? [...cache.data.activities] : [];
   const gradesList = Array.isArray(cache.data.gradesList) ? [...cache.data.gradesList] : [];
   const activityIndex = activities.findIndex((item) => item.id === activity.id);
-  const normalizedActivity = { ...activity, trimestreId };
+  const normalizedActivity = { ...activity, trimestreId: trimesterId };
   if (activityIndex >= 0) activities[activityIndex] = { ...activities[activityIndex], ...normalizedActivity };
   else activities.push(normalizedActivity);
 
@@ -630,19 +630,30 @@ export async function listGradesForCourse(courseId, trimestreId = "") {
 }
 
 export async function saveGrade({ activity, student, value }) {
-  const normalized = normalizeGrade(value, activity.maximo);
+  if (!activity?.id) throw new Error("No se encontro la actividad para calificar.");
+  if (!student?.id) throw new Error("No se encontro el alumno para calificar.");
+
+  const cursoId = activity.cursoId || student.cursoId || "";
+  const materiaId = activity.materiaId || "";
+  const trimestreId = activity.trimestreId || "t1";
+  const maximo = Number(activity.maximo || 100);
+
+  if (!cursoId) throw new Error("La actividad no tiene curso asignado.");
+  if (!materiaId) throw new Error("La actividad no tiene materia asignada.");
+
+  const normalized = normalizeGrade(value, maximo);
   if (!normalized) throw new Error("Nota invalida.");
   const id = gradeDocId(activity.id, student.id);
   const payload = {
     actividadId: activity.id,
-    cursoId: activity.cursoId,
-    materiaId: activity.materiaId,
-    trimestreId: activity.trimestreId || "t1",
+    cursoId,
+    materiaId,
+    trimestreId,
     alumnoId: student.id,
     valor: normalized.valor,
     porcentaje: normalized.porcentaje,
     nota: normalized.nota,
-    maximo: Number(activity.maximo || 100),
+    maximo,
     fecha: activity.fecha || "",
     tipo: activity.tipo || "tarea",
     calificadoPorUid: currentUid(),
