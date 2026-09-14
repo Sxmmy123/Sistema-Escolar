@@ -61,6 +61,9 @@ let authReady = false;
 let activeUser = null;
 let activeRole = "";
 let renderLock = false;
+let shellBindingsController = null;
+
+const TEACHER_SIDEBAR_COLLAPSE_KEY = "colegio-sidebar-docente-colapsado";
 
 function currentRoute() {
   return (window.location.hash || "#/").replace(/^#/, "") || "/";
@@ -110,24 +113,110 @@ async function doLogout() {
 }
 
 function bindShell() {
+  shellBindingsController?.abort();
+  shellBindingsController = new AbortController();
+  const { signal } = shellBindingsController;
   const sidebar = document.querySelector("[data-sidebar]");
   const backdrop = document.querySelector("[data-sidebar-backdrop]");
-  const open = () => {
-    sidebar?.classList.remove("-translate-x-full");
-    backdrop?.classList.remove("hidden");
-  };
-  const close = () => {
-    sidebar?.classList.add("-translate-x-full");
-    backdrop?.classList.add("hidden");
+  const workspace = document.querySelector("main");
+  const mobileMenu = window.matchMedia("(max-width: 1023px)");
+  const menuButtons = [...document.querySelectorAll("[data-action='open-menu']")];
+  const collapseButton = document.querySelector("[data-action='toggle-sidebar-collapse']");
+  let lastMenuButton = null;
+
+  const syncMobileMenu = (open) => {
+    if (!sidebar) return;
+    sidebar.classList.toggle("-translate-x-full", !open);
+    backdrop?.classList.toggle("hidden", !open);
+    document.body.classList.toggle("mobile-sidebar-open", open);
+    sidebar.inert = !open;
+    sidebar.setAttribute("aria-hidden", String(!open));
+    backdrop?.setAttribute("aria-hidden", String(!open));
+    menuButtons.forEach((button) => button.setAttribute("aria-expanded", String(open)));
+    if (workspace) workspace.inert = open;
   };
 
-  document.querySelectorAll("[data-action='open-menu']").forEach((button) => button.addEventListener("click", open));
-  document.querySelectorAll("[data-action='close-menu']").forEach((button) => button.addEventListener("click", close));
-  backdrop?.addEventListener("click", close);
-  document.querySelectorAll("[data-sidebar] a").forEach((link) => link.addEventListener("click", close));
+  const open = () => {
+    if (!mobileMenu.matches || !sidebar) return;
+    const sidebarScroll = sidebar.querySelector(".teacher-sidebar-scroll");
+    if (sidebarScroll) sidebarScroll.scrollTop = 0;
+    syncMobileMenu(true);
+    document.querySelector("[data-action='close-menu']")?.focus({ preventScroll: true });
+  };
+  const close = ({ restoreFocus = false } = {}) => {
+    if (!sidebar) return;
+    const wasOpen = !sidebar.classList.contains("-translate-x-full");
+    syncMobileMenu(false);
+    if (restoreFocus && wasOpen) lastMenuButton?.focus({ preventScroll: true });
+  };
+
+  menuButtons.forEach((button) => button.addEventListener("click", () => {
+    lastMenuButton = button;
+    open();
+  }, { signal }));
+  document.querySelectorAll("[data-action='close-menu']").forEach((button) => button.addEventListener("click", () => close({ restoreFocus: true }), { signal }));
+  backdrop?.addEventListener("click", () => close({ restoreFocus: true }), { signal });
+  document.querySelectorAll("[data-sidebar] a").forEach((link) => link.addEventListener("click", () => close(), { signal }));
+
+  if (sidebar) syncMobileMenu(false);
+
+  const syncCollapsedSidebar = (collapsed, persist = false) => {
+    document.documentElement.classList.toggle("teacher-sidebar-collapsed", collapsed);
+    if (collapseButton) {
+      const label = collapsed ? "Expandir menu" : "Contraer menu";
+      collapseButton.setAttribute("aria-label", label);
+      collapseButton.setAttribute("title", label);
+      collapseButton.setAttribute("aria-expanded", String(!collapsed));
+    }
+    if (persist) {
+      try {
+        localStorage.setItem(TEACHER_SIDEBAR_COLLAPSE_KEY, collapsed ? "1" : "0");
+      } catch {
+        // El menu sigue funcionando aunque el navegador bloquee el almacenamiento.
+      }
+    }
+  };
+
+  if (collapseButton) {
+    let savedCollapsed = false;
+    try {
+      savedCollapsed = localStorage.getItem(TEACHER_SIDEBAR_COLLAPSE_KEY) === "1";
+    } catch {
+      savedCollapsed = false;
+    }
+    syncCollapsedSidebar(savedCollapsed);
+    collapseButton.addEventListener("click", () => {
+      syncCollapsedSidebar(!document.documentElement.classList.contains("teacher-sidebar-collapsed"), true);
+    }, { signal });
+  }
+
+  mobileMenu.addEventListener("change", () => close(), { signal });
+  window.addEventListener("storage", (event) => {
+    if (event.key === TEACHER_SIDEBAR_COLLAPSE_KEY) syncCollapsedSidebar(event.newValue === "1");
+  }, { signal });
+  document.addEventListener("keydown", (event) => {
+    if (!sidebar || sidebar.classList.contains("-translate-x-full") || !mobileMenu.matches) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close({ restoreFocus: true });
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = [...sidebar.querySelectorAll("a[href], button:not([disabled]), [tabindex='0']")]
+      .filter((element) => element.getClientRects().length > 0);
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }, { signal });
 
   document.querySelectorAll("[data-action='logout']").forEach((button) => {
-    button.addEventListener("click", doLogout);
+    button.addEventListener("click", doLogout, { signal });
   });
 
   bindAccountSettings();

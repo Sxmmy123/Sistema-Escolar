@@ -1,5 +1,5 @@
 ﻿const CACHE_PREFIX = "ue-ecologica-nb";
-const CACHE_VERSION = "v1.0.3";
+const CACHE_VERSION = "v1.0.4";
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -74,6 +74,17 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (isRemoteDataRequest(url)) return;
+
+  const isLocalViteAsset = ["localhost", "127.0.0.1"].includes(url.hostname) && (
+    url.pathname.startsWith("/src/") ||
+    url.pathname.startsWith("/@vite/") ||
+    url.pathname.includes("/node_modules/.vite/") ||
+    url.searchParams.has("t")
+  );
+  if (isLocalViteAsset) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request));

@@ -45,6 +45,8 @@ import {
   gradeByActivityAndStudent,
   gradeNumber,
   gradeTone,
+  isMaterialActivity,
+  isScoredMaterialActivity,
   isSaberActivity,
   optionalStudentActivityGrade,
   studentActivityGrade
@@ -92,6 +94,88 @@ function sortStudentsByName(students = []) {
 
 function selectedCourse(context = teacherState.context) {
   return context?.courses?.find((course) => course.id === teacherState.selectedCourseId) || context?.courses?.[0] || null;
+}
+
+function activityEvaluationLabel(activity = {}) {
+  if (isMaterialActivity(activity)) return "Responsabilidad";
+  return isSaberActivity(activity) ? "Saber" : "Hacer";
+}
+
+function activityPointsLabel(activity = {}) {
+  if (isMaterialActivity(activity) && !isScoredMaterialActivity(activity)) return "Sin puntaje";
+  return `${Number(activity.maximo || 100)} pts`;
+}
+
+function materialItemsForActivity(activity = {}) {
+  const storedItems = Array.isArray(activity.materiales) ? activity.materiales : [];
+  const items = storedItems
+    .map((item) => ({
+      cantidad: Math.max(1, Math.min(999, Math.round(Number(item?.cantidad) || 1))),
+      material: String(item?.material || "").trim()
+    }))
+    .filter((item) => item.material);
+  if (items.length) return items;
+  const legacyTitle = String(activity.titulo || "").trim();
+  if (!legacyTitle) return [];
+  return legacyTitle
+    .split(/\r?\n|,\s*/)
+    .map((material) => material.replace(/^\s*[-*\u2022]\s*/, "").trim())
+    .filter(Boolean)
+    .map((material) => ({ cantidad: 1, material }));
+}
+
+function materialEditorRow(item = {}) {
+  return `
+    <div class="grid grid-cols-[72px_minmax(0,1fr)_38px] items-center gap-2" data-material-item-row>
+      <input type="number" name="materialCantidad" min="1" max="999" value="${escapeHtml(item.cantidad || 1)}" aria-label="Cantidad" class="h-10 w-full rounded-xl border border-slate-200 px-2 text-center text-sm font-semibold outline-none focus:border-school-green">
+      <input type="text" name="materialNombre" maxlength="120" value="${escapeHtml(item.material || "")}" placeholder="Ej: Cartulina" aria-label="Material" class="h-10 min-w-0 rounded-xl border border-slate-200 px-3 text-sm font-medium outline-none focus:border-school-green">
+      <button type="button" data-remove-material-row title="Quitar material" aria-label="Quitar material" class="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600">${icon("trash-2", "h-4 w-4")}</button>
+    </div>
+  `;
+}
+
+function materialEditorRows(items = []) {
+  const rows = items.length ? items : [{ cantidad: 1, material: "" }];
+  return rows.map(materialEditorRow).join("");
+}
+
+function readMaterialEditor(form) {
+  if (!form) return [];
+  const data = new FormData(form);
+  const quantities = data.getAll("materialCantidad");
+  return data.getAll("materialNombre")
+    .map((material, index) => ({
+      cantidad: Math.max(1, Math.min(999, Math.round(Number(quantities[index]) || 1))),
+      material: String(material || "").trim()
+    }))
+    .filter((item) => item.material);
+}
+
+function bindMaterialListEditor(form) {
+  if (!form) return;
+  const list = form.querySelector("[data-material-list]");
+  if (!list) return;
+  form.querySelector("[data-add-material-row]")?.addEventListener("click", () => {
+    list.insertAdjacentHTML("beforeend", materialEditorRow({ cantidad: 1, material: "" }));
+    list.querySelector("[data-material-item-row]:last-child input[name='materialNombre']")?.focus();
+    refreshIcons();
+  });
+  list.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-material-row]");
+    if (!removeButton) return;
+    const rows = list.querySelectorAll("[data-material-item-row]");
+    const row = removeButton.closest("[data-material-item-row]");
+    if (rows.length > 1) {
+      row?.remove();
+      return;
+    }
+    row?.querySelector("input[name='materialNombre']")?.setAttribute("value", "");
+    const materialInput = row?.querySelector("input[name='materialNombre']");
+    const quantityInput = row?.querySelector("input[name='materialCantidad']");
+    if (materialInput) materialInput.value = "";
+    if (quantityInput) quantityInput.value = "1";
+    materialInput?.focus();
+  });
 }
 
 function renderCourseTabs(context, onSelect) {
@@ -232,7 +316,7 @@ async function renderAttendance(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -316,7 +400,7 @@ async function renderAttendance(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -643,6 +727,9 @@ async function renderTasks(context) {
   }
   const activity = visibleActivities.find((item) => item.id === teacherState.gradeModalActivityId);
   const editActivity = visibleActivities.find((item) => item.id === teacherState.taskEditActivityId);
+  const draftIsMaterial = isMaterialActivity({ tipo: teacherState.taskDraftTipo });
+  const editIsMaterial = isMaterialActivity(editActivity);
+  const editMaterialScored = isScoredMaterialActivity(editActivity);
   const activityCourse = activity ? (coursesById[activity.cursoId] || course) : course;
   const editCourseId = teacherState.taskDraftCourseId || editActivity?.cursoId || course?.id || context.courses[0]?.id;
   const editCourse = context.courses.find((item) => item.id === editCourseId) || context.courses.find((item) => item.id === editActivity?.cursoId) || course || context.courses[0];
@@ -683,7 +770,7 @@ async function renderTasks(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -777,18 +864,21 @@ async function renderTasks(context) {
                             const accent = courseAccent(activity.cursoId);
                             const courseNumber = String(activityCourse.corto || activityCourse.nombre || "")
                               .replace(/\D/g, "") || "I";
-                            const title = `${subject?.nombre || activity.materiaId} - ${activity.titulo || "Sin titulo"}`;
+                            const materialNotice = isMaterialActivity(activity);
+                            const title = materialNotice
+                              ? `${subject?.nombre || activity.materiaId} - Materiales: ${activity.titulo || "Sin detalle"}`
+                              : `${subject?.nombre || activity.materiaId} - ${activity.titulo || "Sin titulo"}`;
                             return showCourseInAgenda ? `
-                            <button type="button" draggable="true" class="flex w-full cursor-grab touch-none items-stretch overflow-hidden rounded-lg border-2 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft active:cursor-grabbing" style="border-color:${accent}" data-edit-activity="${activity.id}" title="${escapeHtml(activity.titulo)}">
-                              <span class="min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11px] font-black leading-4 text-slate-900">
-                                ${escapeHtml(title)}
+                            <button type="button" draggable="true" class="flex w-full cursor-grab touch-none items-stretch overflow-hidden rounded-lg border-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft active:cursor-grabbing ${materialNotice ? "bg-amber-50" : "bg-white"}" style="border-color:${materialNotice ? "#F7B51B" : accent}" data-edit-activity="${activity.id}" title="${escapeHtml(activity.titulo)}">
+                              <span class="flex min-w-0 flex-1 items-center gap-1 truncate px-1.5 py-0.5 text-[11px] font-black leading-4 text-slate-900">
+                                ${materialNotice ? icon("package-open", "h-3 w-3 shrink-0 text-amber-700") : ""}<span class="truncate">${escapeHtml(title)}</span>
                               </span>
                               <span class="grid min-w-6 place-items-center px-1 text-xs font-black text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>
                             </button>
                           ` : `
-                            <button type="button" draggable="true" class="flex w-full cursor-grab touch-none items-stretch overflow-hidden rounded-lg border-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft active:cursor-grabbing" style="border-color:${subject?.color || "#e2e8f0"}; background:${subject?.color || "#fff"}" data-edit-activity="${activity.id}" title="${escapeHtml(activity.titulo)}">
-                              <span class="min-w-0 flex-1 truncate px-1.5 py-0.5 text-[11px] font-black leading-4 text-slate-900">
-                                ${escapeHtml(title)}
+                            <button type="button" draggable="true" class="flex w-full cursor-grab touch-none items-stretch overflow-hidden rounded-lg border-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft active:cursor-grabbing" style="border-color:${materialNotice ? "#F7B51B" : (subject?.color || "#e2e8f0")}; background:${materialNotice ? "#fffbeb" : (subject?.color || "#fff")}" data-edit-activity="${activity.id}" title="${escapeHtml(activity.titulo)}">
+                              <span class="flex min-w-0 flex-1 items-center gap-1 truncate px-1.5 py-0.5 text-[11px] font-black leading-4 text-slate-900">
+                                ${materialNotice ? icon("package-open", "h-3 w-3 shrink-0 text-amber-700") : ""}<span class="truncate">${escapeHtml(title)}</span>
                               </span>
                             </button>
                           `;
@@ -855,7 +945,7 @@ async function renderTasks(context) {
 
             <div class="rounded-3xl border border-slate-200 bg-white p-4">
               <p class="text-sm font-black text-slate-700">Tipo de actividad</p>
-              <div class="mt-3 grid gap-3 sm:grid-cols-2">
+              <div class="mt-3 grid gap-3 sm:grid-cols-3">
                 <button type="button" data-task-type="tarea" class="rounded-3xl border-2 p-5 text-left transition hover:-translate-y-0.5 hover:shadow-soft ${teacherState.taskDraftTipo === "tarea" ? "border-green-500 bg-green-50 text-green-800 ring-4 ring-green-100" : "border-slate-200 bg-white text-slate-700"}">
                   <h4 class="text-xl font-black">HACER</h4>
                   <p class="mt-1 text-sm font-semibold text-slate-500">Tareas, ejercicios</p>
@@ -864,18 +954,38 @@ async function renderTasks(context) {
                   <h4 class="text-xl font-black">SABER</h4>
                   <p class="mt-1 text-sm font-semibold text-slate-500">Examenes, cuestionarios</p>
                 </button>
+                <button type="button" data-task-type="material" class="rounded-3xl border-2 p-5 text-left transition hover:-translate-y-0.5 hover:shadow-soft ${draftIsMaterial ? "border-amber-400 bg-amber-50 text-amber-900 ring-4 ring-amber-100" : "border-slate-200 bg-white text-slate-700"}">
+                  <div class="flex items-center gap-2">${icon("package-open", "h-5 w-5")}<h4 class="text-xl font-black">MATERIALES</h4></div>
+                  <p class="mt-1 text-sm font-semibold text-slate-500">Lo que deben traer</p>
+                </button>
               </div>
             </div>
 
             <div class="${teacherState.taskDraftTipo ? "" : "hidden"} rounded-3xl border border-slate-200 bg-white p-4">
-              <div class="grid gap-3 md:grid-cols-[1fr_160px]">
+              ${draftIsMaterial ? `
+                <div class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
+                  <div class="grid grid-cols-[72px_minmax(0,1fr)_38px] gap-2 border-b border-slate-200 bg-slate-100 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    <span class="text-center">Cantidad</span><span>Material</span><span></span>
+                  </div>
+                  <div class="grid gap-2 p-3" data-material-list>${materialEditorRows()}</div>
+                  <div class="border-t border-slate-200 bg-white px-3 py-2">
+                    <button type="button" data-add-material-row class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-school-green transition hover:bg-green-50">${icon("plus", "h-4 w-4")} Agregar material</button>
+                  </div>
+                </div>
+              ` : `
                 <label class="block text-sm font-black text-slate-700">Titulo
                   <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-semibold" name="titulo" placeholder="Ej: Investigacion Unidad 1" required>
                 </label>
-                <label class="block text-sm font-black text-slate-700">Nota maxima
-                  <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-semibold" type="number" name="maximo" min="1" placeholder="Ej: 10" required>
+              `}
+              <label data-activity-max-field class="${draftIsMaterial ? "hidden" : "mt-3 block"} text-sm font-black text-slate-700">Puntaje maximo
+                <input data-activity-max-input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-semibold" type="number" name="maximo" min="1" max="100" placeholder="Ej: 10" ${draftIsMaterial ? "disabled" : "required"}>
+              </label>
+              ${draftIsMaterial ? `
+                <label class="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
+                  <input type="checkbox" name="calificable" value="1" data-material-score-toggle class="mt-0.5 h-5 w-5 shrink-0 accent-green-700">
+                  <span><strong class="block text-sm">Habilitar puntaje</strong><span class="mt-0.5 block text-xs font-semibold text-amber-800">El resultado se calculara dentro de Responsabilidad.</span></span>
                 </label>
-              </div>
+              ` : ""}
             </div>
 
             <input type="hidden" name="tipo" value="${escapeHtml(teacherState.taskDraftTipo)}">
@@ -921,19 +1031,31 @@ async function renderTasks(context) {
                 </select>
               </label>
               <label class="block text-sm font-black text-slate-700">Tipo
-                <select class="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold" name="tipo" required>
+                <select class="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-semibold" name="tipo" data-edit-activity-type required>
                   <option value="tarea" ${editActivity.tipo === "tarea" ? "selected" : ""}>HACER - tareas, ejercicios</option>
                   <option value="examen" ${isSaberActivity(editActivity) ? "selected" : ""}>SABER - examenes, cuestionarios</option>
+                  <option value="material" ${editIsMaterial ? "selected" : ""}>MATERIALES - lo que deben traer</option>
                 </select>
               </label>
-              <div class="grid gap-3 sm:grid-cols-[1fr_150px]">
-                <label class="block text-sm font-black text-slate-700">Titulo
-                  <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-semibold" name="titulo" value="${escapeHtml(editActivity.titulo || "")}" required>
-                </label>
-                <label class="block text-sm font-black text-slate-700">Nota maxima
-                  <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-semibold" type="number" name="maximo" min="1" value="${escapeHtml(editActivity.maximo || 100)}" required>
-                </label>
+              <label data-edit-activity-title-field class="${editIsMaterial ? "hidden" : "block"} text-sm font-black text-slate-700">Titulo
+                <input data-edit-activity-title-input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-semibold" name="titulo" value="${escapeHtml(editActivity.titulo || "")}" ${editIsMaterial ? "disabled" : "required"}>
+              </label>
+              <div data-edit-material-list-section class="${editIsMaterial ? "block" : "hidden"} overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
+                <div class="grid grid-cols-[72px_minmax(0,1fr)_38px] gap-2 border-b border-slate-200 bg-slate-100 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <span class="text-center">Cantidad</span><span>Material</span><span></span>
+                </div>
+                <div class="grid gap-2 p-3" data-material-list>${materialEditorRows(materialItemsForActivity(editActivity))}</div>
+                <div class="border-t border-slate-200 bg-white px-3 py-2">
+                  <button type="button" data-add-material-row class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-school-green transition hover:bg-green-50">${icon("plus", "h-4 w-4")} Agregar material</button>
+                </div>
               </div>
+              <label data-edit-activity-max-field class="${editIsMaterial && !editMaterialScored ? "hidden" : "block"} text-sm font-black text-slate-700">Puntaje maximo
+                <input data-edit-activity-max-input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 font-semibold" type="number" name="maximo" min="1" max="100" value="${escapeHtml(editActivity.maximo || 10)}" ${editIsMaterial && !editMaterialScored ? "disabled" : "required"}>
+              </label>
+              <label data-edit-material-score-option class="${editIsMaterial ? "flex" : "hidden"} cursor-pointer items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
+                <input type="checkbox" name="calificable" value="1" data-edit-material-score-toggle class="mt-0.5 h-5 w-5 shrink-0 accent-green-700" ${editMaterialScored ? "checked" : ""}>
+                <span><strong class="block text-sm">Habilitar puntaje</strong><span class="mt-0.5 block text-xs font-semibold text-amber-800">El resultado se calcula dentro de Responsabilidad.</span></span>
+              </label>
               <p class="hidden rounded-2xl border px-4 py-3 text-sm font-bold" data-edit-activity-status></p>
               <div class="flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <button type="button" class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700 transition hover:bg-red-100" data-delete-edit-activity="${editActivity.id}">${icon("trash-2", "mr-1 inline h-4 w-4")} Eliminar</button>
@@ -1022,6 +1144,20 @@ async function renderTasks(context) {
       renderTasks(context);
     });
   });
+  const activityForm = container.querySelector("[data-activity-form]");
+  bindMaterialListEditor(activityForm);
+  const materialScoreToggle = container.querySelector("[data-material-score-toggle]");
+  const materialMaxField = container.querySelector("[data-activity-max-field]");
+  const materialMaxInput = container.querySelector("[data-activity-max-input]");
+  materialScoreToggle?.addEventListener("change", () => {
+    const enabled = materialScoreToggle.checked;
+    materialMaxField?.classList.toggle("hidden", !enabled);
+    if (materialMaxInput) {
+      materialMaxInput.disabled = !enabled;
+      materialMaxInput.required = enabled;
+      if (!enabled) materialMaxInput.value = "";
+    }
+  });
   container.querySelectorAll("[data-task-date]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.taskModalDate = button.dataset.taskDate || todayIso();
@@ -1029,7 +1165,7 @@ async function renderTasks(context) {
     });
   });
 
-  container.querySelector("[data-activity-form]")?.addEventListener("submit", async (event) => {
+  activityForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const status = form.querySelector("[data-activity-status]");
@@ -1037,10 +1173,18 @@ async function renderTasks(context) {
     const button = form.querySelector("button[type='submit']");
     const targetCourse = context.courses.find((item) => item.id === data.get("cursoId")) || draftCourse;
     const materiaPermitida = scheduledSubjectIds.includes(data.get("materiaId"));
-    if (!targetCourse || !data.get("cursoId") || !data.get("materiaId") || !data.get("tipo") || !data.get("fecha") || !data.get("titulo") || !data.get("maximo") || !materiaPermitida) {
+    const tipo = String(data.get("tipo") || "");
+    const material = isMaterialActivity({ tipo });
+    const materiales = material ? readMaterialEditor(form) : [];
+    const titulo = material
+      ? materiales.map((item) => item.material).join(", ")
+      : String(data.get("titulo") || "").trim();
+    const calificable = material && data.get("calificable") === "1";
+    const maximo = material && !calificable ? 0 : data.get("maximo");
+    if (!targetCourse || !data.get("cursoId") || !data.get("materiaId") || !tipo || !data.get("fecha") || !titulo || (material && !materiales.length) || ((!material || calificable) && !maximo) || !materiaPermitida) {
       if (status) {
         status.className = "mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800";
-        status.textContent = "Complete curso, materia valida segun horario, tipo, titulo y nota maxima.";
+        status.textContent = "Complete curso, materia valida segun horario, tipo y detalle. Si habilita puntaje, indique el maximo.";
         status.classList.remove("hidden");
       }
       return;
@@ -1052,7 +1196,7 @@ async function renderTasks(context) {
       status.classList.remove("hidden");
     }
     try {
-      await saveActivity({ course: targetCourse, materiaId: data.get("materiaId"), fecha: data.get("fecha"), titulo: data.get("titulo"), tipo: data.get("tipo"), maximo: data.get("maximo"), trimestreId: teacherState.trimesterId });
+      await saveActivity({ course: targetCourse, materiaId: data.get("materiaId"), fecha: data.get("fecha"), titulo, tipo, maximo, calificable, materiales, trimestreId: teacherState.trimesterId });
       teacherState.taskMonth = String(data.get("fecha") || todayIso()).slice(0, 7);
       teacherState.taskModalDate = "";
       teacherState.taskDraftCourseId = "";
@@ -1119,6 +1263,8 @@ async function renderTasks(context) {
       titulo: selected.titulo,
       tipo: selected.tipo,
       maximo: selected.maximo,
+      calificable: isScoredMaterialActivity(selected),
+      materiales: materialItemsForActivity(selected),
       trimestreId: selected.trimestreId || teacherState.trimesterId
     });
     teacherState.taskMonth = targetDate.slice(0, 7);
@@ -1232,7 +1378,42 @@ async function renderTasks(context) {
     renderTasks(context);
   });
 
-  container.querySelector("[data-edit-activity-form]")?.addEventListener("submit", async (event) => {
+  const editTypeInput = container.querySelector("[data-edit-activity-type]");
+  const editMaterialOption = container.querySelector("[data-edit-material-score-option]");
+  const editMaterialToggle = container.querySelector("[data-edit-material-score-toggle]");
+  const editMaxField = container.querySelector("[data-edit-activity-max-field]");
+  const editMaxInput = container.querySelector("[data-edit-activity-max-input]");
+  const editTitleField = container.querySelector("[data-edit-activity-title-field]");
+  const editTitleInput = container.querySelector("[data-edit-activity-title-input]");
+  const editMaterialListSection = container.querySelector("[data-edit-material-list-section]");
+  const editActivityForm = container.querySelector("[data-edit-activity-form]");
+  bindMaterialListEditor(editActivityForm);
+  const syncEditMaterialFields = () => {
+    const material = isMaterialActivity({ tipo: editTypeInput?.value });
+    const scoreEnabled = material && Boolean(editMaterialToggle?.checked);
+    editTitleField?.classList.toggle("hidden", material);
+    editTitleField?.classList.toggle("block", !material);
+    editMaterialListSection?.classList.toggle("hidden", !material);
+    editMaterialListSection?.classList.toggle("block", material);
+    if (editTitleInput) {
+      editTitleInput.disabled = material;
+      editTitleInput.required = !material;
+    }
+    editMaterialOption?.classList.toggle("hidden", !material);
+    editMaterialOption?.classList.toggle("flex", material);
+    editMaxField?.classList.toggle("hidden", material && !scoreEnabled);
+    editMaxField?.classList.toggle("block", !material || scoreEnabled);
+    if (editMaxInput) {
+      editMaxInput.disabled = material && !scoreEnabled;
+      editMaxInput.required = !material || scoreEnabled;
+      if ((!material || scoreEnabled) && !editMaxInput.value) editMaxInput.value = "10";
+    }
+  };
+  editTypeInput?.addEventListener("change", syncEditMaterialFields);
+  editMaterialToggle?.addEventListener("change", syncEditMaterialFields);
+  syncEditMaterialFields();
+
+  editActivityForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!editActivity) return;
     const form = event.currentTarget;
@@ -1240,10 +1421,18 @@ async function renderTasks(context) {
     const status = form.querySelector("[data-edit-activity-status]");
     const button = form.querySelector("button[type='submit']");
     const targetCourse = context.courses.find((item) => item.id === data.get("cursoId")) || editCourse;
-    if (!targetCourse || !data.get("materiaId") || !data.get("fecha") || !data.get("titulo") || !data.get("maximo")) {
+    const tipo = String(data.get("tipo") || "");
+    const material = isMaterialActivity({ tipo });
+    const materiales = material ? readMaterialEditor(form) : [];
+    const titulo = material
+      ? materiales.map((item) => item.material).join(", ")
+      : String(data.get("titulo") || "").trim();
+    const calificable = material && data.get("calificable") === "1";
+    const maximo = material && !calificable ? 0 : data.get("maximo");
+    if (!targetCourse || !data.get("materiaId") || !data.get("fecha") || !titulo || (material && !materiales.length) || ((!material || calificable) && !maximo)) {
       if (status) {
         status.className = "rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800";
-        status.textContent = "Complete fecha, curso, materia, titulo y nota maxima.";
+        status.textContent = "Complete fecha, curso, materia y detalle. Si habilita puntaje, indique el maximo.";
         status.classList.remove("hidden");
       }
       return;
@@ -1260,9 +1449,11 @@ async function renderTasks(context) {
         course: targetCourse,
         materiaId: data.get("materiaId"),
         fecha: data.get("fecha"),
-        titulo: data.get("titulo"),
-        tipo: data.get("tipo"),
-        maximo: data.get("maximo"),
+        titulo,
+        tipo,
+        maximo,
+        calificable,
+        materiales,
         trimestreId: teacherState.trimesterId
       });
       teacherState.taskMonth = String(data.get("fecha") || todayIso()).slice(0, 7);
@@ -1436,7 +1627,8 @@ async function renderDateGrading(context) {
         : gradeScope === "semana"
           ? nextSchoolDays.includes(itemDate)
           : itemDate === gradeDate;
-      return inAssignedCourse && inRange && !item.interno && !["ser", "auto"].includes(item.tipo);
+      const canBeGraded = !isMaterialActivity(item) || isScoredMaterialActivity(item);
+      return inAssignedCourse && inRange && canBeGraded && !item.interno && !["ser", "auto"].includes(item.tipo);
     })
     .sort((a, b) => {
       const dateOrder = gradeScope === "pendientes"
@@ -1453,6 +1645,8 @@ async function renderDateGrading(context) {
   }
 
   const activity = activities.find((item) => item.id === teacherState.gradeModalActivityId) || null;
+  const noSubmissionLabel = isMaterialActivity(activity) ? "No trajo material" : "No hizo su tarea";
+  const noSubmissionShortLabel = isMaterialActivity(activity) ? "No trajo" : "No hizo";
   const activityCourse = activity ? coursesById[activity.cursoId] : null;
   const [students, gradesMap, attendanceMap] = activity
     ? await Promise.all([
@@ -1556,7 +1750,7 @@ async function renderDateGrading(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -1689,7 +1883,7 @@ async function renderDateGrading(context) {
                                     <button type="button" data-grade-activity="${item.id}" class="group flex w-full items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
                                       <span class="min-w-0 flex-1 px-2 py-1">
                                         <span class="block truncate text-[11px] font-medium leading-tight text-slate-900" title="${escapeHtml(item.titulo || "Sin titulo")}">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-                                        <span class="block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+                                        <span class="block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
                                       </span>
                                       ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
                                     </button>
@@ -1717,7 +1911,7 @@ async function renderDateGrading(context) {
             return `
               <div class="flex items-stretch border-b border-slate-100" style="border-color:${accent}">
                 <div class="min-w-0 flex-1 px-3 py-2.5 sm:px-4" style="background:${subject?.color || "#fff"}">
-                  <p class="truncate text-[10px] font-black uppercase tracking-[.12em] text-slate-500">${showCourse ? `${escapeHtml(activityCourse?.nombre || "")} · ` : ""}${isSaberActivity(activity) ? "Saber" : "Hacer"}</p>
+                  <p class="truncate text-[10px] font-black uppercase tracking-[.12em] text-slate-500">${showCourse ? `${escapeHtml(activityCourse?.nombre || "")} · ` : ""}${activityEvaluationLabel(activity)}</p>
                   <div class="mt-1 flex min-w-0 items-center gap-2">
                     <h3 class="truncate text-sm font-black text-slate-900 sm:text-lg">${escapeHtml(subject?.nombre || activity.materiaId)} - ${escapeHtml(activity.titulo || "Sin titulo")}</h3>
                     <span class="shrink-0 rounded-full bg-white/70 px-2 py-1 text-xs font-black text-school-navy">${activity.maximo || 100} pts</span>
@@ -1802,7 +1996,7 @@ async function renderDateGrading(context) {
                             </div>
                             ${grade ? `
                               <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-black ${gradeTone}">
-                                ${didNotSubmit ? `${icon("ban", "h-4 w-4")}<span class="${listPickerStudent ? "hidden xl:inline" : ""}">No presento</span>` : `${result?.nota ?? "-"}`}
+                                ${didNotSubmit ? `${icon("ban", "h-4 w-4")}<span class="${listPickerStudent ? "hidden xl:inline" : ""}">${isMaterialActivity(activity) ? "No trajo" : "No presento"}</span>` : `${result?.nota ?? "-"}`}
                               </span>
                             ` : `<span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-400">${listPickerStudent ? "-" : "Pendiente"}</span>`}
                           </button>
@@ -1840,7 +2034,7 @@ async function renderDateGrading(context) {
                               }).join("")}
                             </div>
                             <div class="mt-3 grid grid-cols-[1fr_auto] gap-2">
-                              <button type="button" data-list-grade-no-work="${listPickerStudent.id}" class="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-black text-red-700">${icon("ban", "mr-1 inline h-4 w-4")}No hizo su tarea</button>
+                              <button type="button" data-list-grade-no-work="${listPickerStudent.id}" class="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-black text-red-700">${icon("ban", "mr-1 inline h-4 w-4")}${escapeHtml(noSubmissionLabel)}</button>
                               <button type="button" data-close-list-grade class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black text-slate-600">Cerrar</button>
                             </div>
                             <p class="mt-3 hidden rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-black text-green-700" data-list-grade-status></p>
@@ -1867,7 +2061,7 @@ async function renderDateGrading(context) {
                     </div>
                     <div class="mt-3 grid grid-cols-3 gap-2">
                       <button type="button" data-date-grade-prev class="rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-black text-school-navy">${icon("chevron-left", "mr-1 inline h-4 w-4")}Anterior</button>
-                      <button type="button" data-grade-no-work="${currentStudent.id}" class="rounded-xl border border-red-200 bg-red-50 px-2 py-2 text-xs font-black text-red-700">${icon("x-circle", "mr-1 inline h-4 w-4")}No hizo</button>
+                      <button type="button" data-grade-no-work="${currentStudent.id}" class="rounded-xl border border-red-200 bg-red-50 px-2 py-2 text-xs font-black text-red-700">${icon("x-circle", "mr-1 inline h-4 w-4")}${escapeHtml(noSubmissionShortLabel)}</button>
                       <button type="button" data-date-grade-next class="rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-black text-school-navy">Siguiente${icon("chevron-right", "ml-1 inline h-4 w-4")}</button>
                     </div>
                     <p class="mt-3 hidden rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-black text-green-700" data-auto-grade-status></p>
@@ -2098,7 +2292,7 @@ async function renderDateGrading(context) {
     if (status) {
       status.classList.remove("hidden", "border-red-200", "bg-red-50", "text-red-700");
       status.classList.add("border-green-200", "bg-green-50", "text-green-700");
-      status.textContent = "Guardando como no presentado...";
+      status.textContent = isMaterialActivity(activity) ? "Guardando como no trajo..." : "Guardando como no presentado...";
     }
     try {
       const savedGrade = await saveGrade({ activity, student, value: 0 });
@@ -2229,11 +2423,48 @@ function closeNotesModals() {
   teacherState.notesGradeKind = "";
 }
 
-function regularizationActivityLabel(activity) {
-  const subject = findSubject(activity?.materiaId);
-  const date = activity?.fecha ? activity.fecha.split("-").reverse().join("/") : "Sin fecha";
-  const type = activity?.tipo === "examen" || activity?.tipo === "saber" ? "SABER" : "HACER";
-  return `${subject?.corto || subject?.nombre || activity?.materiaId || "Materia"} · ${type} · ${date}`;
+function regularizationSearchKey(value = "") {
+  return String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function regularizationPendingReason(grade, attendanceState = "") {
+  if (grade && Number(grade.valor || 0) > 0) return "";
+  if (attendanceState === "permiso") return "Licencia";
+  if (attendanceState === "falta") return "Falta";
+  if (grade && Number(grade.valor || 0) <= 0) {
+    return ["presente", "atraso"].includes(attendanceState)
+      ? "Asistio y no presento"
+      : "No presento";
+  }
+  return "Sin calificar";
+}
+
+function regularizationPendingPriority(items = []) {
+  const priorities = {
+    Licencia: 0,
+    Falta: 1,
+    "Asistio y no presento": 2,
+    "No presento": 3,
+    "Sin calificar": 4
+  };
+  return items.length
+    ? Math.min(...items.map((item) => priorities[item.pendienteMotivo] ?? 5))
+    : 9;
+}
+
+function regularizationPriorityReason(items = []) {
+  return [...items].sort((a, b) => regularizationPendingPriority([a]) - regularizationPendingPriority([b]))[0]?.pendienteMotivo || "Pendiente";
+}
+
+function regularizationPendingTone(reason = "") {
+  if (reason === "Licencia") return "bg-purple-50 text-purple-700 ring-purple-200";
+  if (reason === "Falta") return "bg-red-50 text-red-700 ring-red-200";
+  if (reason === "Asistio y no presento" || reason === "No presento") return "bg-amber-50 text-amber-800 ring-amber-200";
+  return "bg-slate-100 text-slate-700 ring-slate-200";
 }
 
 function regularizationCourseTabs(context, course) {
@@ -2254,94 +2485,198 @@ function regularizationCourseTabs(context, course) {
   `;
 }
 
-function regularizationStudentCard(student, items, tone = "red", displayNumber = "-") {
-  const toneClass = tone === "amber"
-    ? "border-amber-200 bg-amber-50 text-amber-800"
-    : "border-red-200 bg-red-50 text-red-800";
-  const subjects = [...new Set(items.map((item) => {
-    const subject = findSubject(item.materiaId);
-    return subject?.corto || subject?.nombre || item.materiaId;
-  }).filter(Boolean))];
-  return `
-    <details class="group rounded-xl border border-slate-200 bg-white px-2.5 py-2 shadow-sm transition hover:border-school-green/40">
-      <summary class="flex cursor-pointer list-none items-center justify-between gap-2">
-        <div class="min-w-0">
-          <div class="flex items-center gap-1.5">
-            <span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-school-sky text-[10px] font-black text-school-navy">${escapeHtml(displayNumber)}</span>
-            <h4 class="truncate text-xs font-semibold text-slate-900">${escapeHtml(student.nombre)}</h4>
-          </div>
-          <div class="mt-1 flex flex-wrap gap-1">
-            ${subjects.slice(0, 4).map((subject) => `<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">${escapeHtml(subject)}</span>`).join("")}
-          </div>
-        </div>
-        <span class="shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-black ${toneClass}">${items.length}</span>
-      </summary>
-      <div class="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
-        ${items.map((item) => `
-          <button type="button" data-regularization-grade-activity="${item.id}" data-regularization-grade-student="${student.id}" class="block w-full rounded-lg bg-slate-50 px-2.5 py-1.5 text-left transition hover:bg-green-50 hover:ring-1 hover:ring-school-green">
-            <span class="block truncate text-[11px] font-semibold text-slate-900">${escapeHtml(item.titulo || "Actividad")}</span>
-            <span class="mt-0.5 block text-[10px] font-semibold text-slate-500">${escapeHtml(regularizationActivityLabel(item))}${item.pendienteMotivo ? ` · ${escapeHtml(item.pendienteMotivo)}` : ""}${item.nota ? ` · Nota ${item.nota}` : ""}</span>
-          </button>
-        `).join("")}
-      </div>
-    </details>
-  `;
-}
+function regularizationStudentReportModal({
+  student,
+  activities = [],
+  gradesMap = {},
+  attendanceRows = [],
+  lowLimit = 50,
+  displayNumber = "",
+  subjectId = ""
+}) {
+  if (!student) return "";
 
-function regularizationPendingTable(rows, studentOrderMap = new Map()) {
-  if (!rows.length) {
-    return `<div class="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-4 text-center text-[11px] font-bold text-slate-400 sm:rounded-2xl sm:text-xs">Sin alumnos</div>`;
-  }
+  const isSubjectReport = Boolean(subjectId);
+  const selectedSubject = subjectId ? findSubject(subjectId) : null;
+  const filteredActivities = subjectId
+    ? activities.filter((activity) => activity.materiaId === subjectId)
+    : activities;
+  const reportItems = filteredActivities
+    .map((activity) => {
+      const grade = gradesMap[activity.id]?.[student.id] || null;
+      const attendanceState = attendanceStateForDate(student.id, activity.fecha, attendanceRows);
+      const pendingReason = regularizationPendingReason(grade, attendanceState);
+      return {
+        activity,
+        grade,
+        attendanceState,
+        pendingReason,
+        score: grade ? gradeNumber(grade.nota) : 35
+      };
+    })
+    .sort((a, b) => {
+      const pendingOrder = regularizationPendingPriority(a.pendingReason ? [{ pendienteMotivo: a.pendingReason }] : [])
+        - regularizationPendingPriority(b.pendingReason ? [{ pendienteMotivo: b.pendingReason }] : []);
+      const subjectA = findSubject(a.activity.materiaId)?.nombre || a.activity.materiaId || "";
+      const subjectB = findSubject(b.activity.materiaId)?.nombre || b.activity.materiaId || "";
+      return pendingOrder
+        || subjectA.localeCompare(subjectB, "es", { sensitivity: "base" })
+        || String(b.activity.fecha || "").localeCompare(String(a.activity.fecha || ""));
+    });
+
+  const subjectCount = new Set(reportItems.map((item) => item.activity.materiaId).filter(Boolean)).size;
+  const pendingCount = reportItems.filter((item) => item.pendingReason).length;
+  const overallAverage = reportItems.length
+    ? Math.round(reportItems.reduce((total, item) => total + item.score, 0) / reportItems.length)
+    : 35;
+  const reportGroups = [
+    {
+      id: "saber",
+      label: "Saber",
+      headerClass: "border-amber-200 bg-amber-50 text-amber-900",
+      badgeClass: "bg-amber-100 text-amber-800",
+      items: reportItems.filter((item) => isSaberActivity(item.activity))
+    },
+    {
+      id: "hacer",
+      label: "Hacer",
+      headerClass: "border-green-200 bg-green-50 text-school-green",
+      badgeClass: "bg-green-100 text-school-green",
+      items: reportItems.filter((item) => !isSaberActivity(item.activity) && !isMaterialActivity(item.activity))
+    },
+    {
+      id: "responsabilidad",
+      label: "Responsabilidad",
+      headerClass: "border-blue-200 bg-blue-50 text-blue-900",
+      badgeClass: "bg-blue-100 text-blue-800",
+      items: reportItems.filter((item) => isMaterialActivity(item.activity))
+    }
+  ]
+    .filter((group) => group.items.length)
+    .map((group) => ({
+      ...group,
+      average: Math.round(group.items.reduce((total, item) => total + item.score, 0) / group.items.length)
+    }));
+  const saberGroup = reportGroups.find((group) => group.id === "saber") || null;
+  const hacerGroup = reportGroups.find((group) => group.id === "hacer") || null;
+
   return `
-    <div class="overflow-hidden rounded-xl border border-slate-200 bg-white sm:rounded-2xl">
-      <table class="w-full table-fixed text-left text-[10px] sm:text-[11px]">
-        <thead class="bg-slate-50 text-[10px] font-black text-slate-500">
-          <tr>
-            <th class="w-9 px-1.5 py-1.5 sm:w-12 sm:px-3 sm:py-2">N°</th>
-            <th class="px-1.5 py-1.5 sm:px-2 sm:py-2">Alumno</th>
-            <th class="w-10 px-1.5 py-1.5 text-center sm:w-12 sm:px-3 sm:py-2">Pend.</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-100">
-          ${rows.map(({ student, items }) => {
-            const firstSubject = findSubject(items[0]?.materiaId);
-            const hasAbsent = items.some((item) => item.pendienteMotivo === "Ausente");
-            const numberTone = hasAbsent ? "bg-amber-50 text-amber-700" : "bg-green-50 text-school-green";
-            const displayNumber = studentOrderMap.get(student.id) || "-";
-            return `
-              <tr class="hover:bg-slate-50">
-                <td class="px-1.5 py-1.5 align-top sm:px-3 sm:py-2">
-                  <span class="grid h-6 w-6 place-items-center rounded-md ${numberTone} font-black sm:h-7 sm:w-7 sm:rounded-lg">${escapeHtml(displayNumber)}</span>
-                </td>
-                <td class="min-w-0 px-1.5 py-1.5 sm:px-2 sm:py-2">
-                  <details>
-                    <summary class="cursor-pointer list-none">
-                      <p class="truncate font-bold text-slate-800 sm:font-black">${escapeHtml(student.nombre)}</p>
-                      <p class="mt-0.5 truncate text-[10px] font-bold text-slate-400">${escapeHtml(firstSubject?.corto || firstSubject?.nombre || "Materia")}</p>
-                    </summary>
-                    <div class="mt-1.5 space-y-1">
-                      ${items.map((item) => `
-                        <button type="button" data-regularization-grade-activity="${item.id}" data-regularization-grade-student="${student.id}" class="block w-full rounded-md bg-slate-50 px-1.5 py-1 text-left transition hover:bg-green-50 hover:ring-1 hover:ring-school-green sm:rounded-lg sm:px-2">
-                          <p class="truncate font-bold text-slate-700">${escapeHtml(item.titulo || "Actividad")}</p>
-                          <p class="text-[10px] font-semibold text-slate-400">${escapeHtml(item.pendienteMotivo || "Pendiente")} · ${escapeHtml(regularizationActivityLabel(item))}</p>
-                        </button>
-                      `).join("")}
-                    </div>
-                  </details>
-                </td>
-                <td class="px-1.5 py-1.5 text-center align-top sm:px-3 sm:py-2">
-                  <span class="inline-flex min-w-5 justify-center rounded-md bg-red-50 px-1.5 py-0.5 font-black text-red-600 sm:min-w-6 sm:rounded-lg sm:px-2 sm:py-1">${items.length}</span>
-                </td>
-              </tr>
-            `;
-          }).join("")}
-        </tbody>
-      </table>
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-2 sm:p-5">
+      <section class="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:rounded-3xl">
+        <header class="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5 sm:py-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[9px] font-semibold uppercase tracking-[.14em] text-school-green sm:text-[10px]">${selectedSubject ? `Detalle de ${escapeHtml(selectedSubject.nombre)}` : "Detalle del estudiante"}</p>
+              <h3 class="mt-0.5 truncate text-base font-semibold text-slate-900 sm:text-xl">${escapeHtml(displayNumber)}. ${escapeHtml(student.nombre)}</h3>
+              <p class="mt-1 text-[10px] text-slate-500 sm:text-xs">${selectedSubject ? `Solo ${escapeHtml(selectedSubject.nombre)} · actividades y notas del trimestre` : "Todas las actividades y notas del trimestre"}</p>
+            </div>
+            <button type="button" data-close-regularization-report class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 transition hover:bg-slate-200 sm:h-9 sm:w-9 sm:rounded-xl" aria-label="Cerrar">
+              ${icon("x", "h-4 w-4 sm:h-5 sm:w-5")}
+            </button>
+          </div>
+          ${isSubjectReport ? `
+            <div class="mt-3 grid grid-cols-3 gap-1.5 sm:max-w-lg sm:gap-2">
+              <div class="rounded-lg bg-amber-50 px-2.5 py-2 sm:px-3">
+                <p class="text-[8px] font-medium uppercase text-slate-500 sm:text-[9px]">Saber</p>
+                <p class="mt-0.5 text-base font-semibold sm:text-lg ${saberGroup && saberGroup.average < lowLimit ? "text-red-600" : "text-amber-800"}">${saberGroup ? saberGroup.average : "-"}${saberGroup ? `<span class="text-[9px] font-medium text-slate-400 sm:text-[10px]">/100</span>` : ""}</p>
+              </div>
+              <div class="rounded-lg bg-green-50 px-2.5 py-2 sm:px-3">
+                <p class="text-[8px] font-medium uppercase text-slate-500 sm:text-[9px]">Hacer</p>
+                <p class="mt-0.5 text-base font-semibold sm:text-lg ${hacerGroup && hacerGroup.average < lowLimit ? "text-red-600" : "text-school-green"}">${hacerGroup ? hacerGroup.average : "-"}${hacerGroup ? `<span class="text-[9px] font-medium text-slate-400 sm:text-[10px]">/100</span>` : ""}</p>
+              </div>
+              <div class="rounded-lg bg-red-50 px-2.5 py-2 sm:px-3">
+                <p class="text-[8px] font-medium uppercase text-slate-500 sm:text-[9px]">Pendientes</p>
+                <p class="mt-0.5 text-base font-semibold text-red-600 sm:text-lg">${pendingCount}</p>
+              </div>
+            </div>
+          ` : `
+            <div class="mt-3 grid grid-cols-3 gap-1.5 sm:max-w-lg sm:gap-2">
+              <div class="rounded-lg bg-green-50 px-3 py-2">
+                <p class="text-[9px] font-medium uppercase text-slate-500">Prom. referencial</p>
+                <p class="mt-0.5 text-lg font-semibold ${overallAverage < lowLimit ? "text-red-600" : "text-school-green"}">${overallAverage}<span class="text-[10px] font-medium text-slate-400">/100</span></p>
+              </div>
+              <div class="rounded-lg bg-slate-50 px-3 py-2">
+                <p class="text-[9px] font-medium uppercase text-slate-500">Materias</p>
+                <p class="mt-0.5 text-lg font-semibold text-slate-800">${subjectCount}</p>
+              </div>
+              <div class="rounded-lg bg-red-50 px-3 py-2">
+                <p class="text-[9px] font-medium uppercase text-slate-500">Pendientes</p>
+                <p class="mt-0.5 text-lg font-semibold text-red-600">${pendingCount}</p>
+              </div>
+            </div>
+          `}
+        </header>
+        <div class="min-h-0 flex-1 overflow-auto bg-slate-50/70 p-2.5 sm:p-4">
+          ${reportItems.length ? `
+            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+              <table class="w-full table-fixed text-left text-[9px] sm:text-[11px] ${isSubjectReport ? "min-w-0" : "min-w-[700px]"}">
+                <thead class="sticky top-0 z-10 bg-school-green text-white">
+                  <tr>
+                    ${isSubjectReport ? "" : `<th class="w-32 px-2.5 py-2 font-semibold">Materia</th>`}
+                    <th class="px-2 py-2 font-semibold sm:px-2.5">Actividad</th>
+                    <th class="hidden w-20 px-2 py-2 font-semibold sm:table-cell">Fecha</th>
+                    <th class="hidden w-24 px-2 py-2 font-semibold sm:table-cell">Asistencia</th>
+                    <th class="w-24 px-1.5 py-2 font-semibold sm:w-36 sm:px-2">Estado</th>
+                    <th class="w-12 px-1 py-2 text-center font-semibold sm:w-14 sm:px-2">Nota</th>
+                    <th class="w-11 px-1 py-2 text-center font-semibold sm:w-16 sm:px-2">Editar</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  ${reportGroups.map((group) => `
+                    <tr>
+                      <td colspan="${isSubjectReport ? 6 : 7}" class="border-y px-2.5 py-2 ${group.headerClass}">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <div class="flex items-center gap-2">
+                            <span class="rounded-md px-2 py-1 text-[9px] font-semibold uppercase tracking-[.08em] ${group.badgeClass}">${group.label}</span>
+                            <span class="text-[9px] font-medium sm:text-[10px]">${group.items.length} actividad(es)</span>
+                          </div>
+                          <span class="text-[9px] font-semibold sm:text-[10px]">Prom. ${group.average}/100</span>
+                        </div>
+                      </td>
+                    </tr>
+                    ${group.items.map(({ activity, attendanceState, pendingReason, score }) => {
+                      const subject = findSubject(activity.materiaId);
+                      const pendingTone = regularizationPendingTone(pendingReason);
+                      const scoreTone = pendingReason
+                        ? "bg-red-50 text-red-700"
+                        : score < lowLimit
+                          ? "bg-red-50 text-red-600"
+                          : "bg-green-50 text-school-green";
+                      return `
+                        <tr class="${pendingReason ? "bg-red-50/30" : "bg-white"} hover:bg-green-50/50">
+                          ${isSubjectReport ? "" : `<td class="px-2.5 py-2 font-medium text-slate-700">${escapeHtml(subject?.nombre || activity.materiaId || "Materia")}</td>`}
+                          <td class="px-2 py-2 text-slate-900 sm:px-2.5">
+                            <span class="block leading-tight">${escapeHtml(activity.titulo || "Actividad")}</span>
+                            <span class="mt-1 block truncate text-[8px] leading-tight text-slate-500 sm:hidden">${escapeHtml(activity.fecha ? activity.fecha.split("-").reverse().join("/") : "Sin fecha")} · ${escapeHtml(attendanceState ? attendanceLabel(attendanceState) : "Sin registro")}</span>
+                          </td>
+                          <td class="hidden px-2 py-2 text-slate-500 sm:table-cell">${escapeHtml(activity.fecha ? activity.fecha.split("-").reverse().join("/") : "-")}</td>
+                          <td class="hidden px-2 py-2 text-slate-600 sm:table-cell">${escapeHtml(attendanceState ? attendanceLabel(attendanceState) : "Sin registro")}</td>
+                          <td class="px-1.5 py-2 sm:px-2">
+                            ${pendingReason
+                              ? `<span class="inline-flex max-w-full truncate rounded-md px-1.5 py-1 text-[8px] font-semibold ring-1 ring-inset sm:text-[9px] ${pendingTone}" title="${escapeHtml(pendingReason)}">P · ${escapeHtml(pendingReason)}</span>`
+                              : `<span class="inline-flex max-w-full truncate rounded-md bg-green-50 px-1.5 py-1 text-[8px] font-semibold text-school-green sm:text-[9px]">Presentado</span>`}
+                          </td>
+                          <td class="px-1 py-2 text-center sm:px-2"><span class="inline-flex min-w-7 justify-center rounded-md px-1 py-1 font-semibold sm:min-w-8 sm:px-1.5 ${scoreTone}">${pendingReason ? "P" : score}</span></td>
+                          <td class="px-1 py-2 text-center sm:px-2">
+                            <button type="button" data-regularization-grade-activity="${activity.id}" data-regularization-grade-student="${student.id}" class="inline-grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-school-green transition hover:border-school-green hover:bg-green-50" aria-label="Editar ${escapeHtml(activity.titulo || "nota")}">
+                              ${icon("pencil", "h-3.5 w-3.5")}
+                            </button>
+                          </td>
+                        </tr>
+                      `;
+                    }).join("")}
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          ` : `<div class="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-xs text-slate-500">Todavia no existen actividades revisadas para este alumno.</div>`}
+        </div>
+      </section>
     </div>
   `;
 }
 
-function regularizationGradeModal({ activity, student, currentGrade, displayNumber = "" }) {
+function regularizationGradeModal({ activity, student, currentGrade, displayNumber = "", hasNext = false }) {
   if (!activity || !student) return "";
   const subject = findSubject(activity.materiaId);
   const max = Math.max(1, Math.min(100, Number(activity.maximo || 100)));
@@ -2376,7 +2711,10 @@ function regularizationGradeModal({ activity, student, currentGrade, displayNumb
               <span class="text-xs font-black uppercase tracking-[.14em] text-slate-400">Puntaje obtenido</span>
               <input type="number" min="0" max="${max}" value="${currentValue || ""}" data-regularization-grade-input class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-center text-xl font-black outline-none focus:border-school-green">
             </label>
-            <button type="button" data-save-regularization-grade-input class="w-full rounded-2xl bg-school-green px-4 py-3 text-sm font-black text-white">Guardar nota</button>
+            <div class="grid gap-2 ${hasNext ? "sm:grid-cols-2" : ""}">
+              <button type="button" data-save-regularization-grade-input class="w-full rounded-xl border border-school-green px-3 py-2.5 text-xs font-semibold text-school-green transition hover:bg-green-50">Guardar</button>
+              ${hasNext ? `<button type="button" data-save-next-regularization-grade-input class="w-full rounded-xl bg-school-green px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-school-navy">Guardar y siguiente</button>` : ""}
+            </div>
           `}
           <button type="button" data-regularization-grade-value="0" class="w-full rounded-2xl border border-red-100 bg-red-50 px-4 py-2.5 text-xs font-black text-red-700 transition hover:bg-red-100">No presento</button>
           <p class="hidden rounded-2xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-black text-green-700" data-regularization-grade-status>Guardando...</p>
@@ -2409,7 +2747,7 @@ async function renderRegularization(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -2461,202 +2799,243 @@ async function renderRegularization(context) {
   const regularizationOrderMap = new Map(studentsByName.map((student, index) => [student.id, index + 1]));
   const gradesMap = gradeByActivityAndStudent(gradesList);
   const currentDate = todayIso();
-  const lowLimit = Math.max(35, Math.min(100, Number(teacherState.regularizationLowLimit || 50)));
+  const lowLimit = 50;
   const activitiesToReview = activities
     .filter((item) => course.materias.includes(item.materiaId))
     .filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
+    .filter((item) => !isMaterialActivity(item) || isScoredMaterialActivity(item))
     .filter((item) => !item.fecha || item.fecha <= currentDate)
     .filter((item) => activityHasGrades(item, gradesMap))
     .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
 
   const pendingByStudent = [];
-  const lowByStudent = [];
   studentsByName.forEach((student) => {
     const pending = [];
-    const low = [];
     activitiesToReview.forEach((activity) => {
       const grade = gradesMap[activity.id]?.[student.id];
       const attendanceState = attendanceStateForDate(student.id, activity.fecha, attendanceRows);
-      if (!grade) {
-        pending.push({ ...activity, pendienteMotivo: attendanceState === "falta" ? "Ausente" : "Sin calificar", nota: 35 });
-        return;
-      }
-      if (Number(grade.valor || 0) <= 0) {
-        pending.push({ ...activity, pendienteMotivo: "No presento", nota: 35 });
-        return;
-      }
-      const note = gradeNumber(grade.nota);
-      if (note < lowLimit) low.push({ ...activity, nota: note });
+      const pendingReason = regularizationPendingReason(grade, attendanceState);
+      if (pendingReason) pending.push({ ...activity, pendienteMotivo: pendingReason, nota: 35 });
     });
     if (pending.length) pendingByStudent.push({ student, items: pending });
-    if (low.length) lowByStudent.push({ student, items: low });
   });
 
-  pendingByStudent.sort((a, b) => b.items.length - a.items.length || (regularizationOrderMap.get(a.student.id) || 999) - (regularizationOrderMap.get(b.student.id) || 999));
-  lowByStudent.sort((a, b) => b.items.length - a.items.length || (regularizationOrderMap.get(a.student.id) || 999) - (regularizationOrderMap.get(b.student.id) || 999));
-  const alertedStudents = new Set([...pendingByStudent.map((item) => item.student.id), ...lowByStudent.map((item) => item.student.id)]);
   const pendingTotal = pendingByStudent.reduce((total, item) => total + item.items.length, 0);
-  const lowTotal = lowByStudent.reduce((total, item) => total + item.items.length, 0);
-  const clearSearch = teacherState.regularizationSearch.trim().toLowerCase();
-  const filterReason = teacherState.regularizationFilter;
-  const filteredPending = pendingByStudent
-    .map(({ student, items }) => ({
-      student,
-      items: items.filter((item) => filterReason === "todos" || item.pendienteMotivo === filterReason)
-    }))
-    .filter(({ student, items }) => items.length && (!clearSearch || String(student.nombre || "").toLowerCase().includes(clearSearch)));
-  const responsiveColumnCount = window.innerWidth < 768 ? 1 : window.innerWidth < 1280 ? 2 : 3;
-  const pendingColumns = Array.from({ length: responsiveColumnCount }, (_, column) => filteredPending.filter((_, index) => index % responsiveColumnCount === column));
+  const clearSearch = regularizationSearchKey(teacherState.regularizationSearch);
+  const pendingByStudentMap = new Map(pendingByStudent.map((item) => [item.student.id, item.items]));
+  const subjectIds = (course.materias || []).filter(Boolean);
+  const activitiesBySubject = new Map(subjectIds.map((subjectId) => [
+    subjectId,
+    activitiesToReview.filter((activity) => activity.materiaId === subjectId)
+  ]));
+  const selectedSortSubjectId = subjectIds.includes(teacherState.regularizationSortSubjectId)
+    ? teacherState.regularizationSortSubjectId
+    : "";
+  if (selectedSortSubjectId !== teacherState.regularizationSortSubjectId) {
+    teacherState.regularizationSortSubjectId = "";
+    sessionStorage.removeItem("docenteRegularizacionOrdenMateria");
+  }
+  const matrixRows = studentsByName
+    .filter((student) => !clearSearch || regularizationSearchKey(student.nombre).includes(clearSearch))
+    .map((student) => {
+    const pendingItems = pendingByStudentMap.get(student.id) || [];
+    const summaries = new Map(subjectIds.map((subjectId) => {
+      const subjectActivities = activitiesBySubject.get(subjectId) || [];
+      const subjectPending = pendingItems.filter((activity) => activity.materiaId === subjectId);
+      const scores = subjectActivities.map((activity) => {
+        const grade = gradesMap[activity.id]?.[student.id];
+        return grade ? gradeNumber(grade.nota) : 35;
+      });
+      const lowCount = subjectActivities.reduce((total, activity) => {
+        const grade = gradesMap[activity.id]?.[student.id];
+        return total + (grade && Number(grade.valor || 0) > 0 && gradeNumber(grade.nota) < lowLimit ? 1 : 0);
+      }, 0);
+      return [subjectId, {
+        activityCount: subjectActivities.length,
+        average: scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : null,
+        lowCount,
+        pendingItems: subjectPending
+      }];
+    }));
+    const lowCount = [...summaries.values()].reduce((total, summary) => total + summary.lowCount, 0);
+    return { student, pendingItems, summaries, lowCount };
+  })
+    .sort((a, b) => {
+      if (selectedSortSubjectId) {
+        const summaryA = a.summaries.get(selectedSortSubjectId);
+        const summaryB = b.summaries.get(selectedSortSubjectId);
+        const hasDataA = Boolean(summaryA?.activityCount);
+        const hasDataB = Boolean(summaryB?.activityCount);
+        return Number(hasDataB) - Number(hasDataA)
+          || (summaryA?.average ?? 101) - (summaryB?.average ?? 101)
+          || (summaryB?.lowCount || 0) - (summaryA?.lowCount || 0)
+          || b.pendingItems.length - a.pendingItems.length
+          || String(a.student.nombre || "").localeCompare(String(b.student.nombre || ""), "es", { sensitivity: "base" });
+      }
+      return regularizationPendingPriority(a.pendingItems) - regularizationPendingPriority(b.pendingItems)
+        || b.pendingItems.length - a.pendingItems.length
+        || b.lowCount - a.lowCount
+        || String(a.student.nombre || "").localeCompare(String(b.student.nombre || ""), "es", { sensitivity: "base" });
+    });
+  const regularizationQueue = matrixRows.flatMap(({ student }) => [...(pendingByStudentMap.get(student.id) || [])]
+    .sort((a, b) => regularizationPendingPriority([a]) - regularizationPendingPriority([b])
+      || String(a.fecha || "").localeCompare(String(b.fecha || "")))
+    .map((activity) => ({ activity, student })));
   const selectedRegularizationActivity = activitiesToReview.find((item) => item.id === teacherState.regularizationGradeActivityId) || null;
   const selectedRegularizationStudent = studentsByName.find((item) => item.id === teacherState.regularizationGradeStudentId) || null;
+  const selectedRegularizationReportStudent = studentsByName.find((item) => item.id === teacherState.regularizationReportStudentId) || null;
+  const selectedRegularizationReportSubjectId = subjectIds.includes(teacherState.regularizationReportSubjectId)
+    ? teacherState.regularizationReportSubjectId
+    : "";
+  if (!selectedRegularizationReportSubjectId && teacherState.regularizationReportSubjectId) {
+    teacherState.regularizationReportSubjectId = "";
+  }
   const selectedRegularizationGrade = selectedRegularizationActivity && selectedRegularizationStudent
     ? gradesMap[selectedRegularizationActivity.id]?.[selectedRegularizationStudent.id]
     : null;
+  const currentQueueIndex = regularizationQueue.findIndex(({ activity, student }) => activity.id === selectedRegularizationActivity?.id && student.id === selectedRegularizationStudent?.id);
+  const nextRegularizationTarget = currentQueueIndex >= 0 ? regularizationQueue[currentQueueIndex + 1] || null : null;
 
-  function compactGradeActivityButton(item, widthClass = "") {
-    const subject = findSubject(item.materiaId);
-    const courseItem = coursesById[item.cursoId] || {};
-    const courseNumber = String(courseItem.corto || courseItem.nombre || "").replace(/\D/g, "") || "I";
-    const accent = showCourse ? courseAccent(item.cursoId) : (subject?.color || "#e2e8f0");
-    const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
-    const active = item.id === teacherState.gradeModalActivityId;
-    return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-1.5">
-          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
-        </span>
-        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
-      </button>
-    `;
-  }
-
-  function compactGradeDateCard(dateKey) {
-    const dayActivities = activities.filter((item) => (item.fecha || gradeDate) === dateKey);
-    if (!dayActivities.length) return "";
-    const label = planningDayLabel(dateKey);
-    return `
-      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
-          <div class="min-w-0">
-            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
-            <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
-          </div>
-          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
-        </div>
-        <div class="grid gap-1.5">
-          ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
-        </div>
-      </article>
-    `;
-  }
   container.innerHTML = `
     <section class="space-y-3 sm:space-y-4">
-      <div class="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-soft sm:rounded-3xl sm:p-5">
-        <div class="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between sm:gap-3">
-          <div>
-            <p class="text-[9px] font-black uppercase tracking-[.12em] text-school-green sm:text-[11px] sm:tracking-[.18em]">Regularizacion</p>
-            <h2 class="mt-0.5 text-base font-black text-slate-900 sm:mt-2 sm:text-2xl">${escapeHtml(course.nombre)}</h2>
-            <p class="text-[10px] font-semibold text-slate-500 sm:mt-1 sm:text-sm">${escapeHtml(selectedTrimester().label)} · ${activitiesToReview.length} actividad(es) revisadas</p>
+      <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-4">
+        <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between sm:gap-3">
+          <div class="min-w-0">
+            <p class="text-[9px] font-semibold uppercase tracking-[.12em] text-school-green sm:text-[10px] sm:tracking-[.16em]">Regularizacion</p>
+            <h2 class="mt-0.5 text-lg font-semibold text-slate-900 sm:text-xl">${escapeHtml(course.nombre)}</h2>
+            <p class="mt-0.5 text-[10px] text-slate-500 sm:text-xs">${escapeHtml(selectedTrimester().label)} · ${activitiesToReview.length} actividad(es) revisadas</p>
           </div>
-          <div class="flex flex-col gap-1.5 xl:items-end sm:gap-3">
+          <div class="flex min-w-0 flex-col gap-1.5 lg:items-end sm:gap-2">
             ${regularizationCourseTabs(context, course)}
             <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <span class="inline-flex items-center gap-1 rounded-md border border-green-100 bg-green-50 px-2 py-1 text-[9px] font-black text-school-green sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-[11px]">${icon("calendar-check", "h-3 w-3 sm:h-4 sm:w-4")} ${cacheMeta ? `Copia: ${escapeHtml(cacheMeta.label)}` : "Sin copia local"}</span>
-              <button type="button" data-refresh-regularization-cache class="inline-flex items-center gap-1 rounded-md border border-school-green bg-white px-2 py-1 text-[9px] font-black text-school-green transition hover:bg-school-green hover:text-white sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2 sm:text-xs">
+              <span class="inline-flex items-center gap-1 rounded-md border border-green-100 bg-green-50 px-2 py-1 text-[9px] font-medium text-school-green sm:gap-2 sm:rounded-lg sm:px-3 sm:py-1.5 sm:text-[10px]">${icon("calendar-check", "h-3 w-3 sm:h-3.5 sm:w-3.5")} ${cacheMeta ? `Copia: ${escapeHtml(cacheMeta.label)}` : "Sin copia local"}</span>
+              <button type="button" data-refresh-regularization-cache class="inline-flex items-center gap-1 rounded-md border border-school-green bg-white px-2 py-1 text-[9px] font-semibold text-school-green transition hover:bg-school-green hover:text-white sm:gap-2 sm:rounded-lg sm:px-3 sm:py-1.5 sm:text-[10px]">
                 ${icon("refresh-cw", "h-3 w-3 sm:h-4 sm:w-4")} Actualizar
               </button>
             </div>
           </div>
         </div>
-        <div class="mt-2 grid grid-cols-3 gap-1.5 sm:mt-7 sm:gap-4">
-          <div class="rounded-lg border border-red-100 bg-gradient-to-br from-red-50 to-white p-2 sm:rounded-2xl sm:p-4">
-            <div class="flex items-center gap-1.5 sm:gap-4">
-              <span class="hidden h-9 w-9 shrink-0 place-items-center rounded-xl bg-red-100 text-red-700 sm:grid sm:h-12 sm:w-12 sm:rounded-2xl">${icon("book-x", "h-5 w-5 sm:h-6 sm:w-6")}</span>
-              <div>
-                <p class="text-sm font-black leading-none text-red-700 sm:text-2xl">${pendingByStudent.length} <span class="hidden text-xs text-slate-700 sm:inline sm:text-sm">alumno(s)</span></p>
-                <p class="mt-0.5 text-[9px] font-bold leading-tight text-slate-600 sm:text-xs">${pendingTotal} pend.</p>
-              </div>
-            </div>
-            <div class="mt-1.5 h-0.5 rounded-full bg-red-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-red-600 sm:h-1.5" style="width:${Math.min(100, (pendingByStudent.length / Math.max(studentsByName.length, 1)) * 100)}%"></div></div>
-          </div>
-          <div class="rounded-lg border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-2 sm:rounded-2xl sm:p-4">
-            <div class="flex items-center gap-1.5 sm:gap-4">
-              <span class="hidden h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-700 sm:grid sm:h-12 sm:w-12 sm:rounded-2xl">${icon("user-round", "h-5 w-5 sm:h-6 sm:w-6")}</span>
-              <div>
-                <p class="text-sm font-black leading-none text-amber-700 sm:text-2xl">${lowByStudent.length} <span class="hidden text-xs text-slate-700 sm:inline sm:text-sm">alumno(s)</span></p>
-                <p class="mt-0.5 text-[9px] font-bold leading-tight text-slate-600 sm:text-xs">&lt; ${lowLimit}: ${lowTotal}</p>
-              </div>
-            </div>
-            <div class="mt-1.5 h-0.5 rounded-full bg-amber-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-amber-500 sm:h-1.5" style="width:${Math.min(100, (lowByStudent.length / Math.max(studentsByName.length, 1)) * 100)}%"></div></div>
-          </div>
-          <div class="rounded-lg border border-green-100 bg-gradient-to-br from-green-50 to-white p-2 sm:rounded-2xl sm:p-4">
-            <div class="flex items-center gap-1.5 sm:gap-4">
-              <span class="hidden h-9 w-9 shrink-0 place-items-center rounded-xl bg-green-100 text-school-green sm:grid sm:h-12 sm:w-12 sm:rounded-2xl">${icon("bell", "h-5 w-5 sm:h-6 sm:w-6")}</span>
-              <div>
-                <p class="text-sm font-black leading-none text-school-green sm:text-2xl">${Math.max(0, studentsByName.length - alertedStudents.size)} <span class="hidden text-xs text-slate-700 sm:inline sm:text-sm">alumno(s)</span></p>
-                <p class="mt-0.5 text-[9px] font-bold leading-tight text-slate-600 sm:text-xs">Sin alerta</p>
-              </div>
-            </div>
-            <div class="mt-1.5 h-0.5 rounded-full bg-green-100 sm:mt-4 sm:h-1.5"><div class="h-0.5 rounded-full bg-school-green sm:h-1.5" style="width:${Math.min(100, (Math.max(0, studentsByName.length - alertedStudents.size) / Math.max(studentsByName.length, 1)) * 100)}%"></div></div>
-          </div>
-        </div>
       </div>
 
-      <div class="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-soft sm:rounded-3xl sm:p-5">
-        <div class="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between sm:gap-3">
-          <div>
-            <div class="flex items-center gap-1.5 sm:gap-3">
-              <h3 class="text-sm font-black text-slate-900 sm:text-lg">Actividades pendientes</h3>
-              <span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-black text-red-600 sm:px-3 sm:py-1 sm:text-xs">${pendingTotal}</span>
+      <div class="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-soft sm:rounded-3xl sm:p-4">
+        <div class="flex flex-col gap-2.5 lg:flex-row lg:items-end lg:justify-between">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="text-sm font-semibold text-slate-900 sm:text-base">Seguimiento por estudiante</h3>
+              <span class="rounded-full bg-red-50 px-2 py-0.5 text-[9px] font-semibold text-red-600 sm:text-[10px]">${pendingTotal} pendiente(s)</span>
             </div>
-            <p class="mt-0.5 text-[10px] font-semibold leading-tight text-slate-500 sm:mt-1 sm:text-xs">Ausentes, no presentados y sin calificar.</p>
+            <p class="mt-0.5 text-[9px] leading-tight text-slate-500 sm:text-[10px]">Los alumnos con licencia o actividades pendientes aparecen primero.</p>
           </div>
-          <div class="grid gap-1.5 sm:grid-cols-[minmax(190px,1fr)_auto] sm:gap-2">
-            <label class="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-500 sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm">
+          <label class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-slate-500 focus-within:border-school-green focus-within:bg-white lg:max-w-sm">
               ${icon("search", "h-3.5 w-3.5 sm:h-4 sm:w-4")}
-              <input type="search" value="${escapeHtml(teacherState.regularizationSearch)}" data-regularization-search placeholder="Buscar alumno..." class="w-full bg-transparent text-xs font-semibold outline-none">
-            </label>
-            <select data-regularization-filter class="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700 sm:rounded-xl sm:px-3 sm:py-2 sm:text-xs">
-              <option value="todos" ${filterReason === "todos" ? "selected" : ""}>Filtrar: Todo</option>
-              <option value="No presento" ${filterReason === "No presento" ? "selected" : ""}>No presento</option>
-              <option value="Ausente" ${filterReason === "Ausente" ? "selected" : ""}>Ausente</option>
-              <option value="Sin calificar" ${filterReason === "Sin calificar" ? "selected" : ""}>Sin calificar</option>
-            </select>
-          </div>
+              <input type="search" value="${escapeHtml(teacherState.regularizationSearch)}" data-regularization-search placeholder="Buscar cualquier alumno..." class="min-w-0 flex-1 bg-transparent text-[11px] text-slate-800 outline-none sm:text-xs">
+              ${teacherState.regularizationSearch ? `<button type="button" data-clear-regularization-search class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Limpiar busqueda">${icon("x", "h-3.5 w-3.5")}</button>` : ""}
+          </label>
         </div>
-        <div class="mt-2 grid gap-1.5 md:grid-cols-2 xl:mt-4 xl:grid-cols-3 xl:gap-3">
-          ${filteredPending.length ? pendingColumns.map((column) => regularizationPendingTable(column, regularizationOrderMap)).join("") : emptyState("Sin resultados", "No hay alumnos pendientes con el filtro seleccionado.")}
+        <div class="mt-2 flex flex-wrap gap-1.5 text-[8px] sm:mt-3 sm:text-[9px]">
+          <span class="rounded-md bg-purple-50 px-1.5 py-1 text-purple-700 ring-1 ring-inset ring-purple-200">P · Licencia</span>
+          <span class="rounded-md bg-red-50 px-1.5 py-1 text-red-700 ring-1 ring-inset ring-red-200">P · Falta</span>
+          <span class="rounded-md bg-amber-50 px-1.5 py-1 text-amber-800 ring-1 ring-inset ring-amber-200">P · No presento</span>
+          <span class="rounded-md bg-slate-100 px-1.5 py-1 text-slate-700 ring-1 ring-inset ring-slate-200">P · Sin calificar</span>
+        </div>
+        <div class="mt-2 overflow-x-auto rounded-xl border border-slate-200 sm:mt-3">
+          <table class="w-full table-fixed text-left text-[9px] sm:text-[10px]" style="min-width:${Math.max(880, 400 + subjectIds.length * 92)}px">
+            <thead class="bg-school-green text-white">
+              <tr>
+                <th class="sticky left-0 z-20 w-10 bg-school-green px-2 py-2 text-center font-semibold">N°</th>
+                <th class="sticky left-10 z-20 w-56 bg-school-green px-2.5 py-2 font-semibold">Alumno</th>
+                ${subjectIds.map((subjectId) => {
+                  const subject = findSubject(subjectId);
+                  const active = selectedSortSubjectId === subjectId;
+                  return `
+                    <th class="w-[92px] px-1 py-1.5 text-center font-semibold ${active ? "border-x-2 border-school-gold" : ""}" title="${active ? "Quitar orden de" : "Ordenar por"} ${escapeHtml(subject?.nombre || subjectId)}">
+                      <button type="button" data-regularization-sort-subject="${subjectId}" class="inline-flex w-full items-center justify-center gap-1 rounded-md px-1 py-1 transition ${active ? "bg-white text-school-green" : "text-white hover:bg-white/10"}">
+                        ${escapeHtml(subject?.corto || subject?.nombre || subjectId)}${active ? icon("arrow-up-narrow-wide", "h-3 w-3") : ""}
+                      </button>
+                    </th>
+                  `;
+                }).join("")}
+                <th class="w-16 px-1.5 py-2 text-center font-semibold" title="Cantidad total de notas menores a 50">Bajas</th>
+                <th class="w-28 px-2 py-2 text-center font-semibold">Estado</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${matrixRows.length ? matrixRows.map(({ student, pendingItems, summaries, lowCount }) => {
+                const hasLicense = pendingItems.some((item) => item.pendienteMotivo === "Licencia");
+                const rowBackground = hasLicense ? "bg-purple-50/40" : pendingItems.length ? "bg-red-50/25" : "bg-white";
+                const stickyBackground = hasLicense ? "bg-purple-50" : pendingItems.length ? "bg-red-50" : "bg-white";
+                const primaryReason = regularizationPriorityReason(pendingItems);
+                return `
+                  <tr class="${rowBackground} hover:bg-green-50/60">
+                    <td class="sticky left-0 z-10 px-2 py-1.5 text-center ${stickyBackground}">
+                      <span class="inline-grid h-6 min-w-6 place-items-center rounded-md bg-school-sky px-1 font-semibold text-school-green">${regularizationOrderMap.get(student.id) || "-"}</span>
+                    </td>
+                    <td class="sticky left-10 z-10 px-2.5 py-1.5 ${stickyBackground}">
+                      <button type="button" data-regularization-report-student="${student.id}" class="block w-full truncate text-left font-medium text-slate-900 hover:text-school-green" title="${escapeHtml(student.nombre)}">${escapeHtml(student.nombre)}</button>
+                    </td>
+                    ${subjectIds.map((subjectId) => {
+                      const summary = summaries.get(subjectId);
+                      const activeColumn = selectedSortSubjectId === subjectId ? "border-x-2 border-school-gold bg-yellow-50/70" : "";
+                      if (!summary?.activityCount) return `<td class="px-1 py-1.5 text-center text-slate-300 ${activeColumn}">-</td>`;
+                      if (summary.pendingItems.length) {
+                        const reason = regularizationPriorityReason(summary.pendingItems);
+                        return `
+                          <td class="px-1 py-1 ${activeColumn}">
+                            <button type="button" data-regularization-report-student="${student.id}" data-regularization-report-subject="${subjectId}" class="w-full rounded-md px-1 py-1 text-center ring-1 ring-inset ${regularizationPendingTone(reason)}" title="Ver actividades de ${escapeHtml(findSubject(subjectId)?.nombre || subjectId)}: ${escapeHtml(reason)}">
+                              <span class="block text-[10px] font-semibold">P${summary.pendingItems.length > 1 ? ` ${summary.pendingItems.length}` : ""}</span>
+                              <span class="block truncate text-[7px] leading-tight sm:text-[8px]">${escapeHtml(reason)}</span>
+                            </button>
+                          </td>
+                        `;
+                      }
+                      return `
+                        <td class="px-1 py-1 ${activeColumn}">
+                          <button type="button" data-regularization-report-student="${student.id}" data-regularization-report-subject="${subjectId}" class="w-full rounded-md px-1 py-1 text-center ${summary.average < lowLimit ? "bg-red-50 text-red-600" : "bg-green-50 text-school-green"}" title="Ver actividades de ${escapeHtml(findSubject(subjectId)?.nombre || subjectId)}">
+                            <span class="block text-[10px] font-semibold">${summary.average}</span>
+                            <span class="block text-[7px] leading-tight opacity-70 sm:text-[8px]">${summary.activityCount} act.</span>
+                          </button>
+                        </td>
+                      `;
+                    }).join("")}
+                    <td class="px-1 py-1.5 text-center">
+                      <button type="button" data-regularization-report-student="${student.id}" class="inline-flex min-w-7 justify-center rounded-md px-1.5 py-1 font-semibold ${lowCount ? "bg-red-50 text-red-600" : "bg-slate-50 text-slate-400"}" title="${lowCount} nota(s) menor(es) a 50">${lowCount}</button>
+                    </td>
+                    <td class="px-1.5 py-1.5 text-center">
+                      <button type="button" data-regularization-report-student="${student.id}" class="w-full rounded-md px-1.5 py-1 ${pendingItems.length ? regularizationPendingTone(primaryReason) + " ring-1 ring-inset" : "bg-green-50 text-school-green"}">
+                        <span class="block text-[9px] font-semibold">${pendingItems.length ? `P ${pendingItems.length}` : "Sin pendientes"}</span>
+                        ${pendingItems.length ? `<span class="block truncate text-[7px] leading-tight sm:text-[8px]">${escapeHtml(primaryReason)}</span>` : ""}
+                      </button>
+                    </td>
+                  </tr>
+                `;
+              }).join("") : `
+                <tr>
+                  <td colspan="${subjectIds.length + 4}" class="px-4 py-8 text-center text-xs text-slate-500">No se encontro ningun alumno con esa busqueda.</td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center justify-between gap-1.5 text-[9px] text-slate-500 sm:text-[10px]">
+          <span>Mostrando ${matrixRows.length} de ${studentsByName.length} alumno(s)</span>
+          <span>${selectedSortSubjectId ? `Menor promedio en ${escapeHtml(findSubject(selectedSortSubjectId)?.nombre || selectedSortSubjectId)}` : `${pendingByStudent.length} con pendientes · ${Math.max(0, studentsByName.length - pendingByStudent.length)} sin pendientes`}</span>
         </div>
       </div>
-
-      <div class="rounded-2xl border border-amber-100 bg-white p-3 shadow-soft sm:p-4">
-        <div class="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-          <div>
-            <p class="text-[10px] font-black uppercase tracking-[.16em] text-amber-600">Opcional</p>
-            <h3 class="text-sm font-black text-slate-900 sm:text-base">Notas bajas</h3>
-          </div>
-          <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
-            <label class="flex items-center gap-1 rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-800">
-              Menor a
-              <input type="number" min="35" max="100" value="${lowLimit}" data-regularization-low-limit class="w-14 rounded-md border border-amber-200 bg-white px-1.5 py-0.5 text-center text-[11px] font-black outline-none focus:border-school-green">
-            </label>
-            <button type="button" data-toggle-low-regularization class="rounded-lg px-3 py-1.5 text-[11px] font-black transition ${teacherState.regularizationShowLow ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-800 hover:bg-amber-100"}">
-              ${teacherState.regularizationShowLow ? "Ocultar" : "Ver"} bajas (${lowTotal})
-            </button>
-          </div>
-        </div>
-        ${teacherState.regularizationShowLow ? `
-          <div class="mt-2 grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">
-            ${lowByStudent.length ? lowByStudent.map(({ student, items }) => regularizationStudentCard(student, items, "amber", regularizationOrderMap.get(student.id) || "-")).join("") : emptyState("Sin bajas notas", "No hay calificaciones bajas registradas en las actividades revisadas.")}
-          </div>
-        ` : ""}
-      </div>
+      ${regularizationStudentReportModal({
+        student: selectedRegularizationReportStudent,
+        activities: activitiesToReview,
+        gradesMap,
+        attendanceRows,
+        lowLimit,
+        displayNumber: selectedRegularizationReportStudent ? regularizationOrderMap.get(selectedRegularizationReportStudent.id) || "" : "",
+        subjectId: selectedRegularizationReportSubjectId
+      })}
       ${regularizationGradeModal({
         activity: selectedRegularizationActivity,
         student: selectedRegularizationStudent,
         currentGrade: selectedRegularizationGrade,
-        displayNumber: selectedRegularizationStudent ? regularizationOrderMap.get(selectedRegularizationStudent.id) || "" : ""
+        displayNumber: selectedRegularizationStudent ? regularizationOrderMap.get(selectedRegularizationStudent.id) || "" : "",
+        hasNext: Boolean(nextRegularizationTarget)
       })}
     </section>
   `;
@@ -2664,7 +3043,11 @@ async function renderRegularization(context) {
   container.querySelectorAll("[data-regularization-course]").forEach((button) => {
     button.addEventListener("click", async () => {
       teacherState.selectedCourseId = button.dataset.regularizationCourse;
+      teacherState.regularizationReportStudentId = "";
+      teacherState.regularizationReportSubjectId = "";
+      teacherState.regularizationSortSubjectId = "";
       sessionStorage.setItem("docenteCursoId", teacherState.selectedCourseId);
+      sessionStorage.removeItem("docenteRegularizacionOrdenMateria");
       await renderRegularization(context);
     });
   });
@@ -2675,27 +3058,34 @@ async function renderRegularization(context) {
     await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
     await renderRegularization(context);
   });
-  container.querySelector("[data-toggle-low-regularization]")?.addEventListener("click", async () => {
-    teacherState.regularizationShowLow = !teacherState.regularizationShowLow;
-    sessionStorage.setItem("docenteRegularizacionBajas", teacherState.regularizationShowLow ? "1" : "0");
-    await renderRegularization(context);
-  });
-  container.querySelector("[data-regularization-low-limit]")?.addEventListener("change", async (event) => {
-    teacherState.regularizationLowLimit = Math.max(35, Math.min(100, Number(event.currentTarget.value || 50)));
-    sessionStorage.setItem("docenteRegularizacionLimite", String(teacherState.regularizationLowLimit));
-    await renderRegularization(context);
+  container.querySelectorAll("[data-regularization-sort-subject]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const requestedSubjectId = button.dataset.regularizationSortSubject || "";
+      teacherState.regularizationSortSubjectId = teacherState.regularizationSortSubjectId === requestedSubjectId
+        ? ""
+        : requestedSubjectId;
+      if (teacherState.regularizationSortSubjectId) {
+        sessionStorage.setItem("docenteRegularizacionOrdenMateria", teacherState.regularizationSortSubjectId);
+      } else {
+        sessionStorage.removeItem("docenteRegularizacionOrdenMateria");
+      }
+      await renderRegularization(context);
+    });
   });
   container.querySelector("[data-regularization-search]")?.addEventListener("input", (event) => {
     teacherState.regularizationSearch = event.currentTarget.value || "";
     clearTimeout(regularizationSearchTimer);
-    regularizationSearchTimer = setTimeout(() => {
-      renderRegularization(context);
-    }, 250);
+    regularizationSearchTimer = setTimeout(async () => {
+      await renderRegularization(context);
+      const searchInput = container.querySelector("[data-regularization-search]");
+      searchInput?.focus();
+      searchInput?.setSelectionRange(searchInput.value.length, searchInput.value.length);
+    }, 120);
   });
-  container.querySelector("[data-regularization-filter]")?.addEventListener("change", async (event) => {
-    teacherState.regularizationFilter = event.currentTarget.value || "todos";
-    sessionStorage.setItem("docenteRegularizacionFiltro", teacherState.regularizationFilter);
+  container.querySelector("[data-clear-regularization-search]")?.addEventListener("click", async () => {
+    teacherState.regularizationSearch = "";
     await renderRegularization(context);
+    container.querySelector("[data-regularization-search]")?.focus();
   });
   container.querySelectorAll("[data-regularization-grade-activity]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -2704,15 +3094,27 @@ async function renderRegularization(context) {
       await renderRegularization(context);
     });
   });
+  container.querySelectorAll("[data-regularization-report-student]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      teacherState.regularizationReportStudentId = button.dataset.regularizationReportStudent || "";
+      teacherState.regularizationReportSubjectId = button.dataset.regularizationReportSubject || "";
+      await renderRegularization(context);
+    });
+  });
+  container.querySelector("[data-close-regularization-report]")?.addEventListener("click", async () => {
+    teacherState.regularizationReportStudentId = "";
+    teacherState.regularizationReportSubjectId = "";
+    await renderRegularization(context);
+  });
   container.querySelector("[data-close-regularization-grade]")?.addEventListener("click", async () => {
     teacherState.regularizationGradeActivityId = "";
     teacherState.regularizationGradeStudentId = "";
     await renderRegularization(context);
   });
-  const saveRegularizationGrade = async (value) => {
+  const saveRegularizationGrade = async (value, advance = false) => {
     if (!selectedRegularizationActivity || !selectedRegularizationStudent) return;
     const status = container.querySelector("[data-regularization-grade-status]");
-    container.querySelectorAll("[data-regularization-grade-value], [data-save-regularization-grade-input]").forEach((item) => { item.disabled = true; });
+    container.querySelectorAll("[data-regularization-grade-value], [data-save-regularization-grade-input], [data-save-next-regularization-grade-input]").forEach((item) => { item.disabled = true; });
     if (status) {
       status.classList.remove("hidden");
       status.textContent = "Guardando nota...";
@@ -2720,16 +3122,16 @@ async function renderRegularization(context) {
     try {
       const savedGrade = await saveGrade({ activity: selectedRegularizationActivity, student: selectedRegularizationStudent, value });
       upsertTeacherNotesSnapshotGrade(context, selectedRegularizationActivity, savedGrade);
-      if (status) status.textContent = "Nota guardada";
-      teacherState.regularizationGradeActivityId = "";
-      teacherState.regularizationGradeStudentId = "";
+      if (status) status.textContent = advance && nextRegularizationTarget ? "Nota guardada. Abriendo siguiente..." : "Nota guardada";
+      teacherState.regularizationGradeActivityId = advance && nextRegularizationTarget ? nextRegularizationTarget.activity.id : "";
+      teacherState.regularizationGradeStudentId = advance && nextRegularizationTarget ? nextRegularizationTarget.student.id : "";
       await renderRegularization(context);
     } catch (error) {
       if (status) {
         status.className = "rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700";
         status.textContent = error.message || "No se pudo guardar.";
       }
-      container.querySelectorAll("[data-regularization-grade-value], [data-save-regularization-grade-input]").forEach((item) => { item.disabled = false; });
+      container.querySelectorAll("[data-regularization-grade-value], [data-save-regularization-grade-input], [data-save-next-regularization-grade-input]").forEach((item) => { item.disabled = false; });
     }
   };
   container.querySelectorAll("[data-regularization-grade-value]").forEach((button) => {
@@ -2740,6 +3142,10 @@ async function renderRegularization(context) {
   container.querySelector("[data-save-regularization-grade-input]")?.addEventListener("click", async () => {
     const input = container.querySelector("[data-regularization-grade-input]");
     await saveRegularizationGrade(Number(input?.value || 0));
+  });
+  container.querySelector("[data-save-next-regularization-grade-input]")?.addEventListener("click", async () => {
+    const input = container.querySelector("[data-regularization-grade-input]");
+    await saveRegularizationGrade(Number(input?.value || 0), true);
   });
   refreshIcons();
 }
@@ -2768,7 +3174,7 @@ async function renderNotes(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -2832,8 +3238,8 @@ async function renderNotes(context) {
   const subjectActivities = subjectActivitiesAll
     .filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
     .filter((item) => activityHasGrades(item, gradesMap));
-  const tasks = subjectActivities.filter((item) => item.tipo !== "examen");
-  const exams = subjectActivities.filter((item) => item.tipo === "examen");
+  const tasks = subjectActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item));
+  const exams = subjectActivities.filter(isSaberActivity);
   const serColspan = 5 + serCriteria.length;
   const selectedCriterion = serCriteria.find((item) => item.id === teacherState.notesCriterionId) || null;
   const autoGradeActivity = {
@@ -2899,7 +3305,7 @@ async function renderNotes(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -3282,7 +3688,7 @@ async function renderSummary(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -3358,7 +3764,7 @@ async function renderSummary(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>
@@ -3510,7 +3916,7 @@ async function renderTeacherSchedule(context) {
       <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${isSaberActivity(item) ? "Saber" : "Hacer"} · ${item.maximo || 100} pts</span>
+          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
         </span>
         ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
       </button>

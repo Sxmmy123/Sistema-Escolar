@@ -19,17 +19,17 @@ function teacherCoursesCards(context) {
   const subjectIds = [...new Set(context.courses.flatMap((course) => course.materias || []))];
   return `
     <div>
-      <p class="mb-2 text-[11px] font-black text-slate-500">Cursos asignados</p>
-      <div class="flex flex-wrap gap-2">
-        ${context.courses.map((course) => `<span class="rounded-full bg-school-sky px-3 py-1.5 text-[11px] font-black text-school-navy">${escapeHtml(course.corto || course.nombre)}</span>`).join("")}
+      <p class="mb-1.5 text-[10px] font-semibold text-slate-500 sm:mb-2 sm:text-[11px] sm:font-black">Cursos asignados</p>
+      <div class="flex flex-wrap gap-1.5 sm:gap-2">
+        ${context.courses.map((course) => `<span class="rounded-full bg-school-sky px-2.5 py-1 text-[10px] font-bold text-school-navy sm:px-3 sm:py-1.5 sm:text-[11px] sm:font-black">${escapeHtml(course.corto || course.nombre)}</span>`).join("")}
       </div>
     </div>
     <div>
-      <p class="mb-2 text-[11px] font-black text-slate-500">Materias asignadas</p>
-      <div class="flex flex-wrap gap-2">
+      <p class="mb-1.5 text-[10px] font-semibold text-slate-500 sm:mb-2 sm:text-[11px] sm:font-black">Materias asignadas</p>
+      <div class="flex flex-wrap gap-1.5 sm:gap-2">
         ${subjectIds.map((subjectId) => {
           const subject = findSubject(subjectId);
-          return `<span class="rounded-full px-3 py-1.5 text-[11px] font-black text-slate-700" style="background:${subject?.color || "#e2e8f0"}">${escapeHtml(subject?.corto || subject?.nombre || subjectId)}</span>`;
+          return `<span class="rounded-full px-2.5 py-1 text-[10px] font-bold text-slate-700 sm:px-3 sm:py-1.5 sm:text-[11px] sm:font-black" style="background:${subject?.color || "#e2e8f0"}">${escapeHtml(subject?.corto || subject?.nombre || subjectId)}</span>`;
         }).join("")}
       </div>
     </div>
@@ -58,9 +58,10 @@ function closeTrimesterConfirm() {
 function renderDashboardTrimester(context) {
   const holder = document.querySelector("[data-teacher-dashboard-trimesters]");
   if (!holder) return;
+  const shortLabels = ["1ro", "2do", "3er"];
   setText("[data-teacher-active-trimester]", selectedTrimester().label);
-  holder.innerHTML = TRIMESTERS.map((trimester) => `
-    <button type="button" data-dashboard-trimester="${trimester.id}" class="shrink-0 rounded-xl border px-3 py-1.5 text-xs font-black transition ${trimester.id === teacherState.trimesterId ? "border-school-green bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/40"}">${escapeHtml(trimester.label)}</button>
+  holder.innerHTML = TRIMESTERS.map((trimester, index) => `
+    <button type="button" data-dashboard-trimester="${trimester.id}" class="shrink-0 rounded-lg border px-2 py-1 text-[10px] font-bold transition sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs sm:font-black ${trimester.id === teacherState.trimesterId ? "border-school-green bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/40"}"><span class="sm:hidden">${shortLabels[index]}</span><span class="hidden sm:inline">${escapeHtml(trimester.label)}</span></button>
   `).join("");
   holder.querySelectorAll("[data-dashboard-trimester]").forEach((button) => {
     button.addEventListener("click", () => openTrimesterConfirm(button.dataset.dashboardTrimester));
@@ -104,7 +105,7 @@ export async function renderDashboard(context) {
   const activities = (await Promise.all(context.courses.map((course) => listActivities(course.id, teacherState.trimesterId))))
     .flat()
     .filter((activity) => courseById[activity.cursoId]?.materias.includes(activity.materiaId));
-  const pendingTasks = activities.filter((activity) => String(activity.fecha || "") >= todayIso()).length;
+  const pendingTasks = activities.filter((activity) => !["material", "materiales"].includes(String(activity.tipo || "").toLowerCase()) && String(activity.fecha || "") >= todayIso()).length;
   setText('[data-teacher-count="classesToday"]', String(todayRows.length));
   setText('[data-teacher-count="activities"]', String(activities.length));
   setText('[data-teacher-count="tasks"]', String(pendingTasks));

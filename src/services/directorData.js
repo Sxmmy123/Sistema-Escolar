@@ -1,14 +1,21 @@
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
   query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
   where
 } from "firebase/firestore";
 import { COURSES, DAYS, SUBJECTS, findCourse, findSubject } from "../data/catalog.js";
-import { firestore } from "../firebase/client.js";
+import { auth, firestore } from "../firebase/client.js";
 import { todayIso } from "./teacherData.js";
+
+const DIRECTOR_ATTENDANCE_SETTINGS_ID = "asistencia";
 
 function rows(snapshot) {
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -41,9 +48,104 @@ export async function listDirectorSchedules() {
 }
 
 export async function listDirectorAttendance({ fecha = todayIso(), trimestreId = "" } = {}) {
-  const filters = [where("fecha", "==", fecha)];
-  if (trimestreId) filters.push(where("trimestreId", "==", trimestreId));
-  const snap = await getDocs(query(collection(firestore, "asistencias"), ...filters));
+  const snap = await getDocs(query(collection(firestore, "asistencias"), where("fecha", "==", fecha)));
+  return rows(snap).filter((item) => !trimestreId || (item.trimestreId || "t1") === trimestreId);
+}
+
+export async function listDirectorAttendanceRange({ fechaInicio, fechaFin, trimestreId = "" } = {}) {
+  if (!fechaInicio || !fechaFin) return [];
+  const snap = await getDocs(query(
+    collection(firestore, "asistencias"),
+    where("fecha", ">=", fechaInicio),
+    where("fecha", "<=", fechaFin)
+  ));
+  return rows(snap).filter((item) => !trimestreId || (item.trimestreId || "t1") === trimestreId);
+}
+
+export async function listDirectorAttendanceByTrimester(trimestreId = "t1") {
+  const snap = await getDocs(query(
+    collection(firestore, "asistencias"),
+    where("trimestreId", "==", trimestreId)
+  ));
+  return rows(snap);
+}
+
+export async function getDirectorAttendanceSettings() {
+  const localValue = Number(localStorage.getItem("directorLimiteFaltas") ?? 4);
+  const fallback = Number.isFinite(localValue) ? Math.max(0, Math.min(30, Math.round(localValue))) : 4;
+  try {
+    const snap = await getDoc(doc(firestore, "configuracion_director", DIRECTOR_ATTENDANCE_SETTINGS_ID));
+    if (!snap.exists()) return { limiteFaltas: fallback, guardadoEnFirebase: false };
+    const value = Number(snap.data()?.limiteFaltas);
+    const limiteFaltas = Number.isFinite(value) ? Math.max(0, Math.min(30, Math.round(value))) : fallback;
+    localStorage.setItem("directorLimiteFaltas", String(limiteFaltas));
+    return { id: snap.id, ...snap.data(), limiteFaltas, guardadoEnFirebase: true };
+  } catch {
+    return { limiteFaltas: fallback, guardadoEnFirebase: false };
+  }
+}
+
+export async function saveDirectorAttendanceSettings(limiteFaltas = 4) {
+  const safeLimit = Math.max(0, Math.min(30, Math.round(Number(limiteFaltas) || 0)));
+  const payload = {
+    limiteFaltas: safeLimit,
+    actualizadoPorUid: auth.currentUser?.uid || "",
+    actualizadoPor: auth.currentUser?.email || "director",
+    updatedAt: serverTimestamp()
+  };
+  localStorage.setItem("directorLimiteFaltas", String(safeLimit));
+  try {
+    await setDoc(doc(firestore, "configuracion_director", DIRECTOR_ATTENDANCE_SETTINGS_ID), payload, { merge: true });
+    return { id: DIRECTOR_ATTENDANCE_SETTINGS_ID, ...payload, guardadoEnFirebase: true };
+  } catch {
+    return { id: DIRECTOR_ATTENDANCE_SETTINGS_ID, ...payload, guardadoEnFirebase: false };
+  }
+}
+
+export async function sendStudentAttendanceWarning({
+  student,
+  course,
+  trimestreId = "t1",
+  faltas = 0,
+  limiteFaltas = 4,
+  mensaje = "",
+  activa = false
+}) {
+  if (!student?.id) throw new Error("No se encontro el alumno para enviar la advertencia.");
+  const safeAbsences = Math.max(0, Math.round(Number(faltas) || 0));
+  const safeLimit = Math.max(0, Math.round(Number(limiteFaltas) || 0));
+  const safeMessage = String(mensaje || "").trim().slice(0, 500);
+  const isActive = activa === true;
+  if (isActive && !safeMessage) throw new Error("Escribe el mensaje antes de activar la advertencia.");
+  const payload = {
+    tipo: "advertencia_asistencia",
+    alumnoId: student.id,
+    alumnoNombre: student.nombre || "Alumno",
+    cursoId: student.cursoId || course?.id || "",
+    cursoNombre: course?.nombre || courseName(student.cursoId),
+    trimestreId,
+    faltas: safeAbsences,
+    limiteFaltas: safeLimit,
+    mensaje: safeMessage,
+    activa: isActive,
+    creadaPorUid: auth.currentUser?.uid || "",
+    creadaPor: auth.currentUser?.email || "director",
+    updatedAt: serverTimestamp()
+  };
+  await updateDoc(doc(firestore, "alumnos", student.id), {
+    advertenciaAsistencia: payload,
+    updatedAt: serverTimestamp()
+  });
+  return payload;
+}
+
+export async function listDirectorRecentAttendance(limitCount = 800) {
+  const safeLimit = Math.max(1, Math.min(1500, Number(limitCount) || 800));
+  const snap = await getDocs(query(
+    collection(firestore, "asistencias"),
+    orderBy("fecha", "desc"),
+    limit(safeLimit)
+  ));
   return rows(snap);
 }
 
@@ -51,7 +153,7 @@ export async function listDirectorActivities(trimestreId = "") {
   const filters = [where("activo", "==", true)];
   if (trimestreId) filters.push(where("trimestreId", "==", trimestreId));
   const snap = await getDocs(query(collection(firestore, "actividades"), ...filters));
-  return rows(snap).filter((item) => !item.interno);
+  return rows(snap).filter((item) => !item.interno && !["material", "materiales"].includes(String(item.tipo || "").toLowerCase()));
 }
 
 export async function listDirectorGrades(trimestreId = "") {
@@ -122,7 +224,12 @@ export function assignmentText(assignments = {}) {
 
 export function calculateCourseGrades({ students = [], activities = [], grades = [], courseId = "" } = {}) {
   const courseStudents = students.filter((student) => student.cursoId === courseId && student.activo !== false);
-  const courseActivities = activities.filter((activity) => activity.cursoId === courseId && activity.activo !== false);
+  const startedActivityIds = new Set(grades.map((grade) => grade.actividadId).filter(Boolean));
+  const courseActivities = activities.filter((activity) => (
+    activity.cursoId === courseId &&
+    activity.activo !== false &&
+    startedActivityIds.has(activity.id)
+  ));
   const gradeByKey = new Map(grades.map((grade) => [`${grade.actividadId}|${grade.alumnoId}`, grade]));
   if (!courseStudents.length || !courseActivities.length) {
     return { courseId, average: 0, approved: 0, risk: 0, pending: 0, totalCells: courseStudents.length * courseActivities.length };

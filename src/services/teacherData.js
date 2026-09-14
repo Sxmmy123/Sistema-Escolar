@@ -23,6 +23,16 @@ function currentUserLabel() {
   return sessionStorage.getItem("sesionUsuario") || auth.currentUser?.email || "docente";
 }
 
+function normalizeMaterialItems(items = []) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => ({
+      cantidad: Math.max(1, Math.min(999, Math.round(Number(item?.cantidad) || 1))),
+      material: String(item?.material || "").trim().slice(0, 120)
+    }))
+    .filter((item) => item.material);
+}
+
 function scheduleCacheKey(context = {}) {
   const uid = context.uid || currentUid() || "docente";
   const courseIds = (context.courses || []).map((course) => course.id).sort().join("_") || "sin_cursos";
@@ -516,17 +526,26 @@ export async function listActivities(courseId, trimestreId = "") {
     .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) || String(a.titulo || "").localeCompare(String(b.titulo || "")));
 }
 
-export async function saveActivity({ course, materiaId, fecha, titulo, tipo, maximo, trimestreId = "t1" }) {
-  const id = activityDocId(course.id, materiaId, fecha, titulo);
+export async function saveActivity({ course, materiaId, fecha, titulo, tipo, maximo, calificable = false, materiales = [], trimestreId = "t1" }) {
   const subject = findSubject(materiaId);
+  const isMaterial = ["material", "materiales"].includes(String(tipo || "").toLowerCase());
+  const scoreEnabled = isMaterial && Boolean(calificable);
+  const materialItems = isMaterial ? normalizeMaterialItems(materiales) : [];
+  if (isMaterial && !materialItems.length) throw new Error("Agregue al menos un material.");
+  const cleanTitle = isMaterial
+    ? materialItems.map((item) => item.material).join(", ")
+    : String(titulo || "").trim();
+  const id = activityDocId(course.id, materiaId, fecha, cleanTitle);
   const payload = {
     cursoId: course.id,
     materiaId,
     trimestreId,
     fecha,
-    titulo: String(titulo || "").trim(),
+    titulo: cleanTitle,
     tipo: tipo || "tarea",
-    maximo: Number(maximo || 100),
+    maximo: isMaterial && !scoreEnabled ? 0 : Number(maximo || 100),
+    calificable: scoreEnabled,
+    materiales: materialItems,
     creadoPorUid: currentUid(),
     creadoPor: currentUserLabel(),
     activo: true,
@@ -537,7 +556,7 @@ export async function saveActivity({ course, materiaId, fecha, titulo, tipo, max
     tipo: "actividades",
     accion: "crear",
     detalle: `Creo ${payload.tipo} ${payload.titulo} en ${course.nombre} - ${subject?.nombre || materiaId}`,
-    datos: { actividadId: id, cursoId: course.id, materiaId, trimestreId, fecha, maximo: payload.maximo }
+    datos: { actividadId: id, cursoId: course.id, materiaId, trimestreId, fecha, maximo: payload.maximo, calificable: payload.calificable, cantidadMateriales: materialItems.length }
   });
   return { id, ...payload };
 }
@@ -569,17 +588,26 @@ export async function saveInternalActivity({ course, materiaId, titulo, tipo, ma
   return { id, ...payload };
 }
 
-export async function updateActivity({ activity, course, materiaId, fecha, titulo, tipo, maximo, trimestreId = "t1" }) {
+export async function updateActivity({ activity, course, materiaId, fecha, titulo, tipo, maximo, calificable = false, materiales = [], trimestreId = "t1" }) {
   if (!activity?.id) throw new Error("Actividad invalida.");
   const subject = findSubject(materiaId);
+  const isMaterial = ["material", "materiales"].includes(String(tipo || "").toLowerCase());
+  const scoreEnabled = isMaterial && Boolean(calificable);
+  const materialItems = isMaterial ? normalizeMaterialItems(materiales) : [];
+  if (isMaterial && !materialItems.length) throw new Error("Agregue al menos un material.");
+  const cleanTitle = isMaterial
+    ? materialItems.map((item) => item.material).join(", ")
+    : String(titulo || "").trim();
   const payload = {
     cursoId: course.id,
     materiaId,
     trimestreId,
     fecha,
-    titulo: String(titulo || "").trim(),
+    titulo: cleanTitle,
     tipo: tipo || "tarea",
-    maximo: Number(maximo || 100),
+    maximo: isMaterial && !scoreEnabled ? 0 : Number(maximo || 100),
+    calificable: scoreEnabled,
+    materiales: materialItems,
     updatedAt: serverTimestamp()
   };
   await updateDoc(doc(firestore, "actividades", activity.id), payload);
@@ -587,7 +615,7 @@ export async function updateActivity({ activity, course, materiaId, fecha, titul
     tipo: "actividades",
     accion: "editar",
     detalle: `Edito ${payload.tipo} ${payload.titulo} en ${course.nombre} - ${subject?.nombre || materiaId}`,
-    datos: { actividadId: activity.id, cursoId: course.id, materiaId, trimestreId, fecha, maximo: payload.maximo }
+    datos: { actividadId: activity.id, cursoId: course.id, materiaId, trimestreId, fecha, maximo: payload.maximo, calificable: payload.calificable, cantidadMateriales: materialItems.length }
   });
   return { id: activity.id, ...activity, ...payload };
 }

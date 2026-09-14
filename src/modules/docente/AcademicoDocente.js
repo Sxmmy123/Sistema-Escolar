@@ -72,6 +72,15 @@ export function isSaberActivity(activity = {}) {
   return ["examen", "saber"].includes(String(activity.tipo || "").toLowerCase());
 }
 
+export function isMaterialActivity(activity = {}) {
+  return ["material", "materiales"].includes(String(activity.tipo || "").toLowerCase());
+}
+
+export function isScoredMaterialActivity(activity = {}) {
+  const scoreEnabled = activity.calificable === true || activity.calificable === 1 || activity.calificable === "true";
+  return isMaterialActivity(activity) && scoreEnabled && Number(activity.maximo || 0) > 0;
+}
+
 export function isAttendanceValue(state) {
   return ["presente", "atraso", "permiso"].includes(state);
 }
@@ -112,14 +121,29 @@ export function responsibilityScore(tasks, studentId, gradesMap) {
   return gradeNumber((presented * 100) / tasks.length);
 }
 
+export function materialResponsibilityScore(materials, studentId, gradesMap) {
+  const scoredMaterials = materials.filter(isScoredMaterialActivity);
+  const possible = scoredMaterials.reduce((total, material) => total + Math.max(Number(material.maximo || 0), 0), 0);
+  if (!possible) return null;
+  const obtained = scoredMaterials.reduce((total, material) => {
+    const maximum = Math.max(Number(material.maximo || 0), 0);
+    const rawValue = Number(gradesMap[material.id]?.[studentId]?.valor ?? 0);
+    const safeValue = Number.isFinite(rawValue) ? Math.max(0, Math.min(maximum, rawValue)) : 0;
+    return total + safeValue;
+  }, 0);
+  return gradeNumber((obtained * 100) / possible);
+}
+
 export function calculateStudentTerm(student, activities, gradesMap, attendanceRows, serExtras = [], autoGrade = null) {
-  const tasks = activities.filter((activity) => !isSaberActivity(activity));
+  const materials = activities.filter(isMaterialActivity);
+  const tasks = activities.filter((activity) => !isSaberActivity(activity) && !isMaterialActivity(activity));
   const exams = activities.filter(isSaberActivity);
   const hacer100 = averageGrades(tasks.map((activity) => studentActivityGrade(activity, student.id, gradesMap)));
   const saber100 = averageGrades(exams.map((activity) => studentActivityGrade(activity, student.id, gradesMap)));
   const asistencia100 = attendanceScore(student.id, attendanceRows);
   const puntualidad100 = punctualityScore(student.id, attendanceRows);
-  const responsabilidad100 = responsibilityScore(tasks, student.id, gradesMap);
+  const materialScore = materialResponsibilityScore(materials, student.id, gradesMap);
+  const responsabilidad100 = materialScore ?? responsibilityScore(tasks, student.id, gradesMap);
   const ser100 = averageGrades([asistencia100, puntualidad100, responsabilidad100, ...serExtras]);
   const auto100 = autoGrade ?? 35;
   const ser10 = weightedGrade(ser100, 10);
@@ -130,6 +154,7 @@ export function calculateStudentTerm(student, activities, gradesMap, attendanceR
   return {
     tasks,
     exams,
+    materials,
     asistencia100,
     puntualidad100,
     responsabilidad100,

@@ -47,7 +47,7 @@ export function exportNotesToExcel({
   studentActivityGrade,
   calculateStudentTerm
 }) {
-  const tasks = subjectActivities.filter((item) => item.tipo !== "examen");
+  const tasks = subjectActivities.filter((item) => !["examen", "saber", "material", "materiales"].includes(String(item.tipo || "").toLowerCase()));
   const exams = subjectActivities.filter((item) => item.tipo === "examen");
   const examColumns = exams.length ? exams : [{ id: "__sin_examenes", titulo: "Sin examenes", maximo: 100 }];
   const taskColumns = tasks.length ? tasks : [{ id: "__sin_tareas", titulo: "Sin tareas", maximo: 100 }];

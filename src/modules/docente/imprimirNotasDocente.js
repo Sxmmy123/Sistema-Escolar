@@ -1,5 +1,5 @@
 ﻿import { findSubject } from "../../data/catalog.js";
-import { gradeByActivityAndStudent, isSaberActivity, studentActivityGrade } from "./AcademicoDocente.js";
+import { gradeByActivityAndStudent, isMaterialActivity, isSaberActivity, studentActivityGrade } from "./AcademicoDocente.js";
 import { escapeHtml } from "./UtilidadesDocente.js";
 
 const SCHOOL_NAME = "ECOLOGICA NUEVA BOLIVIA";
@@ -80,7 +80,7 @@ function subjectSheet({
     .filter((item) => Object.keys(gradesMap[item.id] || {}).length > 0);
   const serColumns = splitColumns(serCriteriaRaw, 1, 4, "ser");
   const saberColumns = splitColumns(gradedActivities.filter(isSaberActivity), 3, 6, "saber");
-  const hacerColumns = splitColumns(gradedActivities.filter((item) => !isSaberActivity(item)), 3, 7, "hacer");
+  const hacerColumns = splitColumns(gradedActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item)), 3, 7, "hacer");
   const noteCount = 3 + serColumns.length + 2 + saberColumns.length + 2 + hacerColumns.length + 2 + 2 + 3;
   const fullSpan = 2 + noteCount;
   const areaColspan = Math.max(4, fullSpan - 14);

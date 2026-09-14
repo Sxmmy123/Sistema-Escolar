@@ -69,6 +69,15 @@ function isSaberActivity(activity = {}) {
   return ["examen", "saber"].includes(String(activity.tipo || "").toLowerCase());
 }
 
+function isMaterialActivity(activity = {}) {
+  return ["material", "materiales"].includes(String(activity.tipo || "").toLowerCase());
+}
+
+function isScoredMaterialActivity(activity = {}) {
+  const scoreEnabled = activity.calificable === true || activity.calificable === 1 || activity.calificable === "true";
+  return isMaterialActivity(activity) && scoreEnabled && Number(activity.maximo || 0) > 0;
+}
+
 function isAttendanceValue(state) {
   return ["presente", "atraso", "permiso", "licencia"].includes(String(state || "").toLowerCase());
 }
@@ -115,14 +124,29 @@ function responsibilityScore(tasks, studentId, gradesMap) {
   return gradeNumber((presented * 100) / tasks.length);
 }
 
+function materialResponsibilityScore(materials, studentId, gradesMap) {
+  const scoredMaterials = materials.filter(isScoredMaterialActivity);
+  const possible = scoredMaterials.reduce((total, material) => total + Math.max(Number(material.maximo || 0), 0), 0);
+  if (!possible) return null;
+  const obtained = scoredMaterials.reduce((total, material) => {
+    const maximum = Math.max(Number(material.maximo || 0), 0);
+    const rawValue = Number(gradesMap[material.id]?.[studentId]?.valor ?? 0);
+    const safeValue = Number.isFinite(rawValue) ? Math.max(0, Math.min(maximum, rawValue)) : 0;
+    return total + safeValue;
+  }, 0);
+  return gradeNumber((obtained * 100) / possible);
+}
+
 function calculateStudentTerm(student, activities, gradesMap, attendanceRows, serExtras = [], autoGrade = null) {
-  const tasks = activities.filter((activity) => !isSaberActivity(activity));
+  const materials = activities.filter(isMaterialActivity);
+  const tasks = activities.filter((activity) => !isSaberActivity(activity) && !isMaterialActivity(activity));
   const exams = activities.filter(isSaberActivity);
   const hacer100 = averageGrades(tasks.map((activity) => studentActivityGrade(activity, student.id, gradesMap)));
   const saber100 = averageGrades(exams.map((activity) => studentActivityGrade(activity, student.id, gradesMap)));
   const asistencia100 = attendanceScore(student.id, attendanceRows);
   const puntualidad100 = punctualityScore(student.id, attendanceRows);
-  const responsabilidad100 = responsibilityScore(tasks, student.id, gradesMap);
+  const materialScore = materialResponsibilityScore(materials, student.id, gradesMap);
+  const responsabilidad100 = materialScore ?? responsibilityScore(tasks, student.id, gradesMap);
   const ser100 = averageGrades([asistencia100, puntualidad100, responsabilidad100, ...serExtras]);
   const auto100 = autoGrade ?? 35;
   const ser10 = weightedGrade(ser100, 10);
@@ -235,9 +259,14 @@ export async function getStudentDashboardData() {
   const grades = allGrades.filter((grade) => (grade.trimestreId || "t1") === trimesterId);
   const attendance = allAttendance.filter((item) => (item.trimestreId || "t1") === trimesterId);
   const gradeByActivity = new Map(grades.map((grade) => [grade.actividadId, grade]));
+  const storedAttendanceWarning = context.student.advertenciaAsistencia;
+  const attendanceWarning = storedAttendanceWarning?.activa === true && storedAttendanceWarning?.trimestreId === trimesterId
+    ? storedAttendanceWarning
+    : null;
 
-  const programmed = activities.filter((activity) => !activity.interno && String(activity.fecha || "") >= now);
-  const missing = activities.filter((activity) => !activity.interno && String(activity.fecha || "") < now && !gradeByActivity.has(activity.id));
+  const materials = activities.filter((activity) => !activity.interno && isMaterialActivity(activity) && String(activity.fecha || "") >= now);
+  const programmed = activities.filter((activity) => !activity.interno && !isMaterialActivity(activity) && String(activity.fecha || "") >= now);
+  const missing = activities.filter((activity) => !activity.interno && !isMaterialActivity(activity) && String(activity.fecha || "") < now && !gradeByActivity.has(activity.id));
   const attendanceCount = attendance.length;
   const presentCount = attendance.filter((item) => isAttendanceValue(item.estado)).length;
   const bulletin = buildBulletin({ student: context.student, activities, grades, attendance, trimesterId });
@@ -249,9 +278,11 @@ export async function getStudentDashboardData() {
     activities,
     grades,
     gradeByActivity,
+    materials,
     programmed,
     missing,
     attendance,
+    attendanceWarning,
     attendancePercent: attendanceCount ? Math.round((presentCount / attendanceCount) * 100) : 0,
     bulletin
   };

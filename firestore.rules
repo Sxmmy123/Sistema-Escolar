@@ -90,8 +90,11 @@ service cloud.firestore {
     }
 
     match /alumnos/{id} {
-      allow read: if true;
+      allow get: if true;
+      allow list: if signedIn();
       allow create, update, delete: if isAdmin();
+      allow update: if isDirector() && request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(["advertenciaAsistencia", "updatedAt"]);
     }
 
     match /docentes/{id} {
@@ -106,6 +109,11 @@ service cloud.firestore {
       allow update: if signedIn() && request.auth.uid == id && onlyAccountEmailFields() && validAccountPreferences();
     }
 
+    match /configuracion_director/{id} {
+      allow read: if isAdmin() || isDirector();
+      allow create, update: if isAdmin() || isDirector();
+      allow delete: if isAdmin();
+    }
 
     match /preferencias_docente/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin() || isDirector());

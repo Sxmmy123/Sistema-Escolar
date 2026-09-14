@@ -36,12 +36,12 @@ export const teacherState = {
   notesGradeStudentId: "",
   notesGradeKind: "",
   notesGradeGuided: false,
-  regularizationShowLow: sessionStorage.getItem("docenteRegularizacionBajas") === "1",
-  regularizationLowLimit: Number(sessionStorage.getItem("docenteRegularizacionLimite") || 50),
   regularizationSearch: "",
-  regularizationFilter: sessionStorage.getItem("docenteRegularizacionFiltro") || "todos",
+  regularizationSortSubjectId: sessionStorage.getItem("docenteRegularizacionOrdenMateria") || "",
   regularizationGradeActivityId: "",
-  regularizationGradeStudentId: ""
+  regularizationGradeStudentId: "",
+  regularizationReportStudentId: "",
+  regularizationReportSubjectId: ""
 };
 
 export function selectedTrimester() {
@@ -77,6 +77,8 @@ export function setActiveTrimester(trimesterId, options = {}) {
   teacherState.notesCriterionId = "";
   teacherState.notesGradeActivityId = "";
   teacherState.regularizationGradeActivityId = "";
+  teacherState.regularizationReportStudentId = "";
+  teacherState.regularizationReportSubjectId = "";
   saveActiveTrimester(options.context || teacherState.context);
 }
 

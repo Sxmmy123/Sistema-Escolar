@@ -41,13 +41,21 @@ const navItems = {
   ]
 };
 
-function navLink([label, href, iconName], activeRoute, compact = false) {
+function navLink([label, href, iconName], activeRoute, compact = false, teacherSidebar = false) {
   const active = href === `#${activeRoute}`;
-  const size = compact ? "gap-2 rounded-xl px-2.5 py-2 text-[12px]" : "gap-2 rounded-xl px-3 py-2 text-sm";
+  const size = compact
+    ? teacherSidebar ? "gap-2.5 rounded-lg px-2.5 py-2 text-[12px]" : "gap-2 rounded-xl px-2.5 py-2 text-[12px]"
+    : "gap-2 rounded-xl px-3 py-2 text-sm";
+  const activeClass = teacherSidebar
+    ? "is-active border-school-green/25 bg-green-50 font-bold text-school-green"
+    : "border-school-gold/60 bg-school-navy text-white shadow-soft";
+  const idleClass = teacherSidebar
+    ? "border-transparent text-slate-600 hover:border-school-green/20 hover:bg-school-sky hover:text-school-navy"
+    : "border-transparent text-slate-600 hover:border-school-green/20 hover:bg-school-sky hover:text-school-navy";
   return `
-    <a href="${href}" class="flex items-center border font-black transition ${size} ${active ? "border-school-gold/60 bg-school-navy text-white shadow-soft" : "border-transparent text-slate-600 hover:border-school-green/20 hover:bg-school-sky hover:text-school-navy"}">
-      ${icon(iconName, compact ? "h-4 w-4" : "h-4 w-4")}
-      <span>${label}</span>
+    <a href="${href}" title="${label}" ${active ? 'aria-current="page"' : ""} class="${teacherSidebar ? "teacher-sidebar-link min-h-9 font-semibold" : "font-black"} flex items-center border transition ${size} ${active ? activeClass : idleClass}">
+      <span class="teacher-sidebar-icon grid shrink-0 place-items-center">${icon(iconName, compact ? "h-4 w-4" : "h-4 w-4")}</span>
+      <span class="teacher-sidebar-copy min-w-0 truncate leading-tight">${label}</span>
     </a>
   `;
 }
@@ -56,44 +64,48 @@ function sidebarNav(items, activeRoute, title, mode = "desktop") {
   const isMobile = mode === "mobile";
   return `
     <div class="flex h-full min-h-0 flex-col overflow-hidden">
-      <div class="flex shrink-0 items-center ${isMobile ? "justify-between" : "justify-start"} gap-3">
-        <a href="#/docente" class="flex min-w-0 items-center gap-3">
-          <span class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-white shadow-soft ring-1 ring-amber-900/10"><img src="${SCHOOL_LOGO}" alt="Escudo Nueva Bolivia" class="h-full w-full object-contain p-1" /></span>
-          <span class="min-w-0">
-            <span class="block truncate text-xs font-black text-school-bark">Colegio Nueva Bolivia</span>
-            <span class="block text-[10px] font-bold text-slate-500">Sistema escolar</span>
+      <div class="teacher-sidebar-brand flex shrink-0 items-center justify-between gap-2">
+        <a href="#/docente" class="teacher-sidebar-home flex min-w-0 items-center gap-2.5" title="Unidad Educativa Nueva Bolivia">
+          <span class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white shadow-soft ring-1 ring-amber-900/10"><img src="${SCHOOL_LOGO}" alt="Escudo Nueva Bolivia" class="h-full w-full object-contain p-1" /></span>
+          <span class="teacher-sidebar-brand-copy min-w-0">
+            <span class="block truncate text-xs font-bold text-school-bark">U.E. Nueva Bolivia</span>
+            <span class="block text-[9px] font-semibold text-slate-500">Sistema escolar</span>
           </span>
         </a>
-        ${isMobile ? `<button class="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-slate-600" data-action="close-menu" aria-label="Cerrar menu">${icon("x", "h-5 w-5")}</button>` : ""}
+        ${isMobile
+          ? `<button class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600" data-action="close-menu" aria-label="Cerrar menu">${icon("x", "h-4 w-4")}</button>`
+          : `<button class="teacher-sidebar-collapse grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-school-green/30 hover:bg-green-50 hover:text-school-green" data-action="toggle-sidebar-collapse" aria-label="Contraer menu" aria-expanded="true" title="Contraer menu">${icon("chevron-left", "h-4 w-4")}</button>`}
       </div>
 
-      <div class="my-3 h-px shrink-0 bg-amber-900/10"></div>
+      <div class="my-2.5 h-px shrink-0 bg-amber-900/10"></div>
 
-      <div class="min-h-0 flex-1 overflow-y-auto pr-1">
-        <nav class="grid gap-1">
-          ${items.slice(0, 5).map((item) => navLink(item, activeRoute, true)).join("")}
+      <div class="teacher-sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+        <nav class="grid gap-0.5">
+          ${items.slice(0, 5).map((item) => navLink(item, activeRoute, true, true)).join("")}
         </nav>
 
-        <p class="mt-4 px-2.5 text-[9px] font-black uppercase tracking-[.18em] text-slate-400">Otros</p>
-        <nav class="mt-1.5 grid gap-1">
-          ${items.slice(5).map((item) => navLink(item, activeRoute, true)).join("")}
+        <p class="teacher-sidebar-section-label mt-3 px-2.5 text-[9px] font-bold uppercase tracking-[.14em] text-slate-400">Otros</p>
+        <nav class="mt-1 grid gap-0.5">
+          ${items.slice(5).map((item) => navLink(item, activeRoute, true, true)).join("")}
         </nav>
       </div>
 
-      <div class="mt-3 shrink-0 rounded-2xl border border-amber-900/10 bg-white p-2 shadow-soft">
+      <div class="teacher-sidebar-account mt-2.5 shrink-0 rounded-xl border border-amber-900/10 bg-white p-2 shadow-soft">
         <div class="flex items-center gap-2">
-          <span class="grid h-8 w-8 place-items-center rounded-xl bg-school-sky text-school-navy">${icon("user-round", "h-4 w-4")}</span>
-          <div class="min-w-0">
-            <p class="truncate text-xs font-black text-school-bark" data-current-user-name>${title}</p>
-            <p class="text-[10px] font-bold text-slate-500">Docente</p>
+          <span class="teacher-sidebar-user-icon grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-school-sky text-school-navy">${icon("user-round", "h-4 w-4")}</span>
+          <div class="teacher-sidebar-user-copy min-w-0">
+            <p class="truncate text-xs font-bold text-school-bark" data-current-user-name>${title}</p>
+            <p class="text-[9px] font-semibold text-slate-500">Docente</p>
           </div>
         </div>
-        <button class="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-school-green/20 bg-green-50 px-3 py-2 text-xs font-black text-school-green transition hover:bg-green-100" data-action="open-account-settings">
-          ${icon("settings", "h-3.5 w-3.5")} Cuenta
+        <div class="teacher-sidebar-actions mt-2 grid ${isMobile ? "grid-cols-2" : "grid-cols-1"} gap-1.5">
+        <button class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-school-green/20 bg-green-50 px-2 py-1.5 text-[11px] font-bold text-school-green transition hover:bg-green-100" data-action="open-account-settings" title="Cuenta">
+          ${icon("settings", "h-3.5 w-3.5")} <span class="teacher-sidebar-action-copy">Cuenta</span>
         </button>
-        <button class="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-xs font-black text-white transition hover:bg-red-700" data-action="logout">
-          ${icon("log-out", "h-3.5 w-3.5")} Salir
+        <button class="flex w-full items-center justify-center gap-1.5 rounded-lg bg-red-600 px-2 py-1.5 text-[11px] font-bold text-white transition hover:bg-red-700" data-action="logout" title="Salir">
+          ${icon("log-out", "h-3.5 w-3.5")} <span class="teacher-sidebar-action-copy">Salir</span>
         </button>
+        </div>
       </div>
     </div>
   `;
@@ -147,31 +159,31 @@ export function appShell(role, activeRoute, content) {
 
   if (role === "docente") {
     return `
-      <div class="min-h-screen bg-transparent lg:pl-48">
-        <aside class="fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh w-48 overflow-hidden border-r border-amber-900/10 bg-white/95 p-3 shadow-soft backdrop-blur lg:block">
+      <div class="teacher-shell min-h-screen bg-transparent">
+        <aside class="teacher-sidebar fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh overflow-hidden border-r border-amber-900/10 bg-white/95 p-3 shadow-soft backdrop-blur lg:block" data-desktop-sidebar aria-label="Navegacion docente">
           ${sidebarNav(items, activeRoute, title, "desktop")}
         </aside>
 
         <header class="sticky top-0 z-30 border-b border-amber-900/10 bg-white/90 shadow-sm backdrop-blur lg:hidden">
-          <div class="flex items-center justify-between gap-3 px-4 py-3">
+          <div class="flex h-14 items-center justify-between gap-3 px-3">
             <a href="#/docente" class="flex min-w-0 items-center gap-3 font-black text-school-bark">
-              <span class="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl bg-white shadow-soft ring-1 ring-amber-900/10"><img src="${SCHOOL_LOGO}" alt="Escudo Nueva Bolivia" class="h-full w-full object-contain p-1" /></span>
-              <span class="truncate">Docente</span>
+              <span class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white shadow-soft ring-1 ring-amber-900/10"><img src="${SCHOOL_LOGO}" alt="Escudo Nueva Bolivia" class="h-full w-full object-contain p-1" /></span>
+              <span class="truncate text-sm">Panel docente</span>
             </a>
-            <button class="grid h-10 w-10 place-items-center rounded-2xl border border-amber-900/10 bg-white text-school-navy" data-action="open-menu" aria-label="Abrir menu">
-              ${icon("menu", "h-5 w-5")}
+            <button class="grid h-9 w-9 place-items-center rounded-lg border border-amber-900/10 bg-white text-school-navy" data-action="open-menu" aria-label="Abrir menu" aria-expanded="false">
+              ${icon("menu", "h-4 w-4")}
             </button>
           </div>
         </header>
 
-        <aside class="fixed inset-y-0 left-0 z-50 h-dvh max-h-dvh w-72 -translate-x-full overflow-hidden border-r border-amber-900/10 bg-white p-4 shadow-2xl transition-transform duration-300 lg:hidden" data-sidebar>
+        <aside class="fixed inset-y-0 left-0 z-50 h-dvh max-h-dvh w-[252px] max-w-[84vw] -translate-x-full overflow-hidden border-r border-amber-900/10 bg-white p-3 shadow-2xl transition-transform duration-300 lg:hidden" data-sidebar aria-label="Navegacion docente" aria-hidden="true">
           ${sidebarNav(items, activeRoute, title, "mobile")}
         </aside>
         <div class="fixed inset-0 z-40 hidden bg-slate-950/40 lg:hidden" data-sidebar-backdrop></div>
         ${accountSettingsModal()}
 
-        <main class="mx-auto max-w-7xl px-4 py-4 ${docenteMainFixedClass}">${content}</main>
-        <footer class="mx-auto max-w-7xl px-4 pb-4 text-xs font-bold text-slate-400 ${isDocenteDashboard ? "lg:hidden" : ""}">${APP_VERSION}</footer>
+        <main class="mx-auto max-w-7xl px-2.5 py-2.5 sm:px-4 sm:py-4 ${docenteMainFixedClass}">${content}</main>
+        <footer class="mx-auto max-w-7xl px-2.5 pb-3 text-[10px] font-semibold text-slate-400 sm:px-4 ${isDocenteDashboard ? "lg:hidden" : ""}">${APP_VERSION}</footer>
       </div>
     `;
   }
