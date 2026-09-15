@@ -15,6 +15,7 @@ import {
   studentActivityGrade
 } from "./AcademicoDocente.js";
 import { teacherState } from "./EstadoDocente.js";
+import { openTeacherBulletinPrintModal } from "./imprimirBoletinDocente.js";
 import { compactSubjectName, emptyState, escapeHtml, refreshIcons } from "./UtilidadesDocente.js";
 
 function selectedCourse(context = teacherState.context) {
@@ -161,9 +162,14 @@ export async function renderBulletin(context) {
           </div>
           <div class="flex flex-col gap-2 lg:items-end">
             ${courseTabs(context, course)}
-            <button type="button" data-refresh-bulletin class="inline-flex items-center justify-center gap-2 rounded-xl bg-school-green px-3 py-2 text-xs font-black text-white shadow-soft transition hover:bg-school-navy sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">
-              ${icon("refresh-cw", "h-4 w-4")} Actualizar boletin
-            </button>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" data-print-bulletin class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-school-green/30 bg-green-50 px-3 py-2 text-xs font-semibold text-school-green transition hover:bg-green-100 sm:flex-none sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">
+                ${icon("printer", "h-4 w-4")} Imprimir
+              </button>
+              <button type="button" data-refresh-bulletin class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-school-green px-3 py-2 text-xs font-semibold text-white shadow-soft transition hover:bg-school-navy sm:flex-none sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">
+                ${icon("refresh-cw", "h-4 w-4")} Actualizar boletin
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -181,6 +187,16 @@ export async function renderBulletin(context) {
       teacherState.selectedCourseId = button.dataset.bulletinCourse;
       sessionStorage.setItem("docenteCursoId", teacherState.selectedCourseId);
       await renderBulletin(context);
+    });
+  });
+
+  container.querySelector("[data-print-bulletin]")?.addEventListener("click", () => {
+    openTeacherBulletinPrintModal({
+      course,
+      students,
+      snapshotsByTerm,
+      activeTrimesterId: teacherState.trimesterId,
+      teacherName: context?.teacher?.nombre || context?.profile?.nombre || context?.user?.displayName || "Docente"
     });
   });
 
