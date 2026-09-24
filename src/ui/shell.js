@@ -79,7 +79,7 @@ function sidebarNav(items, activeRoute, title, mode = "desktop") {
 
       <div class="my-2.5 h-px shrink-0 bg-amber-900/10"></div>
 
-      <div class="teacher-sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+      <div class="teacher-sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1" data-sidebar-scroll>
         <nav class="grid gap-0.5">
           ${items.slice(0, 5).map((item) => navLink(item, activeRoute, true, true)).join("")}
         </nav>
@@ -106,6 +106,56 @@ function sidebarNav(items, activeRoute, title, mode = "desktop") {
           ${icon("log-out", "h-3.5 w-3.5")} <span class="teacher-sidebar-action-copy">Salir</span>
         </button>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function studentNavLink([label, href, iconName], activeRoute) {
+  const active = href === `#${activeRoute}`;
+  return `
+    <a href="${href}" title="${label}" ${active ? 'aria-current="page"' : ""} class="student-sidebar-link ${active ? "is-active border-school-green/25 bg-green-50 text-school-green" : "border-transparent text-slate-600 hover:border-school-green/20 hover:bg-school-sky hover:text-school-green"} flex min-h-10 items-center gap-2.5 rounded-lg border px-3 py-2 text-[12px] font-semibold transition">
+      <span class="grid h-5 w-5 shrink-0 place-items-center">${icon(iconName, "h-4 w-4")}</span>
+      <span class="min-w-0 truncate leading-tight">${label}</span>
+    </a>
+  `;
+}
+
+function studentSidebarNav(items, activeRoute, mode = "desktop") {
+  const isMobile = mode === "mobile";
+  return `
+    <div class="flex h-full min-h-0 flex-col overflow-hidden">
+      <div class="flex shrink-0 items-center justify-between gap-2">
+        <a href="#/alumno" class="flex min-w-0 items-center gap-2.5" title="Unidad Educativa Nueva Bolivia">
+          <span class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white shadow-soft ring-1 ring-amber-900/10"><img src="${SCHOOL_LOGO}" alt="Escudo Nueva Bolivia" class="h-full w-full object-contain p-1" /></span>
+          <span class="min-w-0">
+            <span class="block truncate text-xs font-bold text-school-bark">U.E. Nueva Bolivia</span>
+            <span class="block text-[9px] font-semibold text-slate-500">Sistema escolar</span>
+          </span>
+        </a>
+        ${isMobile ? `<button class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 transition hover:bg-slate-200" data-action="close-menu" aria-label="Cerrar menu">${icon("x", "h-4 w-4")}</button>` : ""}
+      </div>
+
+      <div class="my-2.5 h-px shrink-0 bg-amber-900/10"></div>
+
+      <div class="student-sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1" data-sidebar-scroll>
+        <p class="px-3 pb-1.5 text-[9px] font-bold uppercase tracking-[.14em] text-slate-400">Mi espacio</p>
+        <nav class="grid gap-1" aria-label="Secciones del alumno">
+          ${items.map((item) => studentNavLink(item, activeRoute)).join("")}
+        </nav>
+      </div>
+
+      <div class="mt-3 shrink-0 rounded-xl border border-amber-900/10 bg-white p-2 shadow-soft">
+        <div class="flex items-center gap-2">
+          <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-school-sky text-school-green">${icon("graduation-cap", "h-4 w-4")}</span>
+          <div class="min-w-0">
+            <p class="truncate text-xs font-bold text-school-bark">Cuenta escolar</p>
+            <p class="text-[9px] font-semibold text-slate-500">Estudiante</p>
+          </div>
+        </div>
+        <button class="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-red-600 px-2 py-1.5 text-[11px] font-bold text-white transition hover:bg-red-700" data-action="logout">
+          ${icon("log-out", "h-3.5 w-3.5")} Salir
+        </button>
       </div>
     </div>
   `;
@@ -182,8 +232,41 @@ export function appShell(role, activeRoute, content) {
         <div class="fixed inset-0 z-40 hidden bg-slate-950/40 lg:hidden" data-sidebar-backdrop></div>
         ${accountSettingsModal()}
 
-        <main class="mx-auto max-w-7xl px-2.5 py-2.5 sm:px-4 sm:py-4 ${docenteMainFixedClass}">${content}</main>
+        <main class="mx-auto max-w-7xl px-2.5 py-2.5 sm:px-4 sm:py-4 ${docenteMainFixedClass}" data-teacher-ui>${content}</main>
         <footer class="mx-auto max-w-7xl px-2.5 pb-3 text-[10px] font-semibold text-slate-400 sm:px-4 ${isDocenteDashboard ? "lg:hidden" : ""}">${APP_VERSION}</footer>
+      </div>
+    `;
+  }
+
+  if (role === "alumno") {
+    return `
+      <div class="student-shell min-h-screen bg-transparent">
+        <aside class="student-sidebar fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh overflow-hidden border-r border-amber-900/10 bg-white/95 p-3 shadow-soft backdrop-blur lg:block" aria-label="Navegacion del alumno">
+          ${studentSidebarNav(items, activeRoute, "desktop")}
+        </aside>
+
+        <header class="sticky top-0 z-30 border-b border-amber-900/10 bg-white/90 shadow-sm backdrop-blur lg:hidden">
+          <div class="flex h-14 items-center justify-between gap-3 px-3">
+            <a href="#/alumno" class="flex min-w-0 items-center gap-2.5 text-school-bark">
+              <span class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white shadow-soft ring-1 ring-amber-900/10"><img src="${SCHOOL_LOGO}" alt="Escudo Nueva Bolivia" class="h-full w-full object-contain p-1" /></span>
+              <span class="min-w-0">
+                <span class="block truncate text-sm font-bold">Panel del estudiante</span>
+                <span class="block text-[9px] font-semibold text-slate-500">U.E. Nueva Bolivia</span>
+              </span>
+            </a>
+            <button class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-amber-900/10 bg-white text-school-green shadow-sm" data-action="open-menu" aria-label="Abrir menu" aria-expanded="false">
+              ${icon("menu", "h-4 w-4")}
+            </button>
+          </div>
+        </header>
+
+        <aside class="fixed inset-y-0 left-0 z-50 h-dvh max-h-dvh w-[232px] max-w-[84vw] -translate-x-full overflow-hidden border-r border-amber-900/10 bg-white p-3 shadow-2xl transition-transform duration-300 lg:hidden" data-sidebar aria-label="Navegacion del alumno" aria-hidden="true">
+          ${studentSidebarNav(items, activeRoute, "mobile")}
+        </aside>
+        <div class="fixed inset-0 z-40 hidden bg-slate-950/40 backdrop-blur-[1px] lg:hidden" data-sidebar-backdrop aria-hidden="true"></div>
+
+        <main class="mx-auto max-w-7xl px-2.5 py-2.5 sm:px-4 sm:py-4">${content}</main>
+        <footer class="mx-auto max-w-7xl px-2.5 pb-3 text-[10px] font-semibold text-slate-400 sm:px-4">${APP_VERSION}</footer>
       </div>
     `;
   }

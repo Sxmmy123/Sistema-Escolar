@@ -1,6 +1,7 @@
 ﻿import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -8,6 +9,7 @@
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
   where
 } from "firebase/firestore";
 import { COURSES, DAYS, SUBJECTS, findCourse, findSubject, periodsForCourse } from "../data/catalog.js";
@@ -165,10 +167,17 @@ function normalizeCourses(data = {}) {
     .filter((item) => item.cursoId);
 }
 
+function localIsoDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function todayIso(offset = 0) {
   const date = new Date();
   date.setDate(date.getDate() + offset);
-  return date.toISOString().slice(0, 10);
+  return localIsoDate(date);
 }
 
 export const TRIMESTERS = [
@@ -176,6 +185,14 @@ export const TRIMESTERS = [
   { id: "t2", label: "2do trimestre" },
   { id: "t3", label: "3er trimestre" }
 ];
+
+export const DELIVERY_STATES = {
+  ON_TIME: "a_tiempo",
+  LATE: "tardia",
+  NOT_SUBMITTED: "no_presento",
+  LICENSE_PENDING: "pendiente_licencia",
+  UNREVIEWED: "sin_revisar"
+};
 
 function timestampMillis(value) {
   if (!value) return 0;
@@ -450,7 +467,7 @@ export function nextSchoolDayInfo() {
   return {
     dayId,
     label,
-    iso: date.toISOString().slice(0, 10)
+    iso: localIsoDate(date)
   };
 }
 
@@ -544,11 +561,10 @@ export async function saveActivity({ course, materiaId, fecha, titulo, tipo, max
     titulo: cleanTitle,
     tipo: tipo || "tarea",
     maximo: isMaterial && !scoreEnabled ? 0 : Number(maximo || 100),
-    calificable: scoreEnabled,
-    materiales: materialItems,
+    ...(isMaterial ? { calificable: scoreEnabled, materiales: materialItems } : {}),
     creadoPorUid: currentUid(),
-    creadoPor: currentUserLabel(),
-    activo: true,
+    createdAt: serverTimestamp(),
+    estadoRevision: "sin_iniciar",
     updatedAt: serverTimestamp()
   };
   await setDoc(doc(firestore, "actividades", id), payload, { merge: true });
@@ -556,7 +572,15 @@ export async function saveActivity({ course, materiaId, fecha, titulo, tipo, max
     tipo: "actividades",
     accion: "crear",
     detalle: `Creo ${payload.tipo} ${payload.titulo} en ${course.nombre} - ${subject?.nombre || materiaId}`,
-    datos: { actividadId: id, cursoId: course.id, materiaId, trimestreId, fecha, maximo: payload.maximo, calificable: payload.calificable, cantidadMateriales: materialItems.length }
+    datos: {
+      actividadId: id,
+      cursoId: course.id,
+      materiaId,
+      trimestreId,
+      fecha,
+      maximo: payload.maximo,
+      ...(isMaterial ? { calificable: scoreEnabled, cantidadMateriales: materialItems.length } : {})
+    }
   });
   return { id, ...payload };
 }
@@ -574,8 +598,8 @@ export async function saveInternalActivity({ course, materiaId, titulo, tipo, ma
     maximo: Number(maximo || 100),
     interno: true,
     creadoPorUid: currentUid(),
-    creadoPor: currentUserLabel(),
-    activo: true,
+    createdAt: serverTimestamp(),
+    estadoRevision: "cerrada",
     updatedAt: serverTimestamp()
   };
   await setDoc(doc(firestore, "actividades", id), payload, { merge: true });
@@ -606,8 +630,8 @@ export async function updateActivity({ activity, course, materiaId, fecha, titul
     titulo: cleanTitle,
     tipo: tipo || "tarea",
     maximo: isMaterial && !scoreEnabled ? 0 : Number(maximo || 100),
-    calificable: scoreEnabled,
-    materiales: materialItems,
+    calificable: isMaterial ? scoreEnabled : deleteField(),
+    materiales: isMaterial ? materialItems : deleteField(),
     updatedAt: serverTimestamp()
   };
   await updateDoc(doc(firestore, "actividades", activity.id), payload);
@@ -615,9 +639,33 @@ export async function updateActivity({ activity, course, materiaId, fecha, titul
     tipo: "actividades",
     accion: "editar",
     detalle: `Edito ${payload.tipo} ${payload.titulo} en ${course.nombre} - ${subject?.nombre || materiaId}`,
-    datos: { actividadId: activity.id, cursoId: course.id, materiaId, trimestreId, fecha, maximo: payload.maximo, calificable: payload.calificable, cantidadMateriales: materialItems.length }
+    datos: {
+      actividadId: activity.id,
+      cursoId: course.id,
+      materiaId,
+      trimestreId,
+      fecha,
+      maximo: payload.maximo,
+      ...(isMaterial ? { calificable: scoreEnabled, cantidadMateriales: materialItems.length } : {})
+    }
   });
-  return { id: activity.id, ...activity, ...payload };
+  const updatedActivity = {
+    ...activity,
+    id: activity.id,
+    cursoId: course.id,
+    materiaId,
+    trimestreId,
+    fecha,
+    titulo: cleanTitle,
+    tipo: tipo || "tarea",
+    maximo: isMaterial && !scoreEnabled ? 0 : Number(maximo || 100),
+    ...(isMaterial ? { calificable: scoreEnabled, materiales: materialItems } : {})
+  };
+  if (!isMaterial) {
+    delete updatedActivity.calificable;
+    delete updatedActivity.materiales;
+  }
+  return updatedActivity;
 }
 
 export async function deleteActivity(activity) {
@@ -643,6 +691,32 @@ export function normalizeGrade(value, maximo = 100) {
   return { valor: raw, porcentaje: percent, nota };
 }
 
+function normalizeDeliveryState(value = "") {
+  const state = String(value || "").trim().toLowerCase();
+  return Object.values(DELIVERY_STATES).includes(state) ? state : "";
+}
+
+function isInternalGradeActivity(activity = {}) {
+  return activity.interno === true || ["ser", "auto"].includes(String(activity.tipo || "").toLowerCase());
+}
+
+function deliveryPayload({ activity, normalized, estadoEntrega = "", fechaEntrega = "" }) {
+  if (isInternalGradeActivity(activity)) return {};
+
+  let state = normalizeDeliveryState(estadoEntrega);
+  if (Number(normalized.valor || 0) <= 0) state = DELIVERY_STATES.NOT_SUBMITTED;
+  if (!state) return {};
+
+  const submitted = [DELIVERY_STATES.ON_TIME, DELIVERY_STATES.LATE].includes(state);
+  const safeDate = submitted
+    ? String(fechaEntrega || activity.fecha || todayIso()).slice(0, 10)
+    : "";
+  return {
+    estadoEntrega: state,
+    fechaEntrega: safeDate
+  };
+}
+
 export async function listGradesForActivity(activityId) {
   const snap = await getDocs(query(collection(firestore, "calificaciones"), where("actividadId", "==", activityId)));
   const map = {};
@@ -657,7 +731,13 @@ export async function listGradesForCourse(courseId, trimestreId = "") {
   return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
 }
 
-export async function saveGrade({ activity, student, value }) {
+export async function saveGrade({
+  activity,
+  student,
+  value,
+  estadoEntrega = "",
+  fechaEntrega = ""
+}) {
   if (!activity?.id) throw new Error("No se encontro la actividad para calificar.");
   if (!student?.id) throw new Error("No se encontro el alumno para calificar.");
 
@@ -679,23 +759,104 @@ export async function saveGrade({ activity, student, value }) {
     trimestreId,
     alumnoId: student.id,
     valor: normalized.valor,
-    porcentaje: normalized.porcentaje,
     nota: normalized.nota,
     maximo,
-    fecha: activity.fecha || "",
-    tipo: activity.tipo || "tarea",
     calificadoPorUid: currentUid(),
-    calificadoPor: currentUserLabel(),
+    ...deliveryPayload({ activity, normalized, estadoEntrega, fechaEntrega }),
     updatedAt: serverTimestamp()
   };
-  await setDoc(doc(firestore, "calificaciones", id), payload, { merge: true });
+  const batch = writeBatch(firestore);
+  batch.set(doc(firestore, "calificaciones", id), payload, { merge: true });
+  if (activity.estadoRevision === "sin_iniciar") {
+    batch.set(doc(firestore, "actividades", activity.id), {
+      estadoRevision: "en_proceso",
+      revisionIniciadaAt: serverTimestamp(),
+      revisionIniciadaPorUid: currentUid(),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+  await batch.commit();
+  if (activity.estadoRevision === "sin_iniciar") activity.estadoRevision = "en_proceso";
   await safeAudit({
     tipo: "calificaciones",
     accion: "calificar",
     detalle: `Califico ${student.nombre} con ${payload.nota} en ${activity.titulo}`,
-    datos: { actividadId: activity.id, alumnoId: student.id, trimestreId: payload.trimestreId, nota: payload.nota, valor: payload.valor, maximo: payload.maximo }
+    datos: {
+      actividadId: activity.id,
+      alumnoId: student.id,
+      trimestreId: payload.trimestreId,
+      nota: payload.nota,
+      valor: payload.valor,
+      maximo: payload.maximo,
+      estadoEntrega: payload.estadoEntrega || "registro_anterior",
+      fechaEntrega: payload.fechaEntrega || ""
+    }
   });
   return { id, ...payload };
+}
+
+export async function finalizeActivityReview({ activity, students = [], attendanceMap = {}, gradesMap = {} }) {
+  if (!activity?.id) throw new Error("No se encontro la actividad para finalizar.");
+
+  const revisionFinalizadaFecha = todayIso();
+  const regularizacionDesde = todayIso(1);
+  const batch = writeBatch(firestore);
+  const generatedGrades = [];
+  students.forEach((student) => {
+    if (!student?.id || gradesMap[student.id]) return;
+    const attendanceState = String(attendanceMap[student.id]?.estado || "").toLowerCase();
+    if (["permiso", "licencia"].includes(attendanceState)) return;
+
+    const normalized = normalizeGrade(0, activity.maximo || 100);
+    const id = gradeDocId(activity.id, student.id);
+    const payload = {
+      actividadId: activity.id,
+      cursoId: activity.cursoId || student.cursoId || "",
+      materiaId: activity.materiaId || "",
+      trimestreId: activity.trimestreId || "t1",
+      alumnoId: student.id,
+      valor: normalized.valor,
+      nota: normalized.nota,
+      maximo: Number(activity.maximo || 100),
+      calificadoPorUid: currentUid(),
+      ...deliveryPayload({
+        activity,
+        normalized,
+        estadoEntrega: DELIVERY_STATES.NOT_SUBMITTED
+      }),
+      updatedAt: serverTimestamp()
+    };
+    batch.set(doc(firestore, "calificaciones", id), payload, { merge: true });
+    generatedGrades.push({ id, ...payload });
+  });
+
+  batch.set(doc(firestore, "actividades", activity.id), {
+    estadoRevision: "cerrada",
+    revisionFinalizadaFecha,
+    regularizacionDesde,
+    revisionFinalizadaAt: serverTimestamp(),
+    revisionFinalizadaPorUid: currentUid(),
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+  await batch.commit();
+  activity.estadoRevision = "cerrada";
+  activity.revisionFinalizadaFecha = revisionFinalizadaFecha;
+  activity.regularizacionDesde = regularizacionDesde;
+
+  await safeAudit({
+    tipo: "calificaciones",
+    accion: "finalizar_revision",
+    detalle: `Finalizo la revision de ${activity.titulo || activity.id}`,
+    datos: {
+      actividadId: activity.id,
+      cursoId: activity.cursoId || "",
+      trimestreId: activity.trimestreId || "t1",
+      noPresentaron: generatedGrades.length,
+      regularizacionDesde
+    }
+  });
+
+  return { activity, grades: generatedGrades };
 }
 
 export { COURSES, SUBJECTS };

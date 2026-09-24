@@ -467,10 +467,6 @@ function renderSnapshot(root, snapshot) {
   }
   const updated = root.querySelector("[data-director-dashboard-updated]");
   if (updated) updated.textContent = updatedLabel(snapshot.updatedAt);
-  document.querySelectorAll("[data-director-alert-badge]").forEach((badge) => {
-    badge.textContent = snapshot.alertTotal > 99 ? "99+" : String(snapshot.alertTotal || "");
-    badge.classList.toggle("hidden", !snapshot.alertTotal);
-  });
   refreshDirectorIcons();
 }
 

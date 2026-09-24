@@ -2,13 +2,18 @@ import { icon } from "../../ui/dom.js";
 import {
   COURSES,
   attendancePercent,
-  attendanceTotals,
-  listDirectorActivities,
+  listDirectorAllActivities,
+  listDirectorAttendanceByTrimester,
   listDirectorGrades,
-  listDirectorRecentAttendance,
   listDirectorStudents,
   subjectName
 } from "../../services/directorData.js";
+import {
+  activityHasGrades,
+  calculateStudentTerm,
+  gradeByActivityAndStudent,
+  studentActivityGrade
+} from "../docente/AcademicoDocente.js";
 import { DirectorShell, directorCard, directorStat } from "./DirectorShell.js";
 import { escapeDirectorHtml, refreshDirectorIcons } from "./DirectorUtils.js";
 
@@ -18,11 +23,13 @@ const TRIMESTERS = [
   { id: "t3", label: "3er trimestre" }
 ];
 
-let selectedCourseId = sessionStorage.getItem("directorCursoEstudiantes") || COURSES[0].id;
+const rememberedCourseId = sessionStorage.getItem("directorCursoEstudiantes") || "";
+let selectedCourseId = COURSES.some((course) => course.id === rememberedCourseId) ? rememberedCourseId : COURSES[0].id;
 let allStudents = [];
 let studentsLoaded = false;
 let studentSearch = "";
 let reportDataPromise = null;
+const reportAttendancePromises = new Map();
 
 function normalizeText(value) {
   return String(value || "")
@@ -40,24 +47,9 @@ function termOf(item) {
   return item?.trimestreId || "t1";
 }
 
-function gradeValue(value) {
-  const parsed = Number(value);
-  return Math.max(35, Math.min(100, Number.isFinite(parsed) ? Math.round(parsed) : 35));
-}
-
 function average(values = []) {
   const valid = values.filter((value) => Number.isFinite(value));
   return valid.length ? Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length) : 0;
-}
-
-function courseTabs() {
-  return `
-    <div class="flex gap-1.5 overflow-x-auto pb-1">
-      ${COURSES.map((course) => `
-        <button type="button" data-director-student-course="${course.id}" class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold transition ${course.id === selectedCourseId ? "border-school-green bg-school-green text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-green-300 hover:bg-green-50"}">${escapeDirectorHtml(course.corto)}</button>
-      `).join("")}
-    </div>
-  `;
 }
 
 function studentsTable() {
@@ -70,10 +62,26 @@ function studentsTable() {
       <p class="text-[11px] text-slate-500" data-director-students-visible>Preparando lista...</p>
     </div>
     <div class="overflow-x-auto">
-      <table class="min-w-[680px] w-full text-left text-sm">
-        <thead><tr class="border-b border-slate-100 text-[10px] font-semibold uppercase text-slate-500"><th class="w-12 py-2.5">N.</th><th>Alumno</th><th class="w-24">Curso</th><th class="w-28">CI</th><th class="w-20">Estado</th><th class="w-10"><span class="sr-only">Abrir informe</span></th></tr></thead>
+      <table class="min-w-[610px] w-full text-left text-sm">
+        <thead>
+          <tr class="border-b border-slate-100 text-[10px] font-semibold uppercase text-slate-500">
+            <th class="w-12 py-2.5">N.</th>
+            <th>Alumno</th>
+            <th class="w-44 py-2">
+              <label class="relative inline-flex min-w-36 items-center gap-1.5 rounded-md border border-green-200 bg-green-50 px-2 py-1.5 text-school-green shadow-sm">
+                ${icon("school", "h-3.5 w-3.5 shrink-0")}
+                <select data-director-student-course-select aria-label="Seleccionar curso" class="min-w-0 flex-1 appearance-none bg-transparent pr-4 text-[10px] font-semibold uppercase text-school-green outline-none">
+                  ${COURSES.map((course) => `<option value="${course.id}" ${course.id === selectedCourseId ? "selected" : ""}>${escapeDirectorHtml(course.nombre)}</option>`).join("")}
+                </select>
+                ${icon("chevron-down", "pointer-events-none absolute right-1.5 h-3.5 w-3.5")}
+              </label>
+            </th>
+            <th class="w-28">CI</th>
+            <th class="w-10"><span class="sr-only">Abrir resumen</span></th>
+          </tr>
+        </thead>
         <tbody data-director-students-list>
-          <tr><td colspan="6" class="py-5 text-sm font-medium text-slate-500">Cargando alumnos...</td></tr>
+          <tr><td colspan="5" class="py-5 text-sm font-medium text-slate-500">Cargando alumnos...</td></tr>
         </tbody>
       </table>
     </div>
@@ -90,10 +98,7 @@ export function DirectorStudents() {
         <div class="col-span-2 lg:col-span-1" data-director-students-courses-total>${directorStat("Cursos activos", "0", "Con estudiantes", "school", "bg-slate-700 text-white")}</div>
       </section>
       <section class="mt-3">
-        ${directorCard("Seleccionar curso", courseTabs())}
-      </section>
-      <section class="mt-3">
-        ${directorCard(`<span data-director-students-title>${escapeDirectorHtml(course.nombre)}</span>`, studentsTable())}
+        ${directorCard(`<span data-director-students-title>Estudiantes de ${escapeDirectorHtml(course.nombre)}</span>`, studentsTable())}
       </section>
     </div>
     <div data-director-student-modal></div>
@@ -124,22 +129,21 @@ function renderRows() {
       : `${students.length} estudiante(s) en ${courseFor(selectedCourseId).nombre}`;
   }
   if (!students.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-sm text-slate-500">No se encontraron estudiantes.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-sm text-slate-500">No se encontraron estudiantes.</td></tr>`;
     return;
   }
   tbody.innerHTML = students.map((student, index) => {
     const course = courseFor(student.cursoId);
     return `
-      <tr class="group border-b border-slate-100 transition last:border-0 hover:bg-green-50/60">
+      <tr data-director-student-report="${student.id}" class="group cursor-pointer border-b border-slate-100 transition last:border-0 hover:bg-green-50/60">
         <td class="py-2 text-xs font-semibold text-school-green">${index + 1}</td>
         <td class="py-2 pr-3">
           <button type="button" data-director-student-report="${student.id}" class="max-w-[22rem] truncate text-left text-sm font-semibold text-slate-900 transition group-hover:text-school-green">
             ${escapeDirectorHtml(student.nombre || "Sin nombre")}
           </button>
         </td>
-        <td class="py-2 pr-3"><span class="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600">${escapeDirectorHtml(course.corto)}</span></td>
+        <td class="py-2 pr-3"><button type="button" data-director-student-row-course="${course.id}" class="inline-flex items-center gap-1 rounded-md border border-green-100 bg-green-50 px-2 py-1 text-[10px] font-semibold text-school-green transition hover:border-green-300 hover:bg-green-100" title="Mostrar ${escapeDirectorHtml(course.nombre)}">${icon("school", "h-3 w-3")} ${escapeDirectorHtml(course.nombre)}</button></td>
         <td class="py-2 pr-3 text-xs text-slate-500">${escapeDirectorHtml(student.ci || "-")}</td>
-        <td class="py-2"><span class="rounded-full bg-green-50 px-2 py-1 text-[10px] font-semibold text-school-green">Activo</span></td>
         <td class="py-2 text-right">
           <button type="button" data-director-student-report="${student.id}" class="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-school-green" aria-label="Abrir informe de ${escapeDirectorHtml(student.nombre || "estudiante")}">
             ${icon("chevron-right", "h-4 w-4")}
@@ -162,12 +166,12 @@ function updateStudentSummary() {
   if (courseTotal) courseTotal.innerHTML = directorStat("Alumnos del curso", courseStudents.length, course.nombre, "users", "bg-school-green text-white");
   if (generalTotal) generalTotal.innerHTML = directorStat("Total registrados", allStudents.length, "Estudiantes activos", "contact-round", "bg-school-gold text-white");
   if (coursesTotal) coursesTotal.innerHTML = directorStat("Cursos activos", activeCourses, "Con estudiantes", "school", "bg-slate-700 text-white");
-  if (title) title.textContent = studentSearch ? "Resultados de busqueda" : course.nombre;
+  if (title) title.textContent = studentSearch ? "Resultados de busqueda" : `Estudiantes de ${course.nombre}`;
 }
 
 async function refreshStudents() {
   const tbody = document.querySelector("[data-director-students-list]");
-  if (!studentsLoaded && tbody) tbody.innerHTML = `<tr><td colspan="6" class="py-5 text-sm font-medium text-slate-500">Cargando alumnos...</td></tr>`;
+  if (!studentsLoaded && tbody) tbody.innerHTML = `<tr><td colspan="5" class="py-5 text-sm font-medium text-slate-500">Cargando alumnos...</td></tr>`;
   if (!studentsLoaded) {
     allStudents = (await listDirectorStudents())
       .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" }));
@@ -181,15 +185,26 @@ async function refreshStudents() {
 async function reportData() {
   if (!reportDataPromise) {
     reportDataPromise = Promise.all([
-      listDirectorActivities(),
-      listDirectorGrades(),
-      listDirectorRecentAttendance(1500)
-    ]).then(([activities, grades, attendance]) => ({ activities, grades, attendance }));
+      listDirectorAllActivities(),
+      listDirectorGrades()
+    ]).then(([activities, grades]) => ({ activities, grades }));
   }
   try {
     return await reportDataPromise;
   } catch (error) {
     reportDataPromise = null;
+    throw error;
+  }
+}
+
+async function reportAttendance(trimesterId) {
+  if (!reportAttendancePromises.has(trimesterId)) {
+    reportAttendancePromises.set(trimesterId, listDirectorAttendanceByTrimester(trimesterId));
+  }
+  try {
+    return await reportAttendancePromises.get(trimesterId);
+  } catch (error) {
+    reportAttendancePromises.delete(trimesterId);
     throw error;
   }
 }
@@ -212,107 +227,87 @@ function reportTerm(student, data) {
 
 function buildStudentReport(student, data) {
   const trimesterId = reportTerm(student, data);
-  const startedIds = new Set(data.grades.map((grade) => grade.actividadId).filter(Boolean));
-  const activities = data.activities.filter((activity) => (
+  const termActivities = data.activities.filter((activity) => (
     activity.cursoId === student.cursoId &&
-    termOf(activity) === trimesterId &&
-    startedIds.has(activity.id)
+    termOf(activity) === trimesterId
   ));
-  const gradeByActivity = new Map(data.grades
-    .filter((grade) => grade.alumnoId === student.id)
-    .map((grade) => [grade.actividadId, grade]));
-  const values = activities.map((activity) => gradeValue(gradeByActivity.get(activity.id)?.nota));
-  const pending = activities.filter((activity) => !gradeByActivity.has(activity.id)).length;
-  const low = activities.filter((activity) => {
-    const grade = gradeByActivity.get(activity.id);
-    return grade && gradeValue(grade.nota) < 51;
-  }).length;
-  const subjectIds = [...new Set(activities.map((activity) => activity.materiaId).filter(Boolean))];
+  const termActivityIds = new Set(termActivities.map((activity) => activity.id));
+  const termGrades = data.grades.filter((grade) => termActivityIds.has(grade.actividadId));
+  const gradesMap = gradeByActivityAndStudent(termGrades);
+  const attendance = data.attendance.filter((record) => record.alumnoId === student.id && termOf(record) === trimesterId);
+  const subjectIds = [...new Set(termActivities
+    .filter((activity) => activity.materiaId && activityHasGrades(activity, gradesMap))
+    .map((activity) => activity.materiaId))];
   const subjects = subjectIds.map((subjectId) => {
-    const subjectActivities = activities.filter((activity) => activity.materiaId === subjectId);
+    const subjectActivities = termActivities.filter((activity) => activity.materiaId === subjectId);
+    const gradedActivities = subjectActivities
+      .filter((activity) => !activity.interno && !["ser", "auto"].includes(String(activity.tipo || "").toLowerCase()))
+      .filter((activity) => activityHasGrades(activity, gradesMap));
+    const serCriteria = subjectActivities.filter((activity) => String(activity.tipo || "").toLowerCase() === "ser");
+    const autoActivity = subjectActivities.find((activity) => String(activity.tipo || "").toLowerCase() === "auto") || null;
+    const serExtraValues = serCriteria.map((activity) => studentActivityGrade(activity, student.id, gradesMap));
+    const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota ?? null : null;
+    const calculation = calculateStudentTerm(student, gradedActivities, gradesMap, attendance, serExtraValues, autoGrade);
     return {
       id: subjectId,
       name: subjectName(subjectId),
-      average: average(subjectActivities.map((activity) => gradeValue(gradeByActivity.get(activity.id)?.nota)))
+      average: calculation.final
     };
   }).sort((a, b) => a.average - b.average || a.name.localeCompare(b.name));
-  const attendance = data.attendance.filter((record) => record.alumnoId === student.id && termOf(record) === trimesterId);
   return {
     student,
     course: courseFor(student.cursoId),
     trimesterId,
     trimester: TRIMESTERS.find((term) => term.id === trimesterId)?.label || trimesterId,
-    average: average(values),
-    pending,
-    low,
+    average: average(subjects.map((subject) => subject.average)),
     subjects,
     attendance,
-    attendanceTotals: attendanceTotals(attendance),
     attendancePercent: attendancePercent(attendance)
   };
 }
 
-function metric(label, value, detail, tone, iconName) {
-  return `
-    <div class="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2">
-      <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg ${tone}">${icon(iconName, "h-4 w-4")}</span>
-      <span class="min-w-0"><span class="block text-[9px] font-semibold uppercase text-slate-500">${label}</span><strong class="block text-lg font-semibold leading-tight text-slate-900">${value}</strong><span class="block truncate text-[9px] text-slate-500">${detail}</span></span>
-    </div>
-  `;
-}
-
 function reportModal(report) {
-  const totals = report.attendanceTotals;
-  const scoreTone = report.average && report.average < 51 ? "bg-red-100 text-red-700" : "bg-green-100 text-school-green";
+  const hasGrades = report.subjects.length > 0;
+  const scoreIsLow = hasGrades && report.average < 51;
+  const attendanceValue = report.attendance.length ? `${report.attendancePercent}%` : "--";
+  const scoreValue = hasGrades ? report.average : "--";
   return `
     <div class="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-2 sm:p-5" data-close-director-student-report>
-      <section class="flex max-h-[94dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="director-student-report-title">
+      <section class="flex max-h-[94dvh] w-full max-w-xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="director-student-report-title">
         <header class="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5 sm:py-4">
           <div class="min-w-0">
-            <p class="text-[9px] font-semibold uppercase tracking-[.12em] text-school-green">Informe del estudiante</p>
+            <p class="text-[10px] font-semibold uppercase tracking-[.12em] text-school-green">Resumen del estudiante</p>
             <h3 id="director-student-report-title" class="mt-1 truncate text-base font-semibold text-slate-950 sm:text-xl">${escapeDirectorHtml(report.student.nombre || "Sin nombre")}</h3>
-            <p class="mt-1 text-[11px] text-slate-500">${escapeDirectorHtml(report.course.nombre)} · ${escapeDirectorHtml(report.trimester)}</p>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-700">${icon("school", "h-3.5 w-3.5")} ${escapeDirectorHtml(report.course.nombre)}</span>
+              <span class="inline-flex items-center gap-1.5 rounded-md bg-school-green px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm">${icon("calendar-range", "h-3.5 w-3.5")} ${escapeDirectorHtml(report.trimester)}</span>
+            </div>
           </div>
           <button type="button" data-close-director-student-report-button class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600" aria-label="Cerrar">${icon("x", "h-4 w-4")}</button>
         </header>
-        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-          <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            ${metric("Promedio", report.average || "-", "Actividades", scoreTone, "chart-no-axes-column-increasing")}
-            ${metric("Asistencia", report.attendance.length ? `${report.attendancePercent}%` : "-", `${report.attendance.length} registros`, "bg-blue-100 text-blue-700", "clipboard-check")}
-            ${metric("Pendientes", report.pending, "Se consideran 35", "bg-red-100 text-red-700", "circle-dashed")}
-            ${metric("Notas bajas", report.low, "Menores a 51", "bg-amber-100 text-amber-700", "triangle-alert")}
-          </div>
+        <div class="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <article class="flex min-h-52 flex-col overflow-hidden rounded-lg border border-blue-200 bg-white shadow-sm">
+              <div class="flex flex-1 flex-col items-center justify-center p-5 text-center">
+                <span class="grid h-11 w-11 place-items-center rounded-lg bg-blue-50 text-blue-700">${icon("clipboard-check", "h-5 w-5")}</span>
+                <p class="mt-3 text-xs font-semibold uppercase tracking-[.08em] text-slate-500">Asistencia total</p>
+                <strong class="mt-1 text-4xl font-semibold leading-none text-slate-950">${attendanceValue}</strong>
+              </div>
+              <button type="button" data-open-director-student-attendance="${report.student.id}" data-student-course="${report.student.cursoId}" data-student-term="${report.trimesterId}" class="flex min-h-11 w-full items-center justify-between border-t border-blue-100 bg-blue-50 px-4 text-xs font-semibold text-blue-800 transition hover:bg-blue-100">
+                Ver mas en Asistencia ${icon("arrow-right", "h-4 w-4")}
+              </button>
+            </article>
 
-          <div class="mt-4 grid gap-3 md:grid-cols-[1fr_1.35fr]">
-            <section class="rounded-lg border border-slate-200 p-3">
-              <div class="flex items-center justify-between gap-2">
-                <h4 class="text-xs font-semibold uppercase text-slate-800">Asistencia</h4>
-                <span class="text-[10px] text-slate-500">Solo dias registrados</span>
+            <article class="flex min-h-52 flex-col overflow-hidden rounded-lg border ${scoreIsLow ? "border-red-200" : "border-green-200"} bg-white shadow-sm">
+              <div class="flex flex-1 flex-col items-center justify-center p-5 text-center">
+                <span class="grid h-11 w-11 place-items-center rounded-lg ${scoreIsLow ? "bg-red-50 text-red-700" : "bg-green-50 text-school-green"}">${icon("chart-no-axes-column-increasing", "h-5 w-5")}</span>
+                <p class="mt-3 text-xs font-semibold uppercase tracking-[.08em] text-slate-500">Nota trimestral</p>
+                <div class="mt-1 flex items-end gap-1"><strong class="text-4xl font-semibold leading-none ${scoreIsLow ? "text-red-700" : "text-slate-950"}">${scoreValue}</strong>${hasGrades ? `<span class="pb-0.5 text-xs text-slate-500">/100</span>` : ""}</div>
               </div>
-              <div class="mt-3 grid grid-cols-4 gap-1.5 text-center">
-                <div class="rounded-md bg-green-50 px-1 py-2"><strong class="block text-base text-school-green">${totals.presente || 0}</strong><span class="text-[9px] text-slate-500">Presente</span></div>
-                <div class="rounded-md bg-amber-50 px-1 py-2"><strong class="block text-base text-amber-700">${totals.atraso || 0}</strong><span class="text-[9px] text-slate-500">Atraso</span></div>
-                <div class="rounded-md bg-purple-50 px-1 py-2"><strong class="block text-base text-purple-700">${totals.permiso || 0}</strong><span class="text-[9px] text-slate-500">Licencia</span></div>
-                <div class="rounded-md bg-red-50 px-1 py-2"><strong class="block text-base text-red-700">${totals.falta || 0}</strong><span class="text-[9px] text-slate-500">Falta</span></div>
-              </div>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 p-3">
-              <div class="flex items-center justify-between gap-2">
-                <h4 class="text-xs font-semibold uppercase text-slate-800">Resumen por materia</h4>
-                <span class="text-[10px] text-slate-500">Promedio /100</span>
-              </div>
-              <div class="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                ${report.subjects.length ? report.subjects.map((subject) => `<div class="rounded-md bg-slate-50 px-2 py-2"><span class="block truncate text-[9px] text-slate-500">${escapeDirectorHtml(subject.name)}</span><strong class="mt-0.5 block text-sm font-semibold ${subject.average < 51 ? "text-red-600" : "text-school-green"}">${subject.average}</strong></div>`).join("") : `<p class="col-span-full py-4 text-center text-xs text-slate-500">Sin actividades calificadas.</p>`}
-              </div>
-            </section>
-          </div>
-
-          <div class="mt-4 flex flex-col gap-3 rounded-lg bg-green-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <p class="text-xs leading-5 text-slate-600">Este es un resumen. En Notas puede revisar cada materia y todas las actividades del estudiante.</p>
-            <button type="button" data-open-director-student-notes="${report.student.id}" data-student-course="${report.student.cursoId}" data-student-term="${report.trimesterId}" class="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-school-green px-3 py-2 text-xs font-semibold text-white shadow-sm">
-              Ver notas completas ${icon("arrow-right", "h-4 w-4")}
-            </button>
+              <button type="button" data-open-director-student-notes="${report.student.id}" data-student-course="${report.student.cursoId}" data-student-term="${report.trimesterId}" class="flex min-h-11 w-full items-center justify-between border-t ${scoreIsLow ? "border-red-100 bg-red-50 text-red-800 hover:bg-red-100" : "border-green-100 bg-green-50 text-green-800 hover:bg-green-100"} px-4 text-xs font-semibold transition">
+                Ver mas en Notas ${icon("arrow-right", "h-4 w-4")}
+              </button>
+            </article>
           </div>
         </div>
       </section>
@@ -326,18 +321,26 @@ async function openStudentReport(studentId) {
   if (!modal || !student) return;
   modal.innerHTML = `<div class="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4"><div class="rounded-lg bg-white px-6 py-5 text-center shadow-2xl"><span class="mx-auto block h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-school-green"></span><p class="mt-3 text-xs text-slate-500">Preparando informe...</p></div></div>`;
   try {
-    modal.innerHTML = reportModal(buildStudentReport(student, await reportData()));
+    const data = await reportData();
+    const trimesterId = reportTerm(student, data);
+    const attendance = await reportAttendance(trimesterId);
+    modal.innerHTML = reportModal(buildStudentReport(student, { ...data, attendance }));
     refreshDirectorIcons();
   } catch {
     modal.innerHTML = `<div class="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4" data-close-director-student-report><div class="w-full max-w-sm rounded-lg bg-white p-5 text-center shadow-2xl"><p class="text-sm font-semibold text-red-700">No se pudo cargar el informe.</p><button type="button" data-close-director-student-report-button class="mt-3 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Cerrar</button></div></div>`;
   }
 }
 
-function updateCourseButtons() {
-  document.querySelectorAll("[data-director-student-course]").forEach((button) => {
-    const active = button.dataset.directorStudentCourse === selectedCourseId;
-    button.className = `shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold transition ${active ? "border-school-green bg-school-green text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-green-300 hover:bg-green-50"}`;
-  });
+function selectCourse(courseId, searchInput) {
+  if (!COURSES.some((course) => course.id === courseId)) return;
+  selectedCourseId = courseId;
+  studentSearch = "";
+  if (searchInput) searchInput.value = "";
+  sessionStorage.setItem("directorCursoEstudiantes", selectedCourseId);
+  const courseSelect = document.querySelector("[data-director-student-course-select]");
+  if (courseSelect) courseSelect.value = selectedCourseId;
+  updateStudentSummary();
+  renderRows();
 }
 
 export function bindDirectorStudents(route) {
@@ -350,12 +353,25 @@ export function bindDirectorStudents(route) {
   });
 
   document.querySelector("[data-director-students-list]")?.addEventListener("click", (event) => {
+    const courseButton = event.target.closest("[data-director-student-row-course]");
+    if (courseButton) {
+      selectCourse(courseButton.dataset.directorStudentRowCourse, searchInput);
+      return;
+    }
     const button = event.target.closest("[data-director-student-report]");
     if (button) openStudentReport(button.dataset.directorStudentReport);
   });
 
   document.querySelector("[data-director-student-modal]")?.addEventListener("click", (event) => {
     const modal = event.currentTarget;
+    const attendanceButton = event.target.closest("[data-open-director-student-attendance]");
+    if (attendanceButton) {
+      sessionStorage.setItem("directorAsistenciaEstudiante", attendanceButton.dataset.openDirectorStudentAttendance);
+      sessionStorage.setItem("directorAsistenciaCursoSolicitado", attendanceButton.dataset.studentCourse);
+      sessionStorage.setItem("directorAsistenciaTrimestreSolicitado", attendanceButton.dataset.studentTerm);
+      window.location.hash = "#/director/asistencia";
+      return;
+    }
     const openButton = event.target.closest("[data-open-director-student-notes]");
     if (openButton) {
       sessionStorage.setItem("directorNotasEstudiante", openButton.dataset.openDirectorStudentNotes);
@@ -370,20 +386,12 @@ export function bindDirectorStudents(route) {
     }
   });
 
-  document.querySelectorAll("[data-director-student-course]").forEach((button) => {
-    button.addEventListener("click", () => {
-      selectedCourseId = button.dataset.directorStudentCourse;
-      studentSearch = "";
-      if (searchInput) searchInput.value = "";
-      sessionStorage.setItem("directorCursoEstudiantes", selectedCourseId);
-      updateCourseButtons();
-      updateStudentSummary();
-      renderRows();
-    });
+  document.querySelector("[data-director-student-course-select]")?.addEventListener("change", (event) => {
+    selectCourse(event.currentTarget.value, searchInput);
   });
 
   refreshStudents().catch(() => {
     const tbody = document.querySelector("[data-director-students-list]");
-    if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-sm text-red-600">No se pudieron cargar los alumnos.</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-sm text-red-600">No se pudieron cargar los alumnos.</td></tr>`;
   });
 }

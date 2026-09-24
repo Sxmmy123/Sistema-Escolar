@@ -138,7 +138,7 @@ function bindShell() {
 
   const open = () => {
     if (!mobileMenu.matches || !sidebar) return;
-    const sidebarScroll = sidebar.querySelector(".teacher-sidebar-scroll");
+    const sidebarScroll = sidebar.querySelector("[data-sidebar-scroll]");
     if (sidebarScroll) sidebarScroll.scrollTop = 0;
     syncMobileMenu(true);
     document.querySelector("[data-action='close-menu']")?.focus({ preventScroll: true });

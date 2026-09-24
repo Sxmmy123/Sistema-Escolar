@@ -69,16 +69,16 @@ export function activityHasGrades(activity, gradesMap = {}) {
 }
 
 export function isSaberActivity(activity = {}) {
-  return ["examen", "saber"].includes(String(activity.tipo || "").toLowerCase());
+  return ["examen", "saber"].includes(String(activity?.tipo || "").toLowerCase());
 }
 
 export function isMaterialActivity(activity = {}) {
-  return ["material", "materiales"].includes(String(activity.tipo || "").toLowerCase());
+  return ["material", "materiales"].includes(String(activity?.tipo || "").toLowerCase());
 }
 
 export function isScoredMaterialActivity(activity = {}) {
-  const scoreEnabled = activity.calificable === true || activity.calificable === 1 || activity.calificable === "true";
-  return isMaterialActivity(activity) && scoreEnabled && Number(activity.maximo || 0) > 0;
+  const scoreEnabled = activity?.calificable === true || activity?.calificable === 1 || activity?.calificable === "true";
+  return isMaterialActivity(activity) && scoreEnabled && Number(activity?.maximo || 0) > 0;
 }
 
 export function isAttendanceValue(state) {
@@ -115,10 +115,61 @@ export function optionalStudentActivityGrade(activity, studentId, gradesMap) {
   return grade ? gradeNumber(grade.nota) : "";
 }
 
-export function responsibilityScore(tasks, studentId, gradesMap) {
-  if (!tasks.length) return 35;
-  const presented = tasks.filter((task) => studentActivityGrade(task, studentId, gradesMap) > 35).length;
-  return gradeNumber((presented * 100) / tasks.length);
+export function deliveryStateForGrade(grade = null) {
+  const storedState = String(grade?.estadoEntrega || "").toLowerCase();
+  if (["a_tiempo", "tardia", "no_presento", "pendiente_licencia", "sin_revisar"].includes(storedState)) {
+    return storedState;
+  }
+  if (!grade) return "sin_revisar";
+  return Number(grade.valor || 0) > 0 ? "a_tiempo" : "no_presento";
+}
+
+export function deliveryStateForActivity(activity = {}, grade = null, gradesByStudent = {}) {
+  if (!grade) return "sin_revisar";
+  if (Number(grade.valor || 0) <= 0) return "no_presento";
+
+  const submittedDate = String(grade.fechaEntrega || "").slice(0, 10);
+  if (!submittedDate) return deliveryStateForGrade(grade);
+
+  const dates = Object.values(gradesByStudent || {})
+    .filter((item) => Number(item?.valor || 0) > 0)
+    .map((item) => String(item?.fechaEntrega || "").slice(0, 10))
+    .filter(Boolean);
+
+  if (dates.length) {
+    const counts = dates.reduce((map, date) => {
+      map[date] = (map[date] || 0) + 1;
+      return map;
+    }, {});
+    const referenceDate = Object.entries(counts)
+      .sort(([dateA, countA], [dateB, countB]) => Number(countB) - Number(countA) || dateA.localeCompare(dateB))[0]?.[0];
+    if (referenceDate) return submittedDate === referenceDate ? "a_tiempo" : "tardia";
+  }
+
+  return "a_tiempo";
+}
+
+export function responsibilityContribution(task, studentId, gradesMap, attendanceRows = []) {
+  const grade = gradesMap[task.id]?.[studentId] || null;
+  const state = deliveryStateForActivity(task, grade, gradesMap[task.id] || {});
+  if (state === "a_tiempo") return 100;
+  if (state === "tardia") return 50;
+  if (state === "no_presento") return 0;
+  if (["pendiente_licencia", "sin_revisar"].includes(state) && grade) return null;
+
+  const reviewState = String(task.estadoRevision || "").toLowerCase();
+  if (["sin_iniciar", "en_proceso"].includes(reviewState)) return null;
+  const attendanceState = attendanceStateForDate(studentId, task.fecha, attendanceRows);
+  if (["permiso", "licencia"].includes(String(attendanceState || "").toLowerCase())) return null;
+  return 0;
+}
+
+export function responsibilityScore(tasks, studentId, gradesMap, attendanceRows = []) {
+  const values = tasks
+    .map((task) => responsibilityContribution(task, studentId, gradesMap, attendanceRows))
+    .filter((value) => value != null);
+  if (!values.length) return 35;
+  return gradeNumber(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
 export function materialResponsibilityScore(materials, studentId, gradesMap) {
@@ -143,7 +194,15 @@ export function calculateStudentTerm(student, activities, gradesMap, attendanceR
   const asistencia100 = attendanceScore(student.id, attendanceRows);
   const puntualidad100 = punctualityScore(student.id, attendanceRows);
   const materialScore = materialResponsibilityScore(materials, student.id, gradesMap);
-  const responsabilidad100 = materialScore ?? responsibilityScore(tasks, student.id, gradesMap);
+  const taskResponsibilityValues = tasks
+    .map((task) => responsibilityContribution(task, student.id, gradesMap, attendanceRows))
+    .filter((value) => value != null);
+  const responsibilityValues = materialScore == null
+    ? taskResponsibilityValues
+    : [...taskResponsibilityValues, materialScore];
+  const responsabilidad100 = responsibilityValues.length
+    ? gradeNumber(responsibilityValues.reduce((total, value) => total + value, 0) / responsibilityValues.length)
+    : 35;
   const ser100 = averageGrades([asistencia100, puntualidad100, responsabilidad100, ...serExtras]);
   const auto100 = autoGrade ?? 35;
   const ser10 = weightedGrade(ser100, 10);

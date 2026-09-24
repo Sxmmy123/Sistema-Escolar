@@ -94,10 +94,28 @@ export function DirectorShell(activeRoute, content, options = {}) {
             <h1 class="truncate text-lg font-semibold text-slate-950 sm:text-xl">${title}</h1>
             <p class="truncate text-xs text-slate-500 sm:text-sm">${subtitle}</p>
           </div>
-          <a href="#/director/notas" class="relative hidden h-10 w-10 place-items-center rounded-lg border border-slate-200 bg-white text-slate-800 sm:grid" aria-label="Ver alertas">
-            ${icon("bell", "h-5 w-5")}
-            <span data-director-alert-badge class="absolute -right-1 -top-1 hidden min-w-5 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-5 text-white"></span>
-          </a>
+          <div class="relative" data-director-alerts>
+            <button type="button" data-director-alert-toggle class="relative grid h-10 w-10 place-items-center rounded-lg border border-slate-200 bg-white text-slate-800 transition hover:border-green-300 hover:bg-green-50" aria-label="Abrir alertas" aria-expanded="false" aria-controls="director-alert-panel">
+              ${icon("bell", "h-5 w-5")}
+              <span data-director-alert-badge class="absolute -right-1 -top-1 hidden min-w-5 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-5 text-white"></span>
+            </button>
+            <section id="director-alert-panel" data-director-alert-panel class="absolute right-0 top-12 z-50 hidden w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl" aria-label="Alertas del director">
+              <header class="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-slate-950">Alertas de estudiantes</p>
+                  <p data-director-alert-term class="mt-0.5 text-[11px] text-slate-500">Preparando resumen...</p>
+                </div>
+                <button type="button" data-director-alert-refresh class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-school-green" aria-label="Actualizar alertas" title="Actualizar alertas">${icon("refresh-cw", "h-4 w-4")}</button>
+              </header>
+              <div data-director-alert-content class="max-h-[min(28rem,65dvh)] overflow-y-auto">
+                <div class="grid min-h-40 place-items-center p-5 text-center"><p class="text-xs text-slate-500">Abre la campana para consultar las alertas.</p></div>
+              </div>
+              <footer class="grid grid-cols-2 gap-2 border-t border-slate-100 p-3">
+                <a href="#/director/asistencia" class="inline-flex items-center justify-center gap-1.5 rounded-md bg-blue-50 px-2 py-2 text-[11px] font-semibold text-blue-700">${icon("clipboard-check", "h-3.5 w-3.5")} Asistencia</a>
+                <a href="#/director/notas" class="inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-50 px-2 py-2 text-[11px] font-semibold text-amber-700">${icon("notebook-tabs", "h-3.5 w-3.5")} Notas</a>
+              </footer>
+            </section>
+          </div>
           <div class="hidden items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 md:flex">
             ${icon("calendar-days", "h-5 w-5 text-school-green")}
             <div class="text-right">

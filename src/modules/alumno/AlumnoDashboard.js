@@ -217,7 +217,7 @@ function shellHeader() {
 function panelView() {
   return `
     ${shellHeader()}
-    <section class="student-attendance-alert relative mt-3 hidden overflow-hidden rounded-xl px-3 py-3 sm:px-4 sm:py-3.5" data-student-attendance-warning role="alert" aria-live="assertive"></section>
+    <section class="student-attendance-alert relative mt-4 hidden overflow-hidden rounded-2xl px-4 py-4 sm:px-5 sm:py-5" data-student-attendance-warning role="alert" aria-live="assertive"></section>
     <section class="mt-4 overflow-hidden rounded-2xl border border-school-gold/60 bg-amber-50/60 shadow-soft">
       <div class="flex items-center justify-between gap-3 border-b border-amber-200/80 px-3.5 py-3 sm:px-4">
         <div class="flex min-w-0 items-center gap-2.5">
@@ -332,15 +332,16 @@ function fillPanel(data) {
   if (attendanceWarning && data.attendanceWarning) {
     attendanceWarning.classList.remove("hidden");
     attendanceWarning.innerHTML = `
-      <span class="student-attendance-alert-line absolute inset-x-0 top-0 h-1 bg-red-600"></span>
-      <div class="flex items-start gap-3 pt-1 sm:items-center">
-        <span class="student-attendance-alert-signal grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-red-600 text-white shadow-md shadow-red-200 sm:h-11 sm:w-11">${icon("triangle-alert", "h-5 w-5")}</span>
+      <span class="student-attendance-alert-line absolute inset-x-0 top-0 h-1.5 bg-red-600"></span>
+      <div class="flex items-start gap-3.5 pt-1 sm:gap-4">
+        <span class="student-attendance-alert-signal grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-red-600 text-white shadow-lg shadow-red-200 sm:h-14 sm:w-14">${icon("triangle-alert", "h-6 w-6 sm:h-7 sm:w-7")}</span>
         <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <p class="text-[11px] font-bold uppercase text-red-800 sm:text-xs">Aviso importante de Direccion</p>
-            <span class="rounded-md border border-red-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-red-700">${Number(data.attendanceWarning.faltas || 0)} faltas</span>
+          <div class="flex flex-wrap items-center gap-2.5">
+            <p class="text-sm font-bold uppercase leading-5 text-red-900 sm:text-base">Aviso importante de Direccion</p>
+            <span class="rounded-md bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase text-white sm:text-[11px]">Alerta activa</span>
           </div>
-          <p class="mt-1 break-words text-xs font-medium leading-5 text-slate-800 [overflow-wrap:anywhere] sm:text-sm">${escapeHtml(data.attendanceWarning.mensaje)}</p>
+          <p class="mt-2 break-words text-sm font-semibold leading-6 text-slate-900 [overflow-wrap:anywhere] sm:text-base sm:leading-7">${escapeHtml(data.attendanceWarning.mensaje)}</p>
+          <p class="mt-2.5 inline-flex items-center gap-1.5 text-xs font-bold text-red-800 sm:text-sm">${icon("calendar-x", "h-4 w-4")} ${Number(data.attendanceWarning.faltas || 0)} faltas registradas</p>
         </div>
       </div>
     `;

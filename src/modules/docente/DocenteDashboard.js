@@ -44,7 +44,7 @@ export function DocenteDashboard() {
   });
 
   return appShell("docente", "/docente", `
-    <div class="mx-auto grid w-full max-w-[1120px] gap-2.5 sm:gap-3 lg:h-full lg:grid-rows-[38px_64px_88px_74px_minmax(0,1fr)_92px] lg:overflow-hidden">
+    <div class="mx-auto grid w-full max-w-[1120px] gap-2.5 sm:gap-3 lg:h-full lg:grid-rows-[38px_64px_88px_74px_minmax(0,1fr)_92px] lg:overflow-hidden" data-teacher-page>
       <section class="hidden justify-end sm:flex">
         <div class="w-full max-w-[245px] rounded-xl border border-amber-900/10 bg-white px-4 py-2 text-[11px] font-black capitalize text-school-bark shadow-soft">
           <div class="flex h-full items-center justify-between gap-3">
@@ -56,10 +56,7 @@ export function DocenteDashboard() {
 
       <section class="rounded-lg border border-school-green/20 bg-white px-2.5 py-2 shadow-soft sm:rounded-xl sm:px-3">
         <div class="flex h-full items-center justify-between gap-2">
-          <div class="min-w-0">
-            <p class="text-[8px] font-bold uppercase tracking-[.14em] text-school-green sm:text-[9px] sm:font-black">Trimestre activo</p>
-            <p class="truncate text-xs font-bold text-school-bark sm:text-sm sm:font-black" data-teacher-active-trimester>1er trimestre</p>
-          </div>
+          <p class="text-xs font-medium text-slate-600">Seleccionar trimestre</p>
           <div class="flex shrink-0 gap-1 overflow-x-auto" data-teacher-dashboard-trimesters>
             <span class="rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">Cargando...</span>
           </div>
@@ -70,10 +67,13 @@ export function DocenteDashboard() {
         <div class="absolute inset-y-0 right-0 hidden w-80 bg-gradient-to-l from-school-sky via-school-sky/80 to-transparent lg:block"></div>
         <img src="${publicAsset("images/logo-nueva-bolivia.png")}" alt="" class="absolute right-20 top-1/2 hidden h-20 -translate-y-1/2 object-contain opacity-20 lg:block">
         <div class="relative flex h-full items-center justify-between gap-4">
-          <div class="min-w-0">
-            <p class="hidden text-[9px] font-black uppercase tracking-[.18em] text-school-green sm:block">Unidad Educativa Ecologica Nueva Bolivia</p>
-            <h1 class="truncate text-base font-bold leading-tight text-school-bark sm:text-xl sm:font-black" data-teacher-welcome>Cargando datos del docente...</h1>
-            <p class="mt-0.5 truncate text-[10px] font-medium text-slate-500 sm:mt-1 sm:text-[12px] sm:font-semibold">Tus cursos, materias y jornada de hoy.</p>
+          <div class="teacher-module-heading min-w-0">
+            <h1 class="teacher-module-title">Panel docente</h1>
+            <div class="teacher-module-context">
+              <span class="teacher-module-context-item">${icon("graduation-cap", "h-3.5 w-3.5")}<span data-teacher-header-courses>Cargando cursos...</span></span>
+              <span class="teacher-module-context-item">${icon("calendar-range", "h-3.5 w-3.5")}<span data-teacher-active-trimester>1er trimestre</span></span>
+              <span class="teacher-module-detail" data-teacher-welcome>Cargando datos del docente...</span>
+            </div>
           </div>
           <div class="hidden shrink-0 rounded-xl border border-school-green/20 bg-green-50 px-3 py-2 text-[11px] font-black text-school-green sm:inline-flex" data-teacher-status>
             Conectando con Firebase

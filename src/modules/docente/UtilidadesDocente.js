@@ -38,6 +38,21 @@ export function emptyState(message, detail = "") {
   `;
 }
 
+export function teacherModuleHeading({ title, course = "", trimester = "", detail = "" } = {}) {
+  const contextItems = [
+    course ? `<span class="teacher-module-context-item">${icon("graduation-cap", "h-3.5 w-3.5")}<span>${escapeHtml(course)}</span></span>` : "",
+    trimester ? `<span class="teacher-module-context-item">${icon("calendar-range", "h-3.5 w-3.5")}<span>${escapeHtml(trimester)}</span></span>` : "",
+    detail ? `<span class="teacher-module-detail">${escapeHtml(detail)}</span>` : ""
+  ].filter(Boolean);
+
+  return `
+    <div class="teacher-module-heading min-w-0">
+      <h2 class="teacher-module-title">${escapeHtml(title)}</h2>
+      ${contextItems.length ? `<div class="teacher-module-context">${contextItems.join("")}</div>` : ""}
+    </div>
+  `;
+}
+
 export function courseSubjectsBadges(course) {
   if (!course?.materias?.length) return `<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-500">Sin materias</span>`;
   return course.materias.map((subjectId) => {

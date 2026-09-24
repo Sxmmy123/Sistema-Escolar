@@ -24,14 +24,14 @@ function statusFor(form, selector, message, type = "info") {
   const tone = type === "error"
     ? "border-red-200 bg-red-50 text-red-700"
     : "border-green-200 bg-green-50 text-green-700";
-  status.className = `mt-3 rounded-xl border px-3 py-2 text-xs font-bold sm:mt-4 sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm ${tone}`;
+  status.className = `mt-3 rounded-lg border px-3 py-2.5 text-xs font-medium ${tone}`;
   status.textContent = message;
 }
 
 function updateTabs(container, activeCourseId) {
   container?.querySelectorAll("button[data-course-id]").forEach((button) => {
     const active = button.dataset.courseId === activeCourseId;
-    button.className = `shrink-0 rounded-xl border px-3 py-2 text-xs font-black transition sm:rounded-2xl sm:px-4 sm:text-sm ${active ? "border-school-navy bg-school-navy text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
+    button.className = `shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition ${active ? "border-school-green bg-school-green text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/30 hover:bg-green-50"}`;
   });
 }
 
@@ -46,11 +46,11 @@ function renderUserRows(role, users) {
 
   tbody.innerHTML = users.map((user) => `
     <tr>
-      <td class="px-3 py-2 font-black text-slate-800 sm:px-4 sm:py-3">${user.nombre || "Sin nombre"}</td>
-      <td class="px-3 py-2 font-semibold text-slate-600 sm:px-4 sm:py-3">${user.usuario || "-"}</td>
-      <td class="px-3 py-2 font-semibold text-slate-600 sm:px-4 sm:py-3">${user.correoRecuperacion || "-"}</td>
-      <td class="px-3 py-2 font-semibold text-slate-600 sm:px-4 sm:py-3">${user.rol || role}</td>
-      <td class="px-3 py-2 sm:px-4 sm:py-3"><span class="rounded-full ${user.activo === false ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"} px-2.5 py-1 text-[11px] font-black sm:px-3 sm:text-xs">${user.activo === false ? "Inactivo" : "Activo"}</span></td>
+      <td class="px-4 py-2.5 font-medium text-slate-800">${user.nombre || "Sin nombre"}</td>
+      <td class="px-4 py-2.5 text-slate-600">${user.usuario || "-"}</td>
+      <td class="px-4 py-2.5 text-slate-600">${user.correoRecuperacion || "-"}</td>
+      <td class="px-4 py-2.5 text-slate-600">${user.rol || role}</td>
+      <td class="px-4 py-2.5"><span class="rounded-full ${user.activo === false ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"} px-2.5 py-1 text-[10px] font-medium">${user.activo === false ? "Inactivo" : "Activo"}</span></td>
     </tr>
   `).join("");
 }
@@ -69,14 +69,281 @@ async function refreshUsers(role) {
 
 function collectTeacherAssignments(form) {
   const result = {};
-  form.querySelectorAll("[data-assignment-course]").forEach((card) => {
-    const courseId = card.dataset.assignmentCourse;
-    const checked = card.querySelector("[data-assignment-course-check]")?.checked;
+  form.querySelectorAll("[data-assignment-course]").forEach((panel) => {
+    const courseId = panel.dataset.assignmentCourse;
+    const checked = form.querySelector(`[data-assignment-course-check][value="${courseId}"]`)?.checked;
     if (!checked) return;
-    const materias = [...card.querySelectorAll(`[data-assignment-subject="${courseId}"]:checked`)].map((input) => input.value);
+    const materias = [...panel.querySelectorAll(`[data-assignment-subject="${courseId}"]:checked`)].map((input) => input.value);
     if (materias.length) result[courseId] = { materias };
   });
   return result;
+}
+
+function assignmentTabClass(active) {
+  if (active) {
+    return "inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-school-green bg-school-green px-2 py-2 text-center text-xs font-medium text-white shadow-sm transition";
+  }
+  return "inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-school-green/25 bg-green-50 px-2 py-2 text-center text-xs font-medium text-school-green transition hover:border-school-green/50";
+}
+
+function bindTeacherAssignmentBuilder(form) {
+  const root = form.querySelector("[data-teacher-assignment]");
+  if (!root) return null;
+
+  const courseChecks = [...form.querySelectorAll("[data-assignment-course-check]")];
+  const tabs = [...root.querySelectorAll("[data-assignment-course-tab]")];
+  const panels = [...root.querySelectorAll("[data-assignment-course]")];
+  const courseTotal = form.querySelector("[data-selected-course-total]");
+  const subjectCourseTotal = form.querySelector("[data-subject-course-total]");
+  let activeCourseId = "";
+
+  const selectedCourseIds = () => courseChecks.filter((input) => input.checked).map((input) => input.value);
+
+  const setActiveCourse = (courseId) => {
+    if (!selectedCourseIds().includes(courseId)) return;
+    activeCourseId = courseId;
+    tabs.forEach((tab) => {
+      const active = tab.dataset.assignmentCourseTab === courseId;
+      if (!selectedCourseIds().includes(tab.dataset.assignmentCourseTab)) return;
+      tab.className = assignmentTabClass(active);
+      tab.setAttribute("aria-selected", String(active));
+    });
+    panels.forEach((panel) => panel.classList.toggle("hidden", panel.dataset.assignmentCourse !== courseId));
+  };
+
+  const render = () => {
+    const selectedIds = selectedCourseIds();
+    if (!selectedIds.includes(activeCourseId)) activeCourseId = selectedIds[0] || "";
+
+    panels.forEach((panel) => {
+      const courseId = panel.dataset.assignmentCourse;
+      const selectedSubjects = [...panel.querySelectorAll(`[data-assignment-subject="${courseId}"]:checked`)];
+      const panelCount = panel.querySelector("[data-assignment-panel-count]");
+      const tabCount = root.querySelector(`[data-assignment-course-count="${courseId}"]`);
+      const count = selectedSubjects.length;
+
+      if (panelCount) panelCount.textContent = count ? `${count} ${count === 1 ? "materia seleccionada" : "materias seleccionadas"}` : "Sin materias seleccionadas";
+      if (tabCount) {
+        tabCount.textContent = String(count);
+        tabCount.className = `${count ? "" : "hidden "}min-w-5 rounded-full px-1.5 py-0.5 text-[9px] ${courseId === activeCourseId ? "bg-white/20 text-white" : "bg-green-100 text-green-700"}`;
+      }
+      panel.classList.toggle("hidden", courseId !== activeCourseId);
+    });
+
+    tabs.forEach((tab) => {
+      const courseId = tab.dataset.assignmentCourseTab;
+      const selected = selectedIds.includes(courseId);
+      tab.className = selected ? assignmentTabClass(courseId === activeCourseId) : "hidden";
+      tab.setAttribute("aria-selected", String(selected && courseId === activeCourseId));
+    });
+
+    const totalLabel = `${selectedIds.length} ${selectedIds.length === 1 ? "curso" : "cursos"}`;
+    if (courseTotal) courseTotal.textContent = totalLabel;
+    if (subjectCourseTotal) subjectCourseTotal.textContent = totalLabel;
+  };
+
+  const clearSubjects = (courseId, shouldRender = true) => {
+    const panel = panels.find((item) => item.dataset.assignmentCourse === courseId);
+    panel?.querySelectorAll(`[data-assignment-subject="${courseId}"]`).forEach((input) => {
+      input.checked = false;
+    });
+    if (shouldRender) render();
+  };
+
+  root.addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-assignment-course-tab]");
+    if (tab) {
+      setActiveCourse(tab.dataset.assignmentCourseTab);
+      render();
+      return;
+    }
+
+    const selectAll = event.target.closest("[data-assignment-select-all]");
+    if (selectAll) {
+      const courseId = selectAll.dataset.assignmentSelectAll;
+      const panel = panels.find((item) => item.dataset.assignmentCourse === courseId);
+      panel?.querySelectorAll(`[data-assignment-subject="${courseId}"]`).forEach((input) => {
+        input.checked = true;
+      });
+      render();
+      return;
+    }
+
+    const clear = event.target.closest("[data-assignment-clear]");
+    if (clear) {
+      clearSubjects(clear.dataset.assignmentClear);
+    }
+  });
+
+  form.addEventListener("change", (event) => {
+    if (event.target.matches("[data-assignment-course-check]")) {
+      if (!event.target.checked) clearSubjects(event.target.value, false);
+      render();
+      return;
+    }
+    if (event.target.matches("[data-assignment-subject]")) render();
+  });
+
+  const reset = () => {
+    form.querySelectorAll("[data-assignment-subject], [data-assignment-course-check]").forEach((input) => {
+      input.checked = false;
+    });
+    activeCourseId = "";
+    render();
+  };
+
+  const missingCourses = () => selectedCourseIds().filter((courseId) => {
+    const panel = panels.find((item) => item.dataset.assignmentCourse === courseId);
+    return !panel?.querySelector(`[data-assignment-subject="${courseId}"]:checked`);
+  });
+
+  render();
+  return { getSelectedCourseIds: selectedCourseIds, missingCourses, render, reset, setActiveCourse };
+}
+
+function hideFormStatus(form) {
+  const status = form.querySelector("[data-form-status]");
+  if (!status) return;
+  status.classList.add("hidden");
+  status.textContent = "";
+}
+
+function renderTeacherConfirmation(form) {
+  const target = form.querySelector("[data-teacher-confirmation]");
+  if (!target) return;
+  const data = new FormData(form);
+  const assignments = collectTeacherAssignments(form);
+  const email = String(data.get("emailRecuperacion") || "").trim();
+
+  target.innerHTML = `
+    <section class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div class="flex items-center justify-between gap-3">
+        <div><p class="text-[10px] font-semibold uppercase tracking-[.12em] text-school-green">Cuenta del docente</p><h3 class="mt-0.5 text-base font-semibold text-slate-900">${escapeHtml(data.get("nombre") || "-")}</h3></div>
+        <span class="rounded-full bg-white px-2.5 py-1 text-[10px] font-medium text-slate-500">Datos personales</span>
+      </div>
+      <dl class="mt-3 grid gap-2 sm:grid-cols-3">
+        <div class="rounded-md bg-white px-3 py-2"><dt class="text-[9px] uppercase text-slate-400">Usuario</dt><dd class="mt-0.5 text-xs font-medium text-slate-800">${escapeHtml(data.get("username") || "-")}</dd></div>
+        <div class="rounded-md bg-white px-3 py-2"><dt class="text-[9px] uppercase text-slate-400">Recuperacion</dt><dd class="mt-0.5 break-all text-xs font-medium text-slate-800">${escapeHtml(email || "Sin correo")}</dd></div>
+        <div class="rounded-md bg-white px-3 py-2"><dt class="text-[9px] uppercase text-slate-400">Contrasena temporal</dt><dd class="mt-0.5 text-xs font-medium text-slate-800">${escapeHtml(data.get("password") || "-")}</dd></div>
+      </dl>
+    </section>
+    <section class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="flex items-center justify-between gap-3"><div><p class="text-[10px] font-semibold uppercase tracking-[.12em] text-school-green">Asignacion academica</p><h3 class="mt-0.5 text-sm font-semibold text-slate-900">Cursos y materias</h3></div><span class="rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-medium text-school-green">${Object.keys(assignments).length} curso(s)</span></div>
+      <div class="mt-3 grid gap-2 md:grid-cols-2">
+        ${Object.entries(assignments).map(([courseId, value]) => `
+          <article class="rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <p class="text-xs font-semibold text-slate-900">${findCourse(courseId).nombre}</p>
+            <div class="mt-2 flex flex-wrap gap-1">${value.materias.map((subjectId) => {
+              const subject = findSubject(subjectId);
+              return `<span class="rounded-md px-2 py-1 text-[9px] text-slate-700" style="background:${subject?.color || "#f1f5f9"}">${subject?.nombre || subjectId}</span>`;
+            }).join("")}</div>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function bindTeacherWizard(form, assignmentBuilder) {
+  const steps = [...form.querySelectorAll("[data-teacher-step]")];
+  const progress = [...form.querySelectorAll("[data-teacher-progress-step]")];
+  let currentStep = 1;
+
+  const setStep = (step) => {
+    currentStep = step;
+    steps.forEach((panel) => panel.classList.toggle("hidden", Number(panel.dataset.teacherStep) !== step));
+    progress.forEach((item) => {
+      const stepNumber = Number(item.dataset.teacherProgressStep);
+      const done = stepNumber < step;
+      const active = stepNumber === step;
+      const circle = item.querySelector("[data-teacher-progress-circle]");
+      const title = item.querySelector("[data-teacher-progress-title]");
+      const status = item.querySelector("[data-teacher-progress-status]");
+      const line = item.querySelector("[data-teacher-progress-line]");
+      if (circle) circle.className = `relative z-10 mx-auto grid h-8 w-8 place-items-center rounded-full text-xs font-semibold transition ${active ? "bg-school-green text-white ring-4 ring-green-100" : done ? "bg-school-green text-white" : "bg-slate-200 text-slate-500"}`;
+      if (title) title.className = `mt-2 truncate px-0.5 text-[9px] font-medium sm:text-[10px] ${active || done ? "text-school-green" : "text-slate-500"}`;
+      if (status) {
+        status.textContent = done || step === 5 && active ? "Completado" : active ? "Paso actual" : "Pendiente";
+        status.className = `mt-0.5 hidden text-[9px] md:block ${active || done ? "text-school-green" : "text-slate-400"}`;
+      }
+      if (line) line.className = `absolute left-1/2 top-4 h-0.5 w-full ${done ? "bg-school-green" : "bg-slate-200"}`;
+    });
+    hideFormStatus(form);
+    if (step === 3) assignmentBuilder?.render();
+    if (step === 4) renderTeacherConfirmation(form);
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const advance = (nextStep) => {
+    if (currentStep === 1) {
+      ["nombre", "username", "emailRecuperacion", "password"].forEach((name) => {
+        const input = form.elements.namedItem(name);
+        if (input && typeof input.value === "string") input.value = input.value.trim();
+      });
+      if (!form.reportValidity()) return;
+    }
+
+    if (currentStep === 2 && !assignmentBuilder?.getSelectedCourseIds().length) {
+      statusFor(form, "[data-form-status]", "Selecciona al menos un curso para continuar.", "error");
+      return;
+    }
+
+    if (currentStep === 3) {
+      const missing = assignmentBuilder?.missingCourses() || [];
+      if (missing.length) {
+        assignmentBuilder?.setActiveCourse(missing[0]);
+        assignmentBuilder?.render();
+        statusFor(form, "[data-form-status]", `Selecciona al menos una materia para ${findCourse(missing[0]).nombre}.`, "error");
+        return;
+      }
+    }
+
+    setStep(nextStep);
+  };
+
+  form.addEventListener("click", (event) => {
+    const next = event.target.closest("[data-teacher-next]");
+    if (next) {
+      advance(Number(next.dataset.teacherNext));
+      return;
+    }
+    const back = event.target.closest("[data-teacher-back]");
+    if (back) {
+      setStep(Number(back.dataset.teacherBack));
+      return;
+    }
+    if (event.target.closest("[data-teacher-restart]")) {
+      form.reset();
+      assignmentBuilder?.reset();
+      setStep(1);
+      form.elements.namedItem("nombre")?.focus();
+    }
+  });
+
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && currentStep === 1 && event.target.matches("input")) {
+      event.preventDefault();
+      advance(2);
+    }
+  });
+
+  const showSuccess = (createdUser, assignments, password) => {
+    const details = form.querySelector("[data-teacher-success-details]");
+    if (details) {
+      const subjectCount = Object.values(assignments).reduce((total, value) => total + (value.materias?.length || 0), 0);
+      details.innerHTML = `
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div><p class="text-[9px] uppercase text-slate-400">Docente</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${escapeHtml(createdUser.nombre || "-")}</p></div>
+          <div><p class="text-[9px] uppercase text-slate-400">Usuario</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${escapeHtml(createdUser.usuario || "-")}</p></div>
+          <div><p class="text-[9px] uppercase text-slate-400">Contrasena temporal</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${escapeHtml(password || "-")}</p></div>
+          <div><p class="text-[9px] uppercase text-slate-400">Asignacion</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${Object.keys(assignments).length} curso(s) · ${subjectCount} materia(s)</p></div>
+        </div>`;
+    }
+    setStep(5);
+  };
+
+  setStep(1);
+  return { currentStep: () => currentStep, showSuccess };
 }
 
 function assignmentSummary(assignments) {
@@ -85,9 +352,12 @@ function assignmentSummary(assignments) {
 }
 function bindCreateForms() {
   document.querySelectorAll("[data-create-user-form]").forEach((form) => {
+    const assignmentBuilder = form.dataset.role === "docente" ? bindTeacherAssignmentBuilder(form) : null;
+    const teacherWizard = form.dataset.role === "docente" ? bindTeacherWizard(form, assignmentBuilder) : null;
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const role = form.dataset.role;
+      if (role === "docente" && teacherWizard?.currentStep() !== 4) return;
       const button = form.querySelector("button[type='submit']");
       const data = new FormData(form);
       const assignments = role === "docente" ? collectTeacherAssignments(form) : {};
@@ -119,8 +389,15 @@ function bindCreateForms() {
             ? { rol: role, usuario: createdUser.usuario, nombre: createdUser.nombre, asignacion: assignmentSummary(assignments) }
             : { rol: role, usuario: createdUser.usuario, nombre: createdUser.nombre }
         });
-        form.reset();
-        statusFor(form, "[data-form-status]", "Usuario creado correctamente.");
+        if (role === "docente") {
+          teacherWizard?.showSuccess(createdUser, assignments, data.get("password"));
+          form.reset();
+          assignmentBuilder?.reset();
+          hideFormStatus(form);
+        } else {
+          form.reset();
+          statusFor(form, "[data-form-status]", "Usuario creado correctamente.");
+        }
         await refreshUsers(role);
       } catch (error) {
         statusFor(form, "[data-form-status]", error.message || "No se pudo crear el usuario.", "error");
@@ -147,11 +424,11 @@ function renderStudentRows(students) {
 
   tbody.innerHTML = students.map((student) => `
     <tr>
-      <td class="px-3 py-2 font-black text-slate-700 sm:px-4 sm:py-3">${student.numeroLista || "-"}</td>
-      <td class="px-3 py-2 font-semibold text-slate-900 sm:px-4 sm:py-3">${student.nombre || "-"}</td>
-      <td class="px-3 py-2 font-semibold text-slate-600 sm:px-4 sm:py-3">${student.ci || "-"}</td>
-      <td class="px-3 py-2 sm:px-4 sm:py-3"><span class="rounded-full ${student.activo === false ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"} px-2.5 py-1 text-[11px] font-black sm:px-3 sm:text-xs">${student.activo === false ? "Retirado" : "Activo"}</span></td>
-      <td class="px-3 py-2 sm:px-4 sm:py-3"><button class="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-black text-school-navy sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs" data-toggle-student="${student.id}" data-active="${student.activo !== false}">${student.activo === false ? "Habilitar" : "Retirar"}</button></td>
+      <td class="px-3 py-2.5 font-medium text-slate-700">${student.numeroLista || "-"}</td>
+      <td class="px-3 py-2.5 font-medium text-slate-900">${student.nombre || "-"}</td>
+      <td class="px-3 py-2.5 text-slate-600">${student.ci || "-"}</td>
+      <td class="px-3 py-2.5"><span class="rounded-full ${student.activo === false ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"} px-2.5 py-1 text-[10px] font-medium">${student.activo === false ? "Retirado" : "Activo"}</span></td>
+      <td class="px-3 py-2.5"><button class="rounded-md border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-school-green hover:bg-green-50" data-toggle-student="${student.id}" data-active="${student.activo !== false}">${student.activo === false ? "Habilitar" : "Retirar"}</button></td>
     </tr>
   `).join("");
 
@@ -347,7 +624,7 @@ function scheduleCellButton(subjectId, periodId, dayId) {
   const textClass = subject ? "text-slate-900" : "text-slate-400";
 
   return `
-    <button type="button" data-schedule-cell data-period-id="${periodId}" data-day-id="${dayId}" class="min-h-10 w-full rounded-xl border border-slate-200 px-2 py-1.5 text-center text-[11px] font-black leading-tight transition hover:-translate-y-0.5 hover:border-school-navy hover:shadow-soft sm:min-h-12 sm:rounded-2xl sm:px-3 sm:py-2 sm:text-sm ${textClass}" style="background:${color}">
+    <button type="button" data-schedule-cell data-period-id="${periodId}" data-day-id="${dayId}" class="min-h-10 w-full rounded-md border border-slate-200 px-2 py-1.5 text-center text-[11px] font-medium leading-tight transition hover:border-school-green hover:shadow-sm sm:min-h-11 sm:text-xs ${textClass}" style="background:${color}">
       ${text}
     </button>
   `;
@@ -406,18 +683,18 @@ function renderScheduleGrid(schedule) {
   if (!grid) return;
 
   grid.innerHTML = `
-    <table class="min-w-[760px] border-separate border-spacing-0 text-left text-xs sm:text-sm">
-      <thead class="bg-school-navy text-white">
-        <tr><th class="px-3 py-2 font-black sm:px-4 sm:py-3">Per.</th><th class="px-3 py-2 font-black sm:px-4 sm:py-3">Hora</th>${DAYS.map((day) => `<th class="px-3 py-2 text-center font-black sm:px-4 sm:py-3">${day.label}</th>`).join("")}</tr>
+    <table class="min-w-[760px] w-full border-separate border-spacing-0 text-left text-xs">
+      <thead class="bg-[#123d24] text-white">
+        <tr><th class="px-3 py-2.5 font-medium">Per.</th><th class="px-3 py-2.5 font-medium">Hora</th>${DAYS.map((day) => `<th class="px-3 py-2.5 text-center font-medium">${day.label}</th>`).join("")}</tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
         ${periods.map((period) => `
           <tr class="${period.recreo ? "bg-slate-50" : ""}">
-            <td class="px-3 py-2 text-center font-black text-slate-700 sm:px-4 sm:py-3">${period.label}</td>
-            <td class="whitespace-nowrap px-3 py-2 font-semibold text-slate-600 sm:px-4 sm:py-3">${period.hora}</td>
+            <td class="px-3 py-2 text-center font-medium text-slate-700">${period.label}</td>
+            <td class="whitespace-nowrap px-3 py-2 text-slate-600">${period.hora}</td>
             ${DAYS.map((day) => {
               const selected = state.schedule.clases?.[period.id]?.[day.id] || "";
-              return `<td class="min-w-28 px-1.5 py-1.5 sm:min-w-40 sm:px-2 sm:py-2">${period.recreo ? `<div class="grid min-h-10 place-items-center rounded-xl border border-slate-200 bg-slate-100 text-[11px] font-black text-slate-400 sm:min-h-12 sm:rounded-2xl sm:text-sm">Recreo</div>` : scheduleCellButton(selected, period.id, day.id)}</td>`;
+              return `<td class="min-w-28 px-1.5 py-1.5 sm:min-w-36">${period.recreo ? `<div class="grid min-h-10 place-items-center rounded-md border border-slate-200 bg-slate-100 text-[10px] font-medium text-slate-400 sm:min-h-11">Recreo</div>` : scheduleCellButton(selected, period.id, day.id)}</td>`;
             }).join("")}
           </tr>
         `).join("")}
@@ -553,18 +830,18 @@ function renderAuditRows(items) {
   if (!tbody) return;
 
   if (!items.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-5 font-bold text-slate-500">No hay movimientos para estos filtros.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-5 text-slate-500">No hay movimientos para estos filtros.</td></tr>`;
     return;
   }
 
   tbody.innerHTML = items.map((item) => `
     <tr>
-      <td class="whitespace-nowrap px-4 py-3 font-black text-slate-800">${escapeHtml(item.hora || "-")}</td>
-      <td class="px-4 py-3 font-semibold text-slate-600"><span class="block">${escapeHtml(item.usuario || "-")}</span><span class="text-xs font-black text-slate-400">${escapeHtml(item.rol || "-")}</span></td>
-      <td class="px-4 py-3 font-semibold text-slate-600">${escapeHtml(item.tipo || "-")}</td>
-      <td class="px-4 py-3"><span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">${escapeHtml(item.accion || "-")}</span></td>
-      <td class="px-4 py-3 font-semibold text-slate-700">${escapeHtml(item.detalle || "Movimiento registrado")}</td>
-      <td class="px-4 py-3 text-right"><button class="rounded-xl border border-school-navy px-3 py-1.5 text-xs font-black text-school-navy" data-audit-open="${item.id}">Ver</button></td>
+      <td class="whitespace-nowrap px-4 py-2.5 font-medium text-slate-800">${escapeHtml(item.hora || "-")}</td>
+      <td class="px-4 py-2.5 text-slate-600"><span class="block font-medium">${escapeHtml(item.usuario || "-")}</span><span class="text-[10px] text-slate-400">${escapeHtml(item.rol || "-")}</span></td>
+      <td class="px-4 py-2.5 text-slate-600">${escapeHtml(item.tipo || "-")}</td>
+      <td class="px-4 py-2.5"><span class="rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-medium text-green-700">${escapeHtml(item.accion || "-")}</span></td>
+      <td class="px-4 py-2.5 text-slate-700">${escapeHtml(item.detalle || "Movimiento registrado")}</td>
+      <td class="px-4 py-2.5 text-right"><button class="rounded-md border border-school-green px-3 py-1.5 text-[11px] font-medium text-school-green hover:bg-green-50" data-audit-open="${item.id}">Ver</button></td>
     </tr>
   `).join("");
 
@@ -580,19 +857,19 @@ function openAuditDetail(id) {
   if (!item || !modal || !detail) return;
 
   const dataRows = Object.entries(item.datos || {}).map(([key, value]) => `
-    <div class="rounded-2xl bg-slate-50 px-4 py-3">
-      <p class="text-xs font-black uppercase tracking-[.16em] text-slate-400">${escapeHtml(key)}</p>
-      <p class="mt-1 font-black text-slate-800">${escapeHtml(typeof value === "object" ? JSON.stringify(value) : value)}</p>
+    <div class="rounded-lg bg-slate-50 px-4 py-3">
+      <p class="text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400">${escapeHtml(key)}</p>
+      <p class="mt-1 text-sm font-medium text-slate-800">${escapeHtml(typeof value === "object" ? JSON.stringify(value) : value)}</p>
     </div>
   `).join("");
 
   detail.innerHTML = `
-    <div class="rounded-3xl border border-slate-200 bg-white p-5">
+    <div class="rounded-lg border border-slate-200 bg-white p-4">
       <div class="flex flex-wrap gap-2">
-        <span class="rounded-full bg-school-navy px-3 py-1 text-xs font-black text-white">${escapeHtml(item.tipo || "sistema")}</span>
-        <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">${escapeHtml(item.accion || "movimiento")}</span>
+        <span class="rounded-full bg-school-green px-3 py-1 text-[10px] font-medium text-white">${escapeHtml(item.tipo || "sistema")}</span>
+        <span class="rounded-full bg-green-50 px-3 py-1 text-[10px] font-medium text-green-700">${escapeHtml(item.accion || "movimiento")}</span>
       </div>
-      <h4 class="mt-4 text-xl font-black text-slate-900">${escapeHtml(item.detalle || "Movimiento registrado")}</h4>
+      <h4 class="mt-3 text-lg font-semibold text-slate-900">${escapeHtml(item.detalle || "Movimiento registrado")}</h4>
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div><p class="text-xs font-black uppercase tracking-[.16em] text-slate-400">Usuario</p><p class="font-black text-slate-800">${escapeHtml(item.usuario || "-")}</p></div>
         <div><p class="text-xs font-black uppercase tracking-[.16em] text-slate-400">Rol</p><p class="font-black text-slate-800">${escapeHtml(item.rol || "-")}</p></div>
@@ -1217,8 +1494,8 @@ function bindHistoricalPage() {
     document.querySelectorAll("[data-historical-tab]").forEach((button) => {
       const active = button.dataset.historicalTab === tab;
       button.className = active
-        ? "rounded-xl bg-school-green px-4 py-2 text-sm font-black text-white"
-        : "rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-school-green hover:bg-green-50";
+        ? "inline-flex items-center justify-center gap-1.5 rounded-lg bg-school-green px-4 py-2 text-xs font-semibold text-white"
+        : "inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-school-green hover:bg-green-50";
     });
     document.querySelectorAll("[data-historical-section]").forEach((section) => {
       section.classList.toggle("hidden", section.dataset.historicalSection !== tab);

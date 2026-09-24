@@ -21,7 +21,220 @@ body.mobile-sidebar-open {
   overflow: hidden;
 }
 
+/* Escala visual compartida para todos los modulos del docente. */
+.teacher-shell [data-teacher-ui] {
+  font-size: .875rem;
+  line-height: 1.45;
+}
+
+.teacher-shell [data-teacher-page] {
+  color: #475569;
+}
+
+.teacher-shell [data-teacher-page] .font-black,
+.teacher-shell [data-teacher-page] .font-bold,
+.teacher-shell [data-teacher-page] .font-semibold {
+  font-weight: 500;
+}
+
+.teacher-shell [data-teacher-page] .rounded-3xl {
+  border-radius: .75rem;
+}
+
+.teacher-shell [data-teacher-page] .rounded-2xl {
+  border-radius: .625rem;
+}
+
+.teacher-shell [data-teacher-page] .shadow-soft {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 8px 24px rgba(15, 23, 42, .035);
+}
+
+.teacher-shell [data-teacher-page] input,
+.teacher-shell [data-teacher-page] select,
+.teacher-shell [data-teacher-page] textarea,
+.teacher-shell [data-teacher-page] button,
+.teacher-shell [data-teacher-page] a {
+  letter-spacing: 0;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-surface {
+  border-radius: .75rem;
+  border-color: #dfe5ec;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 8px 24px rgba(15, 23, 42, .035);
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-header {
+  gap: .75rem;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-heading {
+  display: grid;
+  align-content: center;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0;
+  color: #172033;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .3rem .75rem;
+  margin-top: .45rem;
+  color: #64748b;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-context-item {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .8125rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: #334155;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-context-item svg {
+  color: #087b2b;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-context-item + .teacher-module-context-item,
+.teacher-shell [data-teacher-page] .teacher-module-detail {
+  position: relative;
+  padding-left: .75rem;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-context-item + .teacher-module-context-item::before,
+.teacher-shell [data-teacher-page] .teacher-module-detail::before {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  content: "";
+  transform: translateY(-50%);
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-detail {
+  font-size: .75rem;
+  font-weight: 400;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-subtitle {
+  font-weight: 500;
+}
+
+.teacher-shell [data-teacher-page] .teacher-module-header button,
+.teacher-shell [data-teacher-page] .teacher-module-header a,
+.teacher-shell [data-teacher-page] .teacher-module-header input,
+.teacher-shell [data-teacher-page] .teacher-module-header select {
+  font-weight: 500;
+}
+
+@media (max-width: 639px) {
+  .teacher-shell [data-teacher-page] .teacher-module-title {
+    font-size: 1.125rem;
+  }
+
+  .teacher-shell [data-teacher-page] .teacher-module-context-item {
+    font-size: .75rem;
+  }
+
+  .teacher-shell [data-teacher-page] .teacher-module-detail {
+    flex-basis: 100%;
+    padding-left: 0;
+    font-size: .6875rem;
+  }
+
+  .teacher-shell [data-teacher-page] .teacher-module-detail::before {
+    display: none;
+  }
+
+  .teacher-shell [data-teacher-page] .teacher-module-surface {
+    border-radius: .625rem;
+  }
+}
+
+.teacher-shell .regularization-attendance-rail {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0;
+  transform: rotate(180deg);
+}
+
+.admin-shell [data-admin-page] .font-black {
+  font-weight: 600;
+}
+
+.admin-shell [data-admin-page] .font-bold {
+  font-weight: 600;
+}
+
+.admin-shell [data-admin-page] .rounded-2xl,
+.admin-shell [data-admin-page] .rounded-3xl {
+  border-radius: .5rem;
+}
+
+.admin-shell [data-admin-page] .shadow-soft {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+}
+
+.admin-shell [data-admin-page] input,
+.admin-shell [data-admin-page] select,
+.admin-shell [data-admin-page] textarea,
+.admin-shell [data-admin-page] button {
+  letter-spacing: 0;
+}
+
+.admin-shell [data-admin-page] table tbody tr {
+  transition: background-color .15s ease;
+}
+
+.admin-shell [data-admin-page] table tbody tr:hover {
+  background: #f8faf9;
+}
+
+.admin-shell [data-admin-page] [data-historical-grid] table thead,
+.admin-shell [data-admin-page] [data-historical-grades-grid] table thead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+@media (max-width: 639px) {
+  .admin-shell [data-admin-page] .p-5,
+  .admin-shell [data-admin-page] .sm\:p-5 {
+    padding: .875rem;
+  }
+
+  .admin-shell [data-admin-page] table {
+    font-size: .6875rem;
+  }
+}
+
 @media (min-width: 1024px) {
+  .student-shell {
+    padding-left: 14.5rem;
+  }
+
+  .student-sidebar {
+    width: 14.5rem;
+  }
+
+  .student-sidebar-link.is-active {
+    box-shadow: inset 3px 0 0 #087B2B;
+  }
+
   .teacher-shell {
     padding-left: 15.5rem;
     transition: padding-left .2s ease;
@@ -129,8 +342,9 @@ textarea {
 
 .student-attendance-alert {
   border: 2px solid #dc2626;
+  border-left-width: 6px;
   background: #fff1f2;
-  box-shadow: 0 8px 22px rgba(185, 28, 28, .16);
+  box-shadow: 0 12px 30px rgba(185, 28, 28, .2);
   animation: studentAttendanceAlert 1.25s ease-in-out infinite;
 }
 
@@ -142,11 +356,11 @@ textarea {
 @keyframes studentAttendanceAlert {
   0%, 100% {
     border-color: #dc2626;
-    box-shadow: 0 8px 22px rgba(185, 28, 28, .16), 0 0 0 0 rgba(220, 38, 38, .18);
+    box-shadow: 0 12px 30px rgba(185, 28, 28, .2), 0 0 0 0 rgba(220, 38, 38, .2);
   }
   50% {
     border-color: #f7b51b;
-    box-shadow: 0 10px 28px rgba(185, 28, 28, .26), 0 0 0 5px rgba(220, 38, 38, .08);
+    box-shadow: 0 14px 36px rgba(185, 28, 28, .3), 0 0 0 6px rgba(220, 38, 38, .1);
   }
 }
 

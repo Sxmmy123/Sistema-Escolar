@@ -156,6 +156,13 @@ export async function listDirectorActivities(trimestreId = "") {
   return rows(snap).filter((item) => !item.interno && !["material", "materiales"].includes(String(item.tipo || "").toLowerCase()));
 }
 
+export async function listDirectorAllActivities(trimestreId = "") {
+  const filters = [where("activo", "==", true)];
+  if (trimestreId) filters.push(where("trimestreId", "==", trimestreId));
+  const snap = await getDocs(query(collection(firestore, "actividades"), ...filters));
+  return rows(snap);
+}
+
 export async function listDirectorGrades(trimestreId = "") {
   const filters = [];
   if (trimestreId) filters.push(where("trimestreId", "==", trimestreId));

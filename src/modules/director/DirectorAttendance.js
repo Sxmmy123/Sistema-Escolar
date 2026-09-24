@@ -33,6 +33,24 @@ const attendanceState = {
   notice: ""
 };
 
+function consumeRequestedStudent() {
+  const studentId = sessionStorage.getItem("directorAsistenciaEstudiante") || "";
+  const courseId = sessionStorage.getItem("directorAsistenciaCursoSolicitado") || "";
+  const trimesterId = sessionStorage.getItem("directorAsistenciaTrimestreSolicitado") || "";
+  if (courseId && COURSES.some((item) => item.id === courseId)) {
+    attendanceState.courseId = courseId;
+    sessionStorage.setItem("directorAsistenciaCurso", courseId);
+  }
+  if (TRIMESTERS.some((item) => item.id === trimesterId)) {
+    attendanceState.trimesterId = trimesterId;
+    sessionStorage.setItem("directorAsistenciaTrimestre", trimesterId);
+  }
+  sessionStorage.removeItem("directorAsistenciaEstudiante");
+  sessionStorage.removeItem("directorAsistenciaCursoSolicitado");
+  sessionStorage.removeItem("directorAsistenciaTrimestreSolicitado");
+  return studentId;
+}
+
 function normalizeAttendanceState(value = "") {
   const key = String(value || "").toLowerCase();
   return key === "licencia" ? "permiso" : key;
@@ -497,7 +515,19 @@ export function DirectorAttendance() {
 
 export async function bindDirectorAttendance(route) {
   if (route !== "/director/asistencia" && route !== "/director/asistencias") return;
-  if (attendanceState.initialized) { renderAttendance(); return; }
+  const requestedStudentId = consumeRequestedStudent();
+  if (attendanceState.initialized) {
+    if (!attendanceState.recordsByTrimester.has(attendanceState.trimesterId)) {
+      try {
+        attendanceState.recordsByTrimester.set(attendanceState.trimesterId, await listDirectorAttendanceByTrimester(attendanceState.trimesterId));
+      } catch (error) {
+        attendanceState.notice = `Error al cargar ${currentTrimester().label}: ${error.message}`;
+      }
+    }
+    renderAttendance();
+    if (requestedStudentId) showStudentModal(requestedStudentId);
+    return;
+  }
   if (attendanceState.loading) return;
   attendanceState.loading = true;
   try {
@@ -516,6 +546,7 @@ export async function bindDirectorAttendance(route) {
     if (attendanceState.courseId && !COURSES.some((item) => item.id === attendanceState.courseId)) attendanceState.courseId = "";
     attendanceState.initialized = true;
     renderAttendance();
+    if (requestedStudentId) showStudentModal(requestedStudentId);
   } catch (error) {
     const root = document.querySelector("[data-director-attendance-root]");
     if (root) root.innerHTML = `<div class="rounded-lg border border-red-200 bg-red-50 p-5 text-sm font-medium text-red-700">No se pudo cargar la asistencia: ${escapeDirectorHtml(error.message)}</div>`;

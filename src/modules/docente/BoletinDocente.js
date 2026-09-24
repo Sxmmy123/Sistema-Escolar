@@ -16,7 +16,7 @@ import {
 } from "./AcademicoDocente.js";
 import { teacherState } from "./EstadoDocente.js";
 import { openTeacherBulletinPrintModal } from "./imprimirBoletinDocente.js";
-import { compactSubjectName, emptyState, escapeHtml, refreshIcons } from "./UtilidadesDocente.js";
+import { compactSubjectName, emptyState, escapeHtml, refreshIcons, teacherModuleHeading } from "./UtilidadesDocente.js";
 
 function selectedCourse(context = teacherState.context) {
   const courses = context?.courses || [];
@@ -153,13 +153,14 @@ export async function renderBulletin(context) {
 
   container.innerHTML = `
     <section class="space-y-3">
-      <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-4">
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div class="min-w-0">
-            <p class="text-[10px] font-black uppercase tracking-[.18em] text-school-green">Boletin centralizador</p>
-            <h2 class="mt-1 text-xl font-black text-slate-900 sm:text-2xl">${escapeHtml(course.nombre)}</h2>
-            <p class="mt-1 text-xs font-semibold text-slate-500">${students.length || "-"} alumno(s) · ${SUBJECTS.length} materia(s) · 3 trimestres</p>
-          </div>
+      <div class="teacher-module-surface rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-4">
+        <div class="teacher-module-header flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          ${teacherModuleHeading({
+            title: "Boletin centralizador",
+            course: course.nombre,
+            trimester: "Todos los trimestres",
+            detail: `${students.length || "-"} alumno(s) · ${SUBJECTS.length} materia(s)`
+          })}
           <div class="flex flex-col gap-2 lg:items-end">
             ${courseTabs(context, course)}
             <div class="flex flex-wrap gap-2">

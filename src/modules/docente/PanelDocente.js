@@ -89,6 +89,9 @@ function renderDashboardTrimester(context) {
 export async function renderDashboard(context) {
   renderDashboardTrimester(context);
   setText("[data-teacher-welcome]", `Bienvenido, ${context.profile?.nombre || "docente"}`);
+  setText("[data-teacher-header-courses]", context.courses.length
+    ? context.courses.map((course) => course.corto || course.nombre).join(", ")
+    : "Sin cursos asignados");
   setText("[data-teacher-status]", context.courses.length ? "Datos cargados" : "Falta asignacion");
   setText('[data-teacher-count="courses"]', String(context.courses.length));
   setText('[data-teacher-count="subjects"]', String(context.subjectIds.length));

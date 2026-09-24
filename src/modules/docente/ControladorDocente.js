@@ -1,7 +1,6 @@
 ﻿import { DAYS, findSubject, periodsForCourse } from "../../data/catalog.js";
 import { icon } from "../../ui/dom.js";
 import { renderBulletin } from "./BoletinDocente.js";
-import { exportNotesToExcel } from "./exportNotasExcel.js";
 import { openTeacherNotesPrintModal } from "./imprimirNotasDocente.js";
 import { printAttendanceSummaryByMonth } from "./exportResumenAsistencia.js";
 import { renderDashboard } from "./PanelDocente.js";
@@ -30,6 +29,7 @@ import {
   shiftMonth,
   shortDateLabel,
   subjectIconName,
+  teacherModuleHeading,
   workingDaysCalendar
 } from "./UtilidadesDocente.js";
 import {
@@ -42,6 +42,8 @@ import {
   attendanceStates,
   attendanceTone,
   calculateStudentTerm,
+  deliveryStateForActivity,
+  deliveryStateForGrade,
   gradeByActivityAndStudent,
   gradeNumber,
   gradeTone,
@@ -52,8 +54,10 @@ import {
   studentActivityGrade
 } from "./AcademicoDocente.js";
 import {
+  DELIVERY_STATES,
   TRIMESTERS,
   deleteActivity,
+  finalizeActivityReview,
   getTeacherContext,
   getTeacherDataCacheMeta,
   getTeacherNotesSnapshot,
@@ -84,6 +88,98 @@ import {
 
 
 let regularizationSearchTimer = null;
+
+function resolvedActivityReviewState(activity = null, gradesMap = {}) {
+  const stored = String(activity?.estadoRevision || "").toLowerCase();
+  if (["sin_iniciar", "en_proceso", "cerrada"].includes(stored)) return stored;
+  return Object.keys(gradesMap || {}).length ? "cerrada" : "sin_iniciar";
+}
+
+function deliveryEditorData(activity = {}, grade = null, attendanceState = "", gradesForActivity = {}) {
+  const storedState = deliveryStateForGrade(grade);
+  const wasNotSubmitted = storedState === DELIVERY_STATES.NOT_SUBMITTED;
+  const fechaEntrega = String(
+    grade?.fechaEntrega || todayIso()
+  ).slice(0, 10);
+  const estadoEntrega = wasNotSubmitted
+    ? DELIVERY_STATES.NOT_SUBMITTED
+    : deliveryStateForActivity(
+      activity,
+      { ...grade, valor: grade?.valor ?? 1, fechaEntrega },
+      gradesForActivity
+    );
+  return { estadoEntrega, fechaEntrega };
+}
+
+function deliveryReferenceDate(activity = {}, gradesForActivity = {}) {
+  const dates = Object.values(gradesForActivity || {})
+    .filter((item) => Number(item?.valor || 0) > 0)
+    .map((item) => String(item?.fechaEntrega || "").slice(0, 10))
+    .filter(Boolean);
+  if (!dates.length) return todayIso();
+  const counts = dates.reduce((map, date) => {
+    map[date] = (map[date] || 0) + 1;
+    return map;
+  }, {});
+  return Object.entries(counts)
+    .sort(([dateA, countA], [dateB, countB]) => Number(countB) - Number(countA) || dateA.localeCompare(dateB))[0]?.[0]
+    || todayIso();
+}
+
+function gradeDeliveryEditor(activity = {}, grade = null, attendanceState = "", gradesForActivity = {}) {
+  const data = deliveryEditorData(activity, grade, attendanceState, gradesForActivity);
+  const outsideRange = data.estadoEntrega === DELIVERY_STATES.LATE;
+  const referenceDate = deliveryReferenceDate(activity, gradesForActivity);
+  return `
+    <div class="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-left" data-grade-delivery-editor data-activity-date="${escapeHtml(activity.fecha || "")}" data-reference-date="${escapeHtml(referenceDate)}">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <label class="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Fecha de recepcion
+          <input type="date" value="${escapeHtml(data.fechaEntrega)}" data-grade-delivery-date class="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-800 outline-none focus:border-school-green">
+        </label>
+        <span data-grade-delivery-status class="inline-flex min-h-7 items-center justify-center rounded-md px-2 py-1 text-[10px] font-semibold ${outsideRange ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}">${outsideRange ? "Fuera del rango" : "Dentro del rango"}</span>
+      </div>
+      <input type="hidden" value="${escapeHtml(data.estadoEntrega)}" data-grade-delivery-state>
+      <p class="mt-1 text-[9px] leading-tight text-slate-500">El estado se calcula automáticamente con las fechas registradas para esta actividad.</p>
+    </div>
+  `;
+}
+
+function bindGradeDeliveryEditor(container) {
+  const editor = container?.querySelector("[data-grade-delivery-editor]");
+  if (!editor) return;
+  const stateInput = editor.querySelector("[data-grade-delivery-state]");
+  const dateInput = editor.querySelector("[data-grade-delivery-date]");
+  const status = editor.querySelector("[data-grade-delivery-status]");
+  const paint = () => {
+    const late = stateInput?.value === DELIVERY_STATES.LATE;
+    if (status) {
+      status.textContent = late ? "Fuera del rango" : "Dentro del rango";
+      status.className = `inline-flex min-h-7 items-center justify-center rounded-md px-2 py-1 text-[10px] font-semibold ${late ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`;
+    }
+  };
+  dateInput?.addEventListener("change", () => {
+    const referenceDate = editor.dataset.referenceDate || editor.dataset.activityDate || dateInput.value;
+    if (stateInput) stateInput.value = dateInput.value === referenceDate ? DELIVERY_STATES.ON_TIME : DELIVERY_STATES.LATE;
+    paint();
+  });
+}
+
+function readGradeDelivery(container, activity = {}, student = null, attendanceMap = {}) {
+  const editor = container?.querySelector("[data-grade-delivery-editor]");
+  const attendanceState = String(attendanceMap?.[student?.id]?.estado || "");
+  if (!editor) {
+    return {
+      estadoEntrega: DELIVERY_STATES.ON_TIME,
+      fechaEntrega: todayIso(),
+      asistenciaActividad: attendanceState
+    };
+  }
+  return {
+    estadoEntrega: editor.querySelector("[data-grade-delivery-state]")?.value || DELIVERY_STATES.ON_TIME,
+    fechaEntrega: editor.querySelector("[data-grade-delivery-date]")?.value || todayIso(),
+    asistenciaActividad: attendanceState
+  };
+}
 
 function sortStudentsByName(students = []) {
   return [...students].sort((a, b) => {
@@ -343,13 +439,14 @@ async function renderAttendance(context) {
     `;
   }
   container.innerHTML = `
-      <div class="rounded-3xl border border-slate-200 bg-white p-4 shadow-soft">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p class="text-xs font-black uppercase tracking-[.18em] text-school-navy">Asistencia</p>
-            <h2 class="mt-1 text-xl font-black text-slate-900">Sin clases en esta fecha</h2>
-            <p class="mt-1 text-sm font-bold text-slate-500">Segun el horario, no tienes cursos para tomar asistencia este dia.</p>
-          </div>
+      <div class="teacher-module-surface rounded-3xl border border-slate-200 bg-white p-4 shadow-soft">
+        <div class="teacher-module-header flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          ${teacherModuleHeading({
+            title: "Asistencia",
+            course: context.courses.length === 1 ? context.courses[0].nombre : `${context.courses.length} cursos asignados`,
+            trimester: selectedTrimester().label,
+            detail: "Sin clases en esta fecha"
+          })}
           <label class="text-sm font-black text-slate-700">Fecha
             <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 font-semibold" type="date" value="${teacherState.attendanceDate}" data-attendance-date>
           </label>
@@ -427,30 +524,29 @@ async function renderAttendance(context) {
     `;
   }
   container.innerHTML = `
-    <div class="rounded-3xl border border-slate-200 bg-white shadow-soft">
-      <div class="flex flex-col gap-4 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
-        <div class="min-w-0">
-          <p class="text-xs font-black uppercase tracking-[.18em] text-school-navy">Asistencia del curso</p>
-          <div class="relative mt-1 inline-flex max-w-full items-center gap-2">
-            ${canSwitchAttendanceCourse ? `
-              <button type="button" data-attendance-course-toggle class="inline-flex max-w-full items-center gap-2 rounded-2xl border border-school-navy/20 bg-school-sky px-4 py-2 text-xl font-black text-school-navy shadow-sm transition hover:border-school-navy/50">
-                <span class="truncate">${escapeHtml(course.nombre)}</span>
-                ${icon(teacherState.attendanceCoursePickerOpen ? "chevron-left" : "chevron-right", "h-5 w-5 shrink-0")}
+    <div class="teacher-module-surface rounded-3xl border border-slate-200 bg-white shadow-soft">
+      <div class="teacher-module-header flex flex-col gap-4 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
+        ${teacherModuleHeading({
+          title: "Asistencia",
+          course: course.nombre,
+          trimester: selectedTrimester().label,
+          detail: `${students.length} alumnos`
+        })}
+        <div class="grid gap-3 ${canSwitchAttendanceCourse ? "sm:grid-cols-3" : "sm:grid-cols-2"} sm:items-end">
+          ${canSwitchAttendanceCourse ? `
+            <div class="relative">
+              <p class="text-xs text-slate-600">Curso</p>
+              <button type="button" data-attendance-course-toggle class="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-school-green">
+                Cambiar curso
+                ${icon(teacherState.attendanceCoursePickerOpen ? "chevron-up" : "chevron-down", "h-4 w-4 shrink-0")}
               </button>
-              <div class="${teacherState.attendanceCoursePickerOpen ? "flex" : "hidden"} absolute left-0 top-full z-30 mt-2 max-w-[calc(100vw-2rem)] gap-2 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl sm:left-full sm:top-0 sm:ml-2 sm:mt-0">
+              <div class="${teacherState.attendanceCoursePickerOpen ? "flex" : "hidden"} absolute right-0 top-full z-30 mt-2 max-w-[calc(100vw-2rem)] gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
                 ${otherCourses.map((item) => `
-                  <button type="button" data-attendance-course-pick="${item.id}" class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-700 transition hover:border-school-navy hover:bg-school-sky">${escapeHtml(item.corto || item.nombre)}</button>
+                  <button type="button" data-attendance-course-pick="${item.id}" class="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-school-green hover:bg-green-50">${escapeHtml(item.corto || item.nombre)}</button>
                 `).join("")}
               </div>
-            ` : `
-              <div class="inline-flex max-w-full items-center gap-2 rounded-2xl border border-school-navy/20 bg-school-sky px-4 py-2 text-xl font-black text-school-navy shadow-sm">
-                <span class="truncate">${escapeHtml(course.nombre)}</span>
-              </div>
-            `}
-          </div>
-          <p class="mt-1 text-sm font-bold text-slate-500">${escapeHtml(selectedTrimester().label)} · ${students.length} alumnos</p>
-        </div>
-        <div class="grid gap-3 sm:grid-cols-[auto_auto] sm:items-end">
+            </div>
+          ` : ""}
           <label class="text-sm font-black text-slate-700">Fecha
             <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 font-semibold" type="date" value="${teacherState.attendanceDate}" data-attendance-date>
           </label>
@@ -742,6 +838,9 @@ async function renderTasks(context) {
     ])
     : [[], [], []];
   const gradesMap = gradeByActivityAndStudent(gradesList);
+  if (activity && !activity.estadoRevision && !Object.keys(gradesMap[activity.id] || {}).length) {
+    activity.estadoRevision = "sin_iniciar";
+  }
   const activityAttendance = {};
   if (activity) {
     attendanceRows
@@ -806,13 +905,14 @@ async function renderTasks(context) {
           100% { opacity: 0; transform: translateY(-8px) scale(.98); }
         }
       </style>
-      <div class="rounded-3xl border border-slate-200 bg-white shadow-soft">
-        <div class="flex flex-col gap-4 border-b border-slate-100 p-5 lg:flex-row lg:items-center lg:justify-between">
-          <div class="min-w-0">
-            <p class="text-xs font-black uppercase tracking-[.18em] text-school-navy">AGENDA DE ACTIVIDADES</p>
-            <h2 class="capitalize text-2xl font-black text-slate-900">${escapeHtml(monthLabel(teacherState.taskMonth))}</h2>
-            <div class="mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500"><span>${singleCourse ? `Curso: ${escapeHtml(singleCourse.nombre)}` : `${context.courses.length} cursos asignados`}</span><span class="rounded-full border border-school-green/20 bg-school-green/10 px-3 py-1 text-xs font-black uppercase tracking-[.08em] text-school-green">${escapeHtml(selectedTrimester().label)}</span><span>${monthActivities.length} actividad(es) este mes</span></div>
-          </div>
+      <div class="teacher-module-surface rounded-3xl border border-slate-200 bg-white shadow-soft">
+        <div class="teacher-module-header flex flex-col gap-4 border-b border-slate-100 p-5 lg:flex-row lg:items-center lg:justify-between">
+          ${teacherModuleHeading({
+            title: "Agenda de actividades",
+            course: singleCourse ? singleCourse.nombre : `${context.courses.length} cursos asignados`,
+            trimester: selectedTrimester().label,
+            detail: `${monthLabel(teacherState.taskMonth)} · ${monthActivities.length} actividad(es)`
+          })}
           <div class="flex flex-wrap gap-2">
             <button type="button" class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-black text-school-navy" data-task-month-prev>${icon("chevron-left", "mr-1 inline h-4 w-4")}Anterior</button>
             <button type="button" class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-black text-school-navy" data-task-month-next>Siguiente${icon("chevron-right", "ml-1 inline h-4 w-4")}</button>
@@ -1569,7 +1669,15 @@ async function renderTasks(context) {
     if (!student || !activity || !input) return;
     button.disabled = true;
     try {
-      const savedGrade = await saveGrade({ activity, student, value: input.value });
+      const attendanceState = activityAttendance[student.id]?.estado || "";
+      const delivery = deliveryEditorData(activity, currentGrade, attendanceState, gradesMap);
+      const savedGrade = await saveGrade({
+        activity,
+        student,
+        value: input.value,
+        ...delivery,
+        asistenciaActividad: attendanceState
+      });
       upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
       teacherState.gradeIndex = Math.min(teacherState.gradeIndex + 1, Math.max(studentsToGrade.length - 1, 0));
       await renderTasks(context);
@@ -1601,12 +1709,7 @@ async function renderDateGrading(context) {
   const gradeDate = todayIso();
   teacherState.gradeDate = gradeDate;
   const gradeScope = ["pendientes", "semana"].includes(teacherState.gradeScope) ? teacherState.gradeScope : "dia";
-  const nextSchoolDays = [];
-  const nextDayCursor = new Date(`${gradeDate}T12:00:00`);
-  while (nextSchoolDays.length < 7) {
-    nextSchoolDays.push(nextDayCursor.toISOString().slice(0, 10));
-    nextDayCursor.setDate(nextDayCursor.getDate() + 1);
-  }
+  const nextSchoolDays = Array.from({ length: 7 }, (_, index) => todayIso(index));
   const forwardRange = {
     start: nextSchoolDays[0],
     end: nextSchoolDays[nextSchoolDays.length - 1]
@@ -1620,10 +1723,14 @@ async function renderDateGrading(context) {
     : new Set();
   const activities = allActivities
     .filter((item) => {
-      const inAssignedCourse = coursesById[item.cursoId]?.materias.includes(item.materiaId);
+      const inAssignedCourse = coursesById[item.cursoId]?.materias?.includes(item.materiaId);
       const itemDate = item.fecha || "";
       const inRange = gradeScope === "pendientes"
-        ? itemDate && itemDate < gradeDate && !gradedActivityIds.has(item.id)
+        ? itemDate && itemDate < gradeDate && (
+          item.estadoRevision
+            ? item.estadoRevision !== "cerrada"
+            : !gradedActivityIds.has(item.id)
+        )
         : gradeScope === "semana"
           ? nextSchoolDays.includes(itemDate)
           : itemDate === gradeDate;
@@ -1678,24 +1785,30 @@ async function renderDateGrading(context) {
   const currentGrade = currentStudent ? gradesMap[currentStudent.id] : null;
   const currentResult = currentGrade ? normalizeGrade(currentGrade.valor, activity?.maximo) : null;
   const gradedStudents = studentsToGrade.filter((student) => gradesMap[student.id]);
-  const pendingStudents = studentsToGrade.filter((student) => !gradesMap[student.id]);
-  const gradedIds = new Set(gradedStudents.map((student) => student.id));
+  const nextPendingStudent = (student) => {
+    const currentIndex = studentsToGrade.findIndex((item) => item.id === student?.id);
+    const following = currentIndex >= 0
+      ? [...studentsToGrade.slice(currentIndex + 1), ...studentsToGrade.slice(0, currentIndex)]
+      : studentsToGrade;
+    return following.find((item) => item.id !== student?.id && !gradesMap[item.id]) || null;
+  };
+  const reviewState = resolvedActivityReviewState(activity, gradesMap);
+  if (activity && !activity.estadoRevision && reviewState === "sin_iniciar") {
+    activity.estadoRevision = "sin_iniciar";
+  }
+  const allGradedCount = students.filter((student) => gradesMap[student.id]).length;
+  const pendingLicenseCount = students.filter((student) => {
+    const state = String(attendanceMap[student.id]?.estado || "").toLowerCase();
+    return !gradesMap[student.id] && ["permiso", "licencia"].includes(state);
+  }).length;
+  const pendingDefinitiveCount = Math.max(0, students.length - allGradedCount - pendingLicenseCount);
   const gradeModalOpen = Boolean(activity && !teacherState.gradeModalClosed);
   const listPickerStudent = teacherState.gradeMode === "lista" && gradeModalOpen && teacherState.gradeStudentId
     ? (studentsToGrade.find((student) => student.id === teacherState.gradeStudentId) || null)
     : null;
   const listPickerGrade = listPickerStudent ? gradesMap[listPickerStudent.id] : null;
   const showCourse = context.courses.length >= 2;
-  const tomorrowDate = new Date(`${todayIso()}T12:00:00`);
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrowIso = tomorrowDate.toISOString().slice(0, 10);
-  const activitiesByDate = activities.reduce((groups, item) => {
-    const key = item.fecha || gradeDate;
-    groups[key] = groups[key] || [];
-    groups[key].push(item);
-    return groups;
-  }, {});
-  const activityDates = Object.keys(activitiesByDate).sort();
+  const tomorrowIso = todayIso(1);
   const dateColumnLabel = (isoDate) => {
     const dayNumber = Number(String(isoDate || "").slice(8, 10)) || "";
     if (isoDate === todayIso()) return `Hoy ${dayNumber}`;
@@ -1739,43 +1852,6 @@ async function renderDateGrading(context) {
       day: date.toLocaleDateString("es-BO", { weekday: "long" }).toUpperCase()
     };
   };
-  function compactGradeActivityButton(item, widthClass = "") {
-    const subject = findSubject(item.materiaId);
-    const courseItem = coursesById[item.cursoId] || {};
-    const courseNumber = String(courseItem.corto || courseItem.nombre || "").replace(/\D/g, "") || "I";
-    const accent = showCourse ? courseAccent(item.cursoId) : (subject?.color || "#e2e8f0");
-    const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
-    const active = item.id === teacherState.gradeModalActivityId;
-    return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-1.5">
-          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
-        </span>
-        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
-      </button>
-    `;
-  }
-
-  function compactGradeDateCard(dateKey) {
-    const dayActivities = activities.filter((item) => (item.fecha || gradeDate) === dateKey);
-    if (!dayActivities.length) return "";
-    const label = planningDayLabel(dateKey);
-    return `
-      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
-          <div class="min-w-0">
-            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
-            <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
-          </div>
-          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
-        </div>
-        <div class="grid gap-1.5">
-          ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
-        </div>
-      </article>
-    `;
-  }
   container.innerHTML = `
     <section class="space-y-3 sm:space-y-5">
       <style>
@@ -1806,6 +1882,27 @@ async function renderDateGrading(context) {
         .grade-list-shell.has-picker .grade-list-rows {
           animation: gradeRowsPush 520ms cubic-bezier(.22, 1, .36, 1) both;
         }
+        .grade-modal-shell {
+          letter-spacing: 0;
+        }
+        .grade-modal-shell .font-black {
+          font-weight: 600;
+        }
+        .grade-modal-shell .text-2xl,
+        .grade-modal-shell .text-xl {
+          font-size: 1rem;
+          line-height: 1.35rem;
+        }
+        .grade-modal-shell .text-lg,
+        .grade-modal-shell .text-base {
+          font-size: .875rem;
+          line-height: 1.25rem;
+        }
+        .grade-modal-shell .text-4xl,
+        .grade-modal-shell .text-3xl {
+          font-size: 1.5rem;
+          line-height: 1.75rem;
+        }
         .grade-plan-grid {
           display: grid;
           grid-template-columns: minmax(3.15rem, .32fr) repeat(var(--grade-days), minmax(6.4rem, 1fr));
@@ -1821,16 +1918,17 @@ async function renderDateGrading(context) {
           }
         }
       </style>
-      <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p class="text-[10px] font-semibold uppercase tracking-[.18em] text-school-green">Calificar</p>
-            <h2 class="mt-1 text-lg font-semibold capitalize leading-tight text-slate-900 sm:text-xl">${escapeHtml(scopeTitle)}</h2>
-            <p class="mt-1 text-xs font-medium text-slate-500">${activities.length} actividad(es) para ${escapeHtml(selectedTrimester().label)}</p>
-          </div>
+      <div class="teacher-module-surface rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
+        <div class="teacher-module-header flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          ${teacherModuleHeading({
+            title: "Calificar actividades",
+            course: context.courses.length === 1 ? context.courses[0].nombre : `${context.courses.length} cursos asignados`,
+            trimester: selectedTrimester().label,
+            detail: `${scopeTitle} · ${activities.length} actividad(es)`
+          })}
           <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <div class="flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
-              <button type="button" data-grade-scope="pendientes" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition sm:gap-2 sm:px-4 sm:py-2 ${gradeScope === "pendientes" ? "bg-school-green text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("clipboard-clock", "h-3.5 w-3.5 sm:h-4 sm:w-4")}Pendientes</button>
+              <button type="button" data-grade-scope="pendientes" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition sm:gap-2 sm:px-4 sm:py-2 ${gradeScope === "pendientes" ? "bg-school-green text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("clipboard-list", "h-3.5 w-3.5 sm:h-4 sm:w-4")}Pendientes</button>
               <button type="button" data-grade-scope="dia" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition sm:gap-2 sm:px-4 sm:py-2 ${gradeScope === "dia" ? "bg-school-green text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("sun", "h-3.5 w-3.5 sm:h-4 sm:w-4")}Hoy</button>
               <button type="button" data-grade-scope="semana" class="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition sm:gap-2 sm:px-4 sm:py-2 ${gradeScope === "semana" ? "bg-school-green text-white shadow-soft" : "text-slate-600 hover:bg-white"}">${icon("calendar-range", "h-3.5 w-3.5 sm:h-4 sm:w-4")}7 dias</button>
             </div>
@@ -1903,50 +2001,64 @@ async function renderDateGrading(context) {
         </div>
       </div>
       <div class="fixed inset-0 z-50 ${gradeModalOpen ? "flex" : "hidden"} items-center justify-center bg-slate-950/60 p-2 sm:p-4" data-student-grade-modal>
-        <section class="flex max-h-[96vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:rounded-[2rem]">
+        <section class="grade-modal-shell flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl sm:rounded-2xl">
           ${activity ? (() => {
             const subject = findSubject(activity.materiaId);
             const accent = showCourse ? courseAccent(activity.cursoId) : (subject?.color || "#e2e8f0");
             const courseNumber = String(activityCourse?.corto || activityCourse?.nombre || "").replace(/\D/g, "") || "I";
             return `
               <div class="flex items-stretch border-b border-slate-100" style="border-color:${accent}">
-                <div class="min-w-0 flex-1 px-3 py-2.5 sm:px-4" style="background:${subject?.color || "#fff"}">
-                  <p class="truncate text-[10px] font-black uppercase tracking-[.12em] text-slate-500">${showCourse ? `${escapeHtml(activityCourse?.nombre || "")} · ` : ""}${activityEvaluationLabel(activity)}</p>
-                  <div class="mt-1 flex min-w-0 items-center gap-2">
-                    <h3 class="truncate text-sm font-black text-slate-900 sm:text-lg">${escapeHtml(subject?.nombre || activity.materiaId)} - ${escapeHtml(activity.titulo || "Sin titulo")}</h3>
-                    <span class="shrink-0 rounded-full bg-white/70 px-2 py-1 text-xs font-black text-school-navy">${activity.maximo || 100} pts</span>
+                <div class="min-w-0 flex-1 px-3 py-2 sm:px-4" style="background:${subject?.color || "#fff"}">
+                  <p class="truncate text-[9px] font-semibold uppercase text-slate-500">${showCourse ? `${escapeHtml(activityCourse?.nombre || "")} · ` : ""}${activityEvaluationLabel(activity)}</p>
+                  <div class="mt-0.5 flex min-w-0 items-center gap-2">
+                    <h3 class="truncate text-sm font-semibold text-slate-900">${escapeHtml(subject?.nombre || activity.materiaId)} · ${escapeHtml(activity.titulo || "Sin titulo")}</h3>
+                    <span class="shrink-0 rounded-md bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-school-navy">${activity.maximo || 100} pts</span>
                   </div>
                 </div>
-                ${showCourse ? `<span class="grid w-11 place-items-center text-lg font-black text-white sm:w-14 sm:text-2xl" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+                ${showCourse ? `<span class="grid w-10 place-items-center text-sm font-semibold text-white sm:w-12" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
               </div>
             `;
           })() : ""}
-          <div class="flex items-center justify-between gap-2 bg-school-navy px-3 py-2.5 text-white sm:px-4">
+          <div class="flex items-center justify-between gap-2 bg-school-navy px-3 py-2 text-white sm:px-4">
             <div class="min-w-0">
-              <p class="text-[10px] font-black uppercase tracking-[.14em] text-white/70">${studentsToGrade.length} habilitados · ${gradedStudents.length} calificados</p>
-              <h3 class="truncate text-sm font-black sm:text-lg">${teacherState.gradeMode === "lista" ? "Modo lista" : (currentStudent ? escapeHtml(currentStudent.nombre) : "Modo guiado")}</h3>
+              <p class="text-[9px] font-medium uppercase text-white/70">${studentsToGrade.length} habilitados · ${gradedStudents.length} calificados</p>
+              <h3 class="truncate text-sm font-semibold">${teacherState.gradeMode === "lista" ? "Lista de alumnos" : (currentStudent ? escapeHtml(currentStudent.nombre) : "Calificación guiada")}</h3>
             </div>
             <div class="flex shrink-0 items-center gap-1.5">
               <div class="flex rounded-xl bg-white/10 p-1">
-                <button type="button" data-grade-mode="guiado" class="rounded-lg px-2.5 py-1.5 text-[11px] font-black transition ${teacherState.gradeMode === "guiado" ? "bg-white text-school-navy" : "text-white/80 hover:bg-white/10"}">Guiado</button>
-                <button type="button" data-grade-mode="lista" class="rounded-lg px-2.5 py-1.5 text-[11px] font-black transition ${teacherState.gradeMode === "lista" ? "bg-white text-school-navy" : "text-white/80 hover:bg-white/10"}">Lista</button>
+                <button type="button" data-grade-mode="guiado" class="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ${teacherState.gradeMode === "guiado" ? "bg-white text-school-navy" : "text-white/80 hover:bg-white/10"}">Guiado</button>
+                <button type="button" data-grade-mode="lista" class="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ${teacherState.gradeMode === "lista" ? "bg-white text-school-navy" : "text-white/80 hover:bg-white/10"}">Lista</button>
               </div>
-              <button type="button" class="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-white" data-close-student-grade>${icon("x", "h-5 w-5")}</button>
+              <button type="button" class="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white" data-close-student-grade>${icon("x", "h-4 w-4")}</button>
             </div>
           </div>
           ${studentsNotEnabled.length ? `
-            <details class="mx-3 mt-3 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs font-bold text-amber-800 sm:mx-4 sm:text-sm">
-              <summary class="cursor-pointer font-black">${studentsNotEnabled.length} alumno(s) ausentes. Clic para ver.</summary>
+            <details class="mx-3 mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs font-medium text-amber-800 sm:mx-4">
+              <summary class="cursor-pointer font-semibold">${studentsNotEnabled.length} alumno(s) ausentes. Clic para ver.</summary>
               <div class="mt-2 grid gap-1.5 sm:grid-cols-2">
                 ${studentsNotEnabled.map((student) => `<div class="rounded-lg bg-white/70 px-2.5 py-1.5">${escapeHtml(studentOrderMap.get(student.id) || "-")}. ${escapeHtml(student.nombre)} · ${attendanceLabel(attendanceMap[student.id]?.estado || "falta")}</div>`).join("")}
               </div>
             </details>
           ` : ""}
           ${activity ? `
-            <div class="grid min-h-0 flex-1 gap-2 overflow-hidden p-2 sm:gap-3 sm:p-3 ${teacherState.gradeMode === "lista" ? "" : "lg:grid-cols-[140px_1fr]"}">
+            <div class="mx-3 mt-2 flex flex-col gap-2 rounded-lg border px-3 py-2 sm:mx-4 sm:flex-row sm:items-center sm:justify-between ${reviewState === "cerrada" ? "border-green-200 bg-green-50" : reviewState === "en_proceso" ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}">
+              <div class="min-w-0">
+                <p class="text-[10px] font-semibold uppercase tracking-wide ${reviewState === "cerrada" ? "text-green-700" : reviewState === "en_proceso" ? "text-amber-800" : "text-slate-500"}">${reviewState === "cerrada" ? "Revision finalizada" : reviewState === "en_proceso" ? "Revision en proceso" : "Revision sin iniciar"}</p>
+                <p class="mt-0.5 text-[10px] leading-tight text-slate-600">${allGradedCount} de ${students.length} revisados${pendingLicenseCount ? ` · ${pendingLicenseCount} licencia(s) quedaran pendientes` : ""}</p>
+                ${reviewState === "en_proceso" ? `<p class="mt-1 text-[9px] leading-tight text-amber-800">La actividad seguira en Calificar hasta terminar la revision. Los pendientes apareceran en Regularizacion desde mañana.</p>` : ""}
+              </div>
+              ${reviewState === "en_proceso" ? `
+                <button type="button" data-finalize-activity-review class="shrink-0 rounded-lg bg-school-green px-3 py-1.5 text-[10px] font-semibold text-white shadow-sm transition hover:bg-school-navy">
+                  ${icon("check-check", "mr-1 inline h-3.5 w-3.5")} Terminar revision
+                </button>
+              ` : reviewState === "sin_iniciar" ? `<span class="text-[10px] font-medium text-slate-500">Guarda la primera nota para comenzar.</span>` : ""}
+            </div>
+          ` : ""}
+          ${activity ? `
+            <div class="grid min-h-0 flex-1 gap-2 overflow-hidden p-2 ${teacherState.gradeMode === "lista" ? "" : "lg:grid-cols-[132px_1fr]"}">
               ${teacherState.gradeMode === "lista" ? "" : `
-                <aside class="min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-2 sm:rounded-2xl">
-                  <p class="text-[10px] font-black uppercase tracking-[.14em] text-slate-400">Calificados</p>
+                <aside class="min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+                  <p class="text-[9px] font-semibold uppercase text-slate-500">Calificados</p>
                   <div class="mt-2 flex max-h-20 flex-wrap gap-1.5 overflow-y-auto lg:block lg:max-h-none lg:space-y-1.5">
                     ${gradedStudents.map((student) => {
                       const grade = gradesMap[student.id];
@@ -1963,7 +2075,7 @@ async function renderDateGrading(context) {
                         : lowGrade
                           ? "bg-red-600 text-white"
                           : "bg-green-600 text-white";
-                      return `<button type="button" data-open-student-grade="${student.id}" class="inline-flex items-center gap-1.5 rounded-lg border px-1.5 py-1.5 text-[11px] font-black lg:w-full ${tone}">
+                      return `<button type="button" data-open-student-grade="${student.id}" class="inline-flex items-center gap-1.5 rounded-lg border px-1.5 py-1.5 text-[11px] font-semibold lg:w-full ${tone}">
                         <span class="grid h-6 w-6 place-items-center rounded-md ${badgeTone}">${escapeHtml(studentOrderMap.get(student.id) || "-")}</span>
                         <span class="hidden min-w-0 flex-1 truncate text-left lg:block">${escapeHtml(student.nombre)}</span>
                         <span>${didNotSubmit ? "Ø" : (result?.nota ?? "-")}</span>
@@ -2008,36 +2120,37 @@ async function renderDateGrading(context) {
                       const accent = showCourse ? courseAccent(activity.cursoId) : (subject?.color || "#e2e8f0");
                       const courseNumber = String(activityCourse?.corto || activityCourse?.nombre || "").replace(/\D/g, "") || "I";
                       return `
-                        <section class="grade-list-panel min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+                        <section class="grade-list-panel min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-soft">
                           <div class="flex items-stretch border-b border-slate-100" style="border-color:${accent}">
-                            <div class="min-w-0 flex-1 px-4 py-3" style="background:${subject?.color || "#fff"}">
-                              <p class="truncate text-[10px] font-black uppercase tracking-[.12em] text-slate-500">${showCourse ? `${escapeHtml(activityCourse?.nombre || "")} · ` : ""}${escapeHtml(subject?.nombre || activity.materiaId)}</p>
-                              <h4 class="mt-1 truncate text-base font-black text-slate-900">${escapeHtml(activity.titulo || "Sin titulo")}</h4>
+                            <div class="min-w-0 flex-1 px-3 py-2" style="background:${subject?.color || "#fff"}">
+                              <p class="truncate text-[9px] font-semibold uppercase text-slate-500">${showCourse ? `${escapeHtml(activityCourse?.nombre || "")} · ` : ""}${escapeHtml(subject?.nombre || activity.materiaId)}</p>
+                              <h4 class="mt-0.5 truncate text-sm font-semibold text-slate-900">${escapeHtml(activity.titulo || "Sin titulo")}</h4>
                             </div>
-                            ${showCourse ? `<span class="grid w-12 place-items-center text-xl font-black text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
+                            ${showCourse ? `<span class="grid w-10 place-items-center text-sm font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
                           </div>
-                          <div class="min-h-0 overflow-y-auto p-3 sm:p-4">
-                            <div class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                          <div class="min-h-0 overflow-y-auto p-3">
+                             <div class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
                               <div class="min-w-0">
-                                <p class="text-[10px] font-black uppercase tracking-[.12em] text-slate-400">Alumno</p>
-                                <h5 class="truncate text-base font-black text-slate-900">${escapeHtml(listPickerStudent.nombre)}</h5>
+                                <p class="text-[9px] font-semibold uppercase text-slate-500">Alumno</p>
+                                <h5 class="truncate text-sm font-semibold text-slate-900">${escapeHtml(listPickerStudent.nombre)}</h5>
                               </div>
-                              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-school-sky text-lg font-black text-school-navy">${escapeHtml(studentOrderMap.get(listPickerStudent.id) || "-")}</span>
-                            </div>
-                            <p class="mt-3 text-center text-xs font-black text-slate-500">Puntaje sobre ${activity.maximo || 100}</p>
-                            <div class="mt-3 grid max-h-[44vh] grid-cols-5 gap-2 overflow-y-auto pr-1 sm:grid-cols-8 lg:grid-cols-6 xl:grid-cols-8">
+                               <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-school-sky text-sm font-semibold text-school-navy">${escapeHtml(studentOrderMap.get(listPickerStudent.id) || "-")}</span>
+                             </div>
+                             ${gradeDeliveryEditor(activity, listPickerGrade, attendanceMap[listPickerStudent.id]?.estado || "", gradesMap)}
+                             <p class="mt-2 text-center text-[11px] font-medium text-slate-500">Puntaje sobre ${activity.maximo || 100}</p>
+                            <div class="mt-2 grid max-h-[38vh] grid-cols-5 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-8 lg:grid-cols-6 xl:grid-cols-8">
                               ${Array.from({ length: Math.min(Number(activity.maximo || 100), 100) }, (_, index) => index + 1).map((value) => {
                                 const selected = Number(listPickerGrade?.valor) === value;
                                 const result = normalizeGrade(value, activity.maximo);
                                 const low = Number(result?.porcentaje || 0) < 50;
-                                return `<button type="button" data-list-grade-auto="${value}" class="grid h-9 place-items-center rounded-lg border text-sm font-black transition sm:h-10 sm:rounded-xl sm:text-base ${selected ? "border-green-600 bg-green-600 text-white" : low ? "border-red-200 bg-red-50 text-red-700 hover:border-red-400" : "border-slate-200 bg-slate-100 text-slate-700 hover:border-school-navy hover:bg-school-sky"}">${value}</button>`;
+                                return `<button type="button" data-list-grade-auto="${value}" class="grid h-8 place-items-center rounded-md border text-xs font-semibold transition sm:h-9 sm:text-sm ${selected ? "border-green-600 bg-green-600 text-white" : low ? "border-red-200 bg-red-50 text-red-700 hover:border-red-400" : "border-slate-200 bg-slate-100 text-slate-700 hover:border-school-navy hover:bg-school-sky"}">${value}</button>`;
                               }).join("")}
                             </div>
-                            <div class="mt-3 grid grid-cols-[1fr_auto] gap-2">
-                              <button type="button" data-list-grade-no-work="${listPickerStudent.id}" class="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-black text-red-700">${icon("ban", "mr-1 inline h-4 w-4")}${escapeHtml(noSubmissionLabel)}</button>
-                              <button type="button" data-close-list-grade class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black text-slate-600">Cerrar</button>
+                            <div class="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                              <button type="button" data-list-grade-no-work="${listPickerStudent.id}" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">${icon("ban", "mr-1 inline h-4 w-4")}${escapeHtml(noSubmissionLabel)}</button>
+                              <button type="button" data-close-list-grade class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">Cerrar</button>
                             </div>
-                            <p class="mt-3 hidden rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-black text-green-700" data-list-grade-status></p>
+                            <p class="mt-2 hidden rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700" data-list-grade-status></p>
                           </div>
                         </section>
                       `;
@@ -2045,26 +2158,27 @@ async function renderDateGrading(context) {
                   </div>
                 ` : currentStudent ? `
                   <div class="text-center">
-                    <div class="flex items-center justify-center gap-3">
-                      <div class="grid h-12 w-12 place-items-center rounded-xl bg-school-sky text-xl font-black text-school-navy">${escapeHtml(studentOrderMap.get(currentStudent.id) || teacherState.gradeIndex + 1)}</div>
+                     <div class="flex items-center justify-center gap-2.5">
+                      <div class="grid h-9 w-9 place-items-center rounded-lg bg-school-sky text-sm font-semibold text-school-navy">${escapeHtml(studentOrderMap.get(currentStudent.id) || teacherState.gradeIndex + 1)}</div>
                       <div class="min-w-0 text-left">
-                        <p class="text-[11px] font-black uppercase tracking-[.12em] text-slate-400">Alumno ${teacherState.gradeIndex + 1} de ${studentsToGrade.length}</p>
-                        <h4 class="truncate text-lg font-black text-slate-900 sm:text-2xl">${escapeHtml(currentStudent.nombre)}</h4>
-                      </div>
-                    </div>
-                    <p class="mt-2 text-xs font-black text-slate-500 sm:text-sm">Nota sobre ${activity.maximo || 100}. Avanza apenas termina de guardar.</p>
-                    <div class="mt-3 grid max-h-[46vh] grid-cols-5 gap-2 overflow-y-auto pr-1 sm:grid-cols-8 lg:grid-cols-10">
+                        <p class="text-[9px] font-semibold uppercase text-slate-500">Alumno ${teacherState.gradeIndex + 1} de ${studentsToGrade.length}</p>
+                        <h4 class="truncate text-sm font-semibold text-slate-900 sm:text-base">${escapeHtml(currentStudent.nombre)}</h4>
+                       </div>
+                     </div>
+                      ${gradeDeliveryEditor(activity, currentGrade, attendanceMap[currentStudent.id]?.estado || "", gradesMap)}
+                     <p class="mt-2 text-[11px] font-medium text-slate-500">Puntaje sobre ${activity.maximo || 100}</p>
+                    <div class="mt-2 grid max-h-[38vh] grid-cols-5 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-8 lg:grid-cols-10">
                       ${Array.from({ length: Math.min(Number(activity.maximo || 100), 100) + 1 }, (_, value) => {
                         const selected = Number(currentGrade?.valor) === value;
-                        return `<button type="button" data-date-grade-auto="${value}" class="grid h-9 min-w-0 place-items-center rounded-lg border text-sm font-black transition sm:h-11 sm:rounded-xl sm:text-base ${selected ? "border-green-600 bg-green-600 text-white" : "border-slate-200 bg-slate-100 text-slate-700 hover:border-school-navy hover:bg-school-sky"}">${value}</button>`;
+                        return `<button type="button" data-date-grade-auto="${value}" class="grid h-8 min-w-0 place-items-center rounded-md border text-xs font-semibold transition sm:h-9 sm:text-sm ${selected ? "border-green-600 bg-green-600 text-white" : "border-slate-200 bg-slate-100 text-slate-700 hover:border-school-navy hover:bg-school-sky"}">${value}</button>`;
                       }).join("")}
                     </div>
-                    <div class="mt-3 grid grid-cols-3 gap-2">
-                      <button type="button" data-date-grade-prev class="rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-black text-school-navy">${icon("chevron-left", "mr-1 inline h-4 w-4")}Anterior</button>
-                      <button type="button" data-grade-no-work="${currentStudent.id}" class="rounded-xl border border-red-200 bg-red-50 px-2 py-2 text-xs font-black text-red-700">${icon("x-circle", "mr-1 inline h-4 w-4")}${escapeHtml(noSubmissionShortLabel)}</button>
-                      <button type="button" data-date-grade-next class="rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-black text-school-navy">Siguiente${icon("chevron-right", "ml-1 inline h-4 w-4")}</button>
+                    <div class="mt-2 grid grid-cols-3 gap-1.5">
+                      <button type="button" data-date-grade-prev class="rounded-lg border border-slate-200 bg-white px-2 py-2 text-[11px] font-semibold text-school-navy">${icon("chevron-left", "mr-1 inline h-4 w-4")}Anterior</button>
+                      <button type="button" data-grade-no-work="${currentStudent.id}" class="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-[11px] font-semibold text-red-700">${icon("x-circle", "mr-1 inline h-4 w-4")}${escapeHtml(noSubmissionShortLabel)}</button>
+                      <button type="button" data-date-grade-next class="rounded-lg border border-slate-200 bg-white px-2 py-2 text-[11px] font-semibold text-school-navy">Siguiente${icon("chevron-right", "ml-1 inline h-4 w-4")}</button>
                     </div>
-                    <p class="mt-3 hidden rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-black text-green-700" data-auto-grade-status></p>
+                    <p class="mt-2 hidden rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700" data-auto-grade-status></p>
                   </div>
                 ` : `<div>${emptyState("Todo calificado", "No quedan alumnos pendientes para esta actividad.")}</div>`}
               </div>
@@ -2075,6 +2189,7 @@ async function renderDateGrading(context) {
     </section>
   `;
 
+  bindGradeDeliveryEditor(container);
   container.querySelectorAll("[data-grade-scope]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.gradeScope = ["pendientes", "semana"].includes(button.dataset.gradeScope) ? button.dataset.gradeScope : "dia";
@@ -2100,6 +2215,30 @@ async function renderDateGrading(context) {
     teacherState.gradeIndex = 0;
     renderDateGrading(context);
   });
+  container.querySelector("[data-finalize-activity-review]")?.addEventListener("click", async (event) => {
+    if (!activity) return;
+    const detail = pendingDefinitiveCount
+      ? `${pendingDefinitiveCount} alumno(s) sin nota se marcaran como no presentaron.`
+      : "No quedan alumnos sin revisar.";
+    const licenseDetail = pendingLicenseCount
+      ? `\n${pendingLicenseCount} alumno(s) con licencia seguiran pendientes y no perderan Responsabilidad.`
+      : "";
+    if (!confirm(`Terminar la revision de esta actividad?\n\n${detail}${licenseDetail}\n\nLos pendientes apareceran en Regularizacion desde mañana.`)) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Finalizando...";
+    try {
+      const result = await finalizeActivityReview({ activity, students, attendanceMap, gradesMap });
+      upsertTeacherNotesSnapshotActivity(context, result.activity);
+      result.grades.forEach((grade) => upsertTeacherNotesSnapshotGrade(context, result.activity, grade));
+      teacherState.gradeStudentId = "";
+      await renderDateGrading(context);
+    } catch (error) {
+      alert(error?.code === "permission-denied" ? "Sin permiso para finalizar la revision." : (error.message || "No se pudo finalizar la revision."));
+      button.disabled = false;
+      button.textContent = "Terminar revision";
+    }
+  });
   container.querySelectorAll("[data-grade-activity]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.gradeModalActivityId = button.dataset.gradeActivity;
@@ -2110,21 +2249,6 @@ async function renderDateGrading(context) {
       teacherState.gradeModalClosed = false;
       renderDateGrading(context);
     });
-  });
-  container.querySelector("[data-delete-selected-activity]")?.addEventListener("click", async () => {
-    if (!activity) return;
-    const detail = `${activity.tipo || "Actividad"}: ${activity.titulo || "Sin titulo"}\nFecha: ${activity.fecha || ""}`;
-    if (!confirm(`Esta seguro que desea eliminar esta actividad?\n\n${detail}`)) return;
-    try {
-      await deleteActivity(activity);
-      teacherState.gradeModalActivityId = "";
-      teacherState.gradeStudentId = "";
-      teacherState.gradeIndex = 0;
-      teacherState.gradeModalClosed = true;
-      await renderDateGrading(context);
-    } catch (error) {
-      alert(error?.code === "permission-denied" ? "Sin permiso para eliminar actividad." : error.message);
-    }
   });
   container.querySelectorAll("[data-open-student-grade]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2150,12 +2274,6 @@ async function renderDateGrading(context) {
     teacherState.gradeStudentId = "";
     renderDateGrading(context);
   });
-  container.querySelector("[data-list-grade-picker]")?.addEventListener("click", (event) => {
-    if (event.target.matches("[data-list-grade-picker]")) {
-      teacherState.gradeStudentId = "";
-      renderDateGrading(context);
-    }
-  });
   container.querySelector("[data-close-student-grade]")?.addEventListener("click", () => {
     teacherState.gradeStudentId = "";
     teacherState.gradeModalClosed = true;
@@ -2176,14 +2294,6 @@ async function renderDateGrading(context) {
     teacherState.gradeIndex = Math.min(teacherState.gradeIndex + 1, Math.max(studentsToGrade.length - 1, 0));
     renderDateGrading(context);
   });
-  container.querySelectorAll("[data-date-grade-quick]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const input = container.querySelector("[data-date-grade-value]");
-      if (!input) return;
-      input.value = button.dataset.dateGradeQuick;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-  });
   container.querySelectorAll("[data-date-grade-auto]").forEach((button) => {
     button.addEventListener("click", async () => {
       const student = currentStudent;
@@ -2203,13 +2313,13 @@ async function renderDateGrading(context) {
       }
 
       try {
-        const savedGrade = await saveGrade({ activity, student, value });
+        const savedGrade = await saveGrade({ activity, student, value, ...readGradeDelivery(container, activity, student, attendanceMap) });
         upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
         if (status) status.textContent = "Nota guardada";
-        const nextStudent = studentsToGrade.find((item, index) => index > teacherState.gradeIndex && item.id !== student.id && !gradesMap[item.id]) || null;
+        const nextStudent = nextPendingStudent(student);
         teacherState.gradeStudentId = nextStudent?.id || "";
         teacherState.gradeIndex = nextStudent ? studentsToGrade.findIndex((item) => item.id === nextStudent.id) : Math.max(studentsToGrade.length - 1, 0);
-        teacherState.gradeModalClosed = !nextStudent;
+        teacherState.gradeModalClosed = !nextStudent && resolvedActivityReviewState(activity, gradesMap) === "cerrada";
         await renderDateGrading(context);
       } catch (error) {
         if (status) {
@@ -2232,12 +2342,18 @@ async function renderDateGrading(context) {
     const button = event.currentTarget;
     button.disabled = true;
     try {
-      const savedGrade = await saveGrade({ activity, student, value: 0 });
+      const savedGrade = await saveGrade({
+        activity,
+        student,
+        value: 0,
+        estadoEntrega: DELIVERY_STATES.NOT_SUBMITTED,
+        asistenciaActividad: attendanceMap[student.id]?.estado || ""
+      });
       upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
-      const nextStudent = studentsToGrade.find((item, index) => index > teacherState.gradeIndex && item.id !== student.id && !gradesMap[item.id]) || null;
+      const nextStudent = nextPendingStudent(student);
       teacherState.gradeStudentId = nextStudent?.id || "";
       teacherState.gradeIndex = nextStudent ? studentsToGrade.findIndex((item) => item.id === nextStudent.id) : Math.max(studentsToGrade.length - 1, 0);
-      teacherState.gradeModalClosed = !nextStudent;
+      teacherState.gradeModalClosed = !nextStudent && resolvedActivityReviewState(activity, gradesMap) === "cerrada";
       await renderDateGrading(context);
     } catch (error) {
       alert(error?.code === "permission-denied" ? "Sin permiso para guardar nota." : error.message);
@@ -2261,7 +2377,7 @@ async function renderDateGrading(context) {
         status.textContent = `Guardando nota ${result?.nota ?? value}...`;
       }
       try {
-        const savedGrade = await saveGrade({ activity, student, value });
+        const savedGrade = await saveGrade({ activity, student, value, ...readGradeDelivery(container, activity, student, attendanceMap) });
         upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
         if (status) status.textContent = "Nota guardada";
         teacherState.gradeStudentId = "";
@@ -2295,7 +2411,13 @@ async function renderDateGrading(context) {
       status.textContent = isMaterialActivity(activity) ? "Guardando como no trajo..." : "Guardando como no presentado...";
     }
     try {
-      const savedGrade = await saveGrade({ activity, student, value: 0 });
+      const savedGrade = await saveGrade({
+        activity,
+        student,
+        value: 0,
+        estadoEntrega: DELIVERY_STATES.NOT_SUBMITTED,
+        asistenciaActividad: attendanceMap[student.id]?.estado || ""
+      });
       upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
       teacherState.gradeStudentId = "";
       await renderDateGrading(context);
@@ -2311,33 +2433,6 @@ async function renderDateGrading(context) {
         item.disabled = false;
         item.classList.remove("opacity-60");
       });
-    }
-  });
-  container.querySelector("[data-date-grade-value]")?.addEventListener("input", (event) => {
-    const result = normalizeGrade(event.target.value, activity?.maximo);
-    const final = container.querySelector("[data-date-grade-final]");
-    if (final) {
-      final.textContent = result?.nota ?? "-";
-      final.className = `mt-2 text-4xl font-black ${Number(result?.nota || 0) <= 50 ? "text-red-600" : "text-green-700"}`;
-    }
-  });
-  container.querySelector("[data-save-date-grade]")?.addEventListener("click", async (buttonEvent) => {
-    const button = buttonEvent.currentTarget;
-    const student = studentsToGrade.find((item) => item.id === button.dataset.saveDateGrade);
-    const input = container.querySelector("[data-date-grade-value]");
-    if (!student || !activity || !input) return;
-    button.disabled = true;
-    try {
-      const savedGrade = await saveGrade({ activity, student, value: input.value });
-      upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
-      const nextStudent = studentsToGrade[teacherState.gradeIndex + 1] || null;
-      teacherState.gradeStudentId = nextStudent?.id || "";
-      teacherState.gradeIndex = nextStudent ? teacherState.gradeIndex + 1 : Math.max(studentsToGrade.length - 1, 0);
-      teacherState.gradeModalClosed = !nextStudent;
-      await renderDateGrading(context);
-    } catch (error) {
-      alert(error?.code === "permission-denied" ? "Sin permiso para guardar nota." : error.message);
-      button.disabled = false;
     }
   });
   refreshIcons();
@@ -2415,6 +2510,41 @@ function notesGradeModal({ activity, student, currentGrade, totalStudents = 0, c
   `;
 }
 
+function notesEditConfirmationModal(mode = "", changeCount = 0) {
+  if (!mode) return "";
+  const isSave = mode === "save";
+  return `
+    <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/65 p-3" data-notes-edit-confirmation-backdrop>
+      <section class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:rounded-3xl">
+        <header class="border-b border-slate-100 px-4 py-4 sm:px-5">
+          <div class="flex items-start gap-3">
+            <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl ${isSave ? "bg-amber-50 text-amber-700" : "bg-green-50 text-school-green"}">
+              ${icon(isSave ? "shield-alert" : "pencil-line", "h-5 w-5")}
+            </span>
+            <div class="min-w-0">
+              <p class="text-[10px] font-semibold uppercase tracking-[.14em] ${isSave ? "text-amber-700" : "text-school-green"}">${isSave ? "Segunda confirmacion" : "Primera confirmacion"}</p>
+              <h3 class="mt-1 text-lg font-semibold text-slate-900">${isSave ? "Guardar cambios de notas" : "Habilitar edicion"}</h3>
+            </div>
+          </div>
+        </header>
+        <div class="space-y-3 px-4 py-4 text-sm text-slate-600 sm:px-5">
+          ${isSave
+            ? `<p>Se modificaran <strong class="font-semibold text-slate-900">${changeCount} calificacion(es)</strong> en Firebase. Los promedios se recalcularan inmediatamente.</p>
+               <p class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">Verifica los puntajes antes de confirmar. Esta accion quedara registrada.</p>`
+            : `<p>Podras editar solamente calificaciones que ya fueron registradas. Las actividades pendientes continuaran en Calificar o Regularizacion.</p>
+               <p class="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">Los valores se muestran en su puntaje original, respetando el maximo de cada actividad.</p>`}
+        </div>
+        <footer class="flex flex-col-reverse gap-2 border-t border-slate-100 px-4 py-3 sm:flex-row sm:justify-end sm:px-5">
+          <button type="button" data-close-notes-edit-confirmation class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50">Cancelar</button>
+          <button type="button" ${isSave ? "data-confirm-notes-save" : "data-confirm-notes-edit"} class="inline-flex items-center justify-center gap-2 rounded-xl ${isSave ? "bg-amber-600 hover:bg-amber-700" : "bg-school-green hover:bg-school-navy"} px-4 py-2.5 text-xs font-semibold text-white transition">
+            ${icon(isSave ? "save" : "pencil", "h-4 w-4")} ${isSave ? `Guardar ${changeCount} cambio(s)` : "Habilitar edicion"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  `;
+}
+
 function closeNotesModals() {
   teacherState.notesCriterionId = "";
   teacherState.notesCriterionOpen = false;
@@ -2432,55 +2562,99 @@ function regularizationSearchKey(value = "") {
 }
 
 function regularizationPendingReason(grade, attendanceState = "") {
+  const deliveryState = deliveryStateForGrade(grade);
   if (grade && Number(grade.valor || 0) > 0) return "";
-  if (attendanceState === "permiso") return "Licencia";
-  if (attendanceState === "falta") return "Falta";
-  if (grade && Number(grade.valor || 0) <= 0) {
-    return ["presente", "atraso"].includes(attendanceState)
-      ? "Asistio y no presento"
-      : "No presento";
+  if ([DELIVERY_STATES.NOT_SUBMITTED, DELIVERY_STATES.LICENSE_PENDING, DELIVERY_STATES.UNREVIEWED].includes(deliveryState)) return "No presento";
+  if (!grade || Number(grade.valor || 0) <= 0) return "No presento";
+  return "";
+}
+
+function regularizationAttendanceInfo(attendanceState = "") {
+  const attendance = String(attendanceState || "").trim().toLowerCase();
+  if (["permiso", "licencia"].includes(attendance)) {
+    return {
+      id: "licencia",
+      label: "Licencia",
+      detail: "Ausencia justificada",
+      icon: "shield-check",
+      priority: 0,
+      badgeTone: "bg-purple-50 text-purple-700 ring-purple-200",
+      railTone: "border-purple-200 bg-purple-100 text-purple-800",
+      segmentTone: "bg-purple-500"
+    };
   }
-  return "Sin calificar";
+  if (attendance === "falta") {
+    return {
+      id: "falta",
+      label: "Falta",
+      detail: "Faltó a clases",
+      icon: "user-x",
+      priority: 1,
+      badgeTone: "bg-red-50 text-red-700 ring-red-200",
+      railTone: "border-red-200 bg-red-100 text-red-800",
+      segmentTone: "bg-red-500"
+    };
+  }
+  if (["presente", "atraso"].includes(attendance)) {
+    return {
+      id: "presente",
+      label: "Presente",
+      detail: attendance === "atraso" ? "Asistió con atraso" : "Asistió pero no presentó",
+      icon: "user-check",
+      priority: 2,
+      badgeTone: "bg-amber-50 text-amber-800 ring-amber-200",
+      railTone: "border-amber-200 bg-amber-100 text-amber-900",
+      segmentTone: "bg-amber-400"
+    };
+  }
+  return {
+    id: "sin_registro",
+    label: "Sin registro",
+    detail: "No existe asistencia para ese día",
+    icon: "circle-help",
+    priority: 3,
+    badgeTone: "bg-slate-100 text-slate-700 ring-slate-200",
+    railTone: "border-slate-200 bg-slate-100 text-slate-700",
+    segmentTone: "bg-slate-400"
+  };
 }
 
 function regularizationPendingPriority(items = []) {
-  const priorities = {
-    Licencia: 0,
-    Falta: 1,
-    "Asistio y no presento": 2,
-    "No presento": 3,
-    "Sin calificar": 4
-  };
   return items.length
-    ? Math.min(...items.map((item) => priorities[item.pendienteMotivo] ?? 5))
+    ? Math.min(...items.map((item) => regularizationAttendanceInfo(item.pendienteAsistencia).priority))
     : 9;
 }
 
-function regularizationPriorityReason(items = []) {
-  return [...items].sort((a, b) => regularizationPendingPriority([a]) - regularizationPendingPriority([b]))[0]?.pendienteMotivo || "Pendiente";
-}
-
 function regularizationPendingTone(reason = "") {
-  if (reason === "Licencia") return "bg-purple-50 text-purple-700 ring-purple-200";
-  if (reason === "Falta") return "bg-red-50 text-red-700 ring-red-200";
-  if (reason === "Asistio y no presento" || reason === "No presento") return "bg-amber-50 text-amber-800 ring-amber-200";
+  if (reason === "No presento") return "bg-red-50 text-red-700 ring-red-200";
   return "bg-slate-100 text-slate-700 ring-slate-200";
 }
 
-function regularizationCourseTabs(context, course) {
-  if ((context?.courses || []).length <= 1) {
-    return `<div class="inline-flex items-center gap-1 rounded-lg bg-school-sky px-2 py-1 text-[10px] font-black text-school-navy sm:gap-2 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs">${icon("users-round", "h-3.5 w-3.5 sm:h-4 sm:w-4")} ${escapeHtml(course?.nombre || "Curso")}</div>`;
-  }
+function regularizationPendingIcon(reason = "") {
+  if (reason === "No presento") return "circle-x";
+  return "circle-help";
+}
+
+function regularizationSegmentTone(attendanceState = "") {
+  return regularizationAttendanceInfo(attendanceState).segmentTone;
+}
+
+function regularizationPendingBar(items = [], type = "hacer") {
+  const filtered = items.filter((item) => (isSaberActivity(item) ? "saber" : "hacer") === type);
+  const slots = 10;
   return `
-    <div class="flex gap-1.5 overflow-x-auto pb-1 sm:gap-2">
-      ${context.courses.map((item) => {
-        const active = item.id === course?.id;
-        return `
-          <button type="button" data-regularization-course="${item.id}" class="inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-black transition sm:gap-2 sm:rounded-xl sm:px-3.5 sm:py-2 sm:text-xs ${active ? "border-school-green bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-700 hover:border-school-green/50"}">
-            ${icon("users-round", "h-3.5 w-3.5 sm:h-4 sm:w-4")} ${escapeHtml(item.nombre)}
-          </button>
-        `;
-      }).join("")}
+    <div class="min-w-0">
+      <div class="mb-1 flex items-center justify-between gap-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+        <span>${type === "saber" ? "Saber" : "Hacer"}</span>
+        <span>${filtered.length}</span>
+      </div>
+      <div class="grid h-4 grid-cols-10 gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5" role="img" aria-label="${filtered.length} actividad(es) pendientes de ${type}">
+        ${Array.from({ length: slots }, (_, index) => {
+          const item = filtered[index];
+          const attendanceInfo = item ? regularizationAttendanceInfo(item.pendienteAsistencia) : null;
+          return `<span class="min-w-0 rounded-[2px] ${attendanceInfo ? attendanceInfo.segmentTone : "bg-slate-200"}"${item ? ` title="${escapeHtml(item.titulo || "Actividad")} · No presentó · ${escapeHtml(attendanceInfo.label)}"` : ""}></span>`;
+        }).join("")}
+      </div>
     </div>
   `;
 }
@@ -2490,45 +2664,29 @@ function regularizationStudentReportModal({
   activities = [],
   gradesMap = {},
   attendanceRows = [],
-  lowLimit = 50,
   displayNumber = "",
-  subjectId = ""
+  course = null
 }) {
   if (!student) return "";
 
-  const isSubjectReport = Boolean(subjectId);
-  const selectedSubject = subjectId ? findSubject(subjectId) : null;
-  const filteredActivities = subjectId
-    ? activities.filter((activity) => activity.materiaId === subjectId)
-    : activities;
-  const reportItems = filteredActivities
+  const reportItems = activities
     .map((activity) => {
       const grade = gradesMap[activity.id]?.[student.id] || null;
       const attendanceState = attendanceStateForDate(student.id, activity.fecha, attendanceRows);
       const pendingReason = regularizationPendingReason(grade, attendanceState);
       return {
         activity,
-        grade,
         attendanceState,
-        pendingReason,
-        score: grade ? gradeNumber(grade.nota) : 35
+        pendingReason
       };
     })
+    .filter((item) => item.pendingReason)
     .sort((a, b) => {
-      const pendingOrder = regularizationPendingPriority(a.pendingReason ? [{ pendienteMotivo: a.pendingReason }] : [])
-        - regularizationPendingPriority(b.pendingReason ? [{ pendienteMotivo: b.pendingReason }] : []);
-      const subjectA = findSubject(a.activity.materiaId)?.nombre || a.activity.materiaId || "";
-      const subjectB = findSubject(b.activity.materiaId)?.nombre || b.activity.materiaId || "";
-      return pendingOrder
-        || subjectA.localeCompare(subjectB, "es", { sensitivity: "base" })
-        || String(b.activity.fecha || "").localeCompare(String(a.activity.fecha || ""));
+      const typeOrder = Number(isSaberActivity(b.activity)) - Number(isSaberActivity(a.activity));
+      return typeOrder
+        || regularizationAttendanceInfo(a.attendanceState).priority - regularizationAttendanceInfo(b.attendanceState).priority
+        || String(a.activity.fecha || "").localeCompare(String(b.activity.fecha || ""));
     });
-
-  const subjectCount = new Set(reportItems.map((item) => item.activity.materiaId).filter(Boolean)).size;
-  const pendingCount = reportItems.filter((item) => item.pendingReason).length;
-  const overallAverage = reportItems.length
-    ? Math.round(reportItems.reduce((total, item) => total + item.score, 0) / reportItems.length)
-    : 35;
   const reportGroups = [
     {
       id: "saber",
@@ -2542,146 +2700,91 @@ function regularizationStudentReportModal({
       label: "Hacer",
       headerClass: "border-green-200 bg-green-50 text-school-green",
       badgeClass: "bg-green-100 text-school-green",
-      items: reportItems.filter((item) => !isSaberActivity(item.activity) && !isMaterialActivity(item.activity))
-    },
-    {
-      id: "responsabilidad",
-      label: "Responsabilidad",
-      headerClass: "border-blue-200 bg-blue-50 text-blue-900",
-      badgeClass: "bg-blue-100 text-blue-800",
-      items: reportItems.filter((item) => isMaterialActivity(item.activity))
+      items: reportItems.filter((item) => !isSaberActivity(item.activity))
     }
-  ]
-    .filter((group) => group.items.length)
-    .map((group) => ({
-      ...group,
-      average: Math.round(group.items.reduce((total, item) => total + item.score, 0) / group.items.length)
-    }));
-  const saberGroup = reportGroups.find((group) => group.id === "saber") || null;
-  const hacerGroup = reportGroups.find((group) => group.id === "hacer") || null;
+  ].filter((group) => group.items.length);
+  const saberCount = reportItems.filter((item) => isSaberActivity(item.activity)).length;
+  const hacerCount = reportItems.length - saberCount;
 
   return `
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-2 sm:p-5">
-      <section class="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:rounded-3xl">
+      <section class="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:rounded-3xl">
         <header class="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5 sm:py-4">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-[9px] font-semibold uppercase tracking-[.14em] text-school-green sm:text-[10px]">${selectedSubject ? `Detalle de ${escapeHtml(selectedSubject.nombre)}` : "Detalle del estudiante"}</p>
+              <p class="text-[9px] font-semibold uppercase tracking-[.14em] text-school-green sm:text-[10px]">Pendientes del estudiante</p>
               <h3 class="mt-0.5 truncate text-base font-semibold text-slate-900 sm:text-xl">${escapeHtml(displayNumber)}. ${escapeHtml(student.nombre)}</h3>
-              <p class="mt-1 text-[10px] text-slate-500 sm:text-xs">${selectedSubject ? `Solo ${escapeHtml(selectedSubject.nombre)} · actividades y notas del trimestre` : "Todas las actividades y notas del trimestre"}</p>
+              <p class="mt-1 text-[10px] text-slate-500 sm:text-xs">${course ? `${escapeHtml(course.nombre)} · ` : ""}Solo se muestran actividades que todavia debe regularizar.</p>
             </div>
             <button type="button" data-close-regularization-report class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 transition hover:bg-slate-200 sm:h-9 sm:w-9 sm:rounded-xl" aria-label="Cerrar">
               ${icon("x", "h-4 w-4 sm:h-5 sm:w-5")}
             </button>
           </div>
-          ${isSubjectReport ? `
-            <div class="mt-3 grid grid-cols-3 gap-1.5 sm:max-w-lg sm:gap-2">
-              <div class="rounded-lg bg-amber-50 px-2.5 py-2 sm:px-3">
-                <p class="text-[8px] font-medium uppercase text-slate-500 sm:text-[9px]">Saber</p>
-                <p class="mt-0.5 text-base font-semibold sm:text-lg ${saberGroup && saberGroup.average < lowLimit ? "text-red-600" : "text-amber-800"}">${saberGroup ? saberGroup.average : "-"}${saberGroup ? `<span class="text-[9px] font-medium text-slate-400 sm:text-[10px]">/100</span>` : ""}</p>
-              </div>
-              <div class="rounded-lg bg-green-50 px-2.5 py-2 sm:px-3">
-                <p class="text-[8px] font-medium uppercase text-slate-500 sm:text-[9px]">Hacer</p>
-                <p class="mt-0.5 text-base font-semibold sm:text-lg ${hacerGroup && hacerGroup.average < lowLimit ? "text-red-600" : "text-school-green"}">${hacerGroup ? hacerGroup.average : "-"}${hacerGroup ? `<span class="text-[9px] font-medium text-slate-400 sm:text-[10px]">/100</span>` : ""}</p>
-              </div>
-              <div class="rounded-lg bg-red-50 px-2.5 py-2 sm:px-3">
-                <p class="text-[8px] font-medium uppercase text-slate-500 sm:text-[9px]">Pendientes</p>
-                <p class="mt-0.5 text-base font-semibold text-red-600 sm:text-lg">${pendingCount}</p>
-              </div>
+          <div class="mt-3 grid grid-cols-3 gap-1.5 sm:max-w-lg sm:gap-2">
+            <div class="rounded-lg bg-green-50 px-3 py-2">
+              <p class="text-[9px] font-medium uppercase text-slate-500">Hacer</p>
+              <p class="mt-0.5 text-lg font-semibold text-school-green">${hacerCount}</p>
             </div>
-          ` : `
-            <div class="mt-3 grid grid-cols-3 gap-1.5 sm:max-w-lg sm:gap-2">
-              <div class="rounded-lg bg-green-50 px-3 py-2">
-                <p class="text-[9px] font-medium uppercase text-slate-500">Prom. referencial</p>
-                <p class="mt-0.5 text-lg font-semibold ${overallAverage < lowLimit ? "text-red-600" : "text-school-green"}">${overallAverage}<span class="text-[10px] font-medium text-slate-400">/100</span></p>
-              </div>
-              <div class="rounded-lg bg-slate-50 px-3 py-2">
-                <p class="text-[9px] font-medium uppercase text-slate-500">Materias</p>
-                <p class="mt-0.5 text-lg font-semibold text-slate-800">${subjectCount}</p>
-              </div>
-              <div class="rounded-lg bg-red-50 px-3 py-2">
-                <p class="text-[9px] font-medium uppercase text-slate-500">Pendientes</p>
-                <p class="mt-0.5 text-lg font-semibold text-red-600">${pendingCount}</p>
-              </div>
+            <div class="rounded-lg bg-amber-50 px-3 py-2">
+              <p class="text-[9px] font-medium uppercase text-slate-500">Saber</p>
+              <p class="mt-0.5 text-lg font-semibold text-amber-800">${saberCount}</p>
             </div>
-          `}
+            <div class="rounded-lg bg-red-50 px-3 py-2">
+              <p class="text-[9px] font-medium uppercase text-slate-500">Total</p>
+              <p class="mt-0.5 text-lg font-semibold text-red-600">${reportItems.length}</p>
+            </div>
+          </div>
         </header>
-        <div class="min-h-0 flex-1 overflow-auto bg-slate-50/70 p-2.5 sm:p-4">
+        <div class="min-h-0 flex-1 space-y-3 overflow-auto bg-slate-50/70 p-2.5 sm:p-4">
           ${reportItems.length ? `
-            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-              <table class="w-full table-fixed text-left text-[9px] sm:text-[11px] ${isSubjectReport ? "min-w-0" : "min-w-[700px]"}">
-                <thead class="sticky top-0 z-10 bg-school-green text-white">
-                  <tr>
-                    ${isSubjectReport ? "" : `<th class="w-32 px-2.5 py-2 font-semibold">Materia</th>`}
-                    <th class="px-2 py-2 font-semibold sm:px-2.5">Actividad</th>
-                    <th class="hidden w-20 px-2 py-2 font-semibold sm:table-cell">Fecha</th>
-                    <th class="hidden w-24 px-2 py-2 font-semibold sm:table-cell">Asistencia</th>
-                    <th class="w-24 px-1.5 py-2 font-semibold sm:w-36 sm:px-2">Estado</th>
-                    <th class="w-12 px-1 py-2 text-center font-semibold sm:w-14 sm:px-2">Nota</th>
-                    <th class="w-11 px-1 py-2 text-center font-semibold sm:w-16 sm:px-2">Editar</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                  ${reportGroups.map((group) => `
-                    <tr>
-                      <td colspan="${isSubjectReport ? 6 : 7}" class="border-y px-2.5 py-2 ${group.headerClass}">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                          <div class="flex items-center gap-2">
-                            <span class="rounded-md px-2 py-1 text-[9px] font-semibold uppercase tracking-[.08em] ${group.badgeClass}">${group.label}</span>
-                            <span class="text-[9px] font-medium sm:text-[10px]">${group.items.length} actividad(es)</span>
+            ${reportGroups.map((group) => `
+              <section class="overflow-hidden rounded-xl border ${group.headerClass}">
+                <div class="flex items-center justify-between gap-2 border-b border-current/10 px-3 py-2">
+                  <span class="rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${group.badgeClass}">${group.label}</span>
+                  <span class="text-[10px] font-semibold">${group.items.length} pendiente(s)</span>
+                </div>
+                <div class="divide-y divide-slate-100 bg-white">
+                  ${group.items.map(({ activity, attendanceState, pendingReason }) => {
+                    const subject = findSubject(activity.materiaId);
+                    const attendanceInfo = regularizationAttendanceInfo(attendanceState);
+                    return `
+                      <article class="grid grid-cols-[auto_minmax(0,1fr)] overflow-hidden bg-white">
+                        <span class="regularization-attendance-rail flex min-h-24 items-center justify-center border-r px-1.5 py-2 text-[9px] font-semibold uppercase ${attendanceInfo.railTone}" title="${escapeHtml(attendanceInfo.detail)}">${escapeHtml(attendanceInfo.label)}</span>
+                        <div class="grid min-w-0 gap-2 px-3 py-2.5 sm:grid-cols-[1fr_auto] sm:items-center">
+                          <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                              <span class="rounded-md bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">${escapeHtml(subject?.nombre || activity.materiaId || "Materia")}</span>
+                              <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-semibold ring-1 ring-inset ${regularizationPendingTone(pendingReason)}">${icon(regularizationPendingIcon(pendingReason), "h-3 w-3")} No presentó</span>
+                            </div>
+                            <p class="mt-1 truncate text-xs font-semibold text-slate-900 sm:text-sm" title="${escapeHtml(activity.titulo || "Actividad")}">${escapeHtml(activity.titulo || "Actividad")}</p>
+                            <p class="mt-0.5 text-[9px] text-slate-500 sm:text-[10px]">${escapeHtml(activity.fecha ? activity.fecha.split("-").reverse().join("/") : "Sin fecha")} · ${escapeHtml(attendanceInfo.detail)}</p>
                           </div>
-                          <span class="text-[9px] font-semibold sm:text-[10px]">Prom. ${group.average}/100</span>
+                          <button type="button" data-regularization-grade-activity="${activity.id}" data-regularization-grade-student="${student.id}" class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-school-green px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-school-navy">
+                            ${icon("pencil", "h-3.5 w-3.5")} Calificar
+                          </button>
                         </div>
-                      </td>
-                    </tr>
-                    ${group.items.map(({ activity, attendanceState, pendingReason, score }) => {
-                      const subject = findSubject(activity.materiaId);
-                      const pendingTone = regularizationPendingTone(pendingReason);
-                      const scoreTone = pendingReason
-                        ? "bg-red-50 text-red-700"
-                        : score < lowLimit
-                          ? "bg-red-50 text-red-600"
-                          : "bg-green-50 text-school-green";
-                      return `
-                        <tr class="${pendingReason ? "bg-red-50/30" : "bg-white"} hover:bg-green-50/50">
-                          ${isSubjectReport ? "" : `<td class="px-2.5 py-2 font-medium text-slate-700">${escapeHtml(subject?.nombre || activity.materiaId || "Materia")}</td>`}
-                          <td class="px-2 py-2 text-slate-900 sm:px-2.5">
-                            <span class="block leading-tight">${escapeHtml(activity.titulo || "Actividad")}</span>
-                            <span class="mt-1 block truncate text-[8px] leading-tight text-slate-500 sm:hidden">${escapeHtml(activity.fecha ? activity.fecha.split("-").reverse().join("/") : "Sin fecha")} · ${escapeHtml(attendanceState ? attendanceLabel(attendanceState) : "Sin registro")}</span>
-                          </td>
-                          <td class="hidden px-2 py-2 text-slate-500 sm:table-cell">${escapeHtml(activity.fecha ? activity.fecha.split("-").reverse().join("/") : "-")}</td>
-                          <td class="hidden px-2 py-2 text-slate-600 sm:table-cell">${escapeHtml(attendanceState ? attendanceLabel(attendanceState) : "Sin registro")}</td>
-                          <td class="px-1.5 py-2 sm:px-2">
-                            ${pendingReason
-                              ? `<span class="inline-flex max-w-full truncate rounded-md px-1.5 py-1 text-[8px] font-semibold ring-1 ring-inset sm:text-[9px] ${pendingTone}" title="${escapeHtml(pendingReason)}">P · ${escapeHtml(pendingReason)}</span>`
-                              : `<span class="inline-flex max-w-full truncate rounded-md bg-green-50 px-1.5 py-1 text-[8px] font-semibold text-school-green sm:text-[9px]">Presentado</span>`}
-                          </td>
-                          <td class="px-1 py-2 text-center sm:px-2"><span class="inline-flex min-w-7 justify-center rounded-md px-1 py-1 font-semibold sm:min-w-8 sm:px-1.5 ${scoreTone}">${pendingReason ? "P" : score}</span></td>
-                          <td class="px-1 py-2 text-center sm:px-2">
-                            <button type="button" data-regularization-grade-activity="${activity.id}" data-regularization-grade-student="${student.id}" class="inline-grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-school-green transition hover:border-school-green hover:bg-green-50" aria-label="Editar ${escapeHtml(activity.titulo || "nota")}">
-                              ${icon("pencil", "h-3.5 w-3.5")}
-                            </button>
-                          </td>
-                        </tr>
-                      `;
-                    }).join("")}
-                  `).join("")}
-                </tbody>
-              </table>
-            </div>
-          ` : `<div class="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-xs text-slate-500">Todavia no existen actividades revisadas para este alumno.</div>`}
+                      </article>
+                    `;
+                  }).join("")}
+                </div>
+              </section>
+            `).join("")}
+          ` : `<div class="rounded-xl border border-green-200 bg-green-50 px-4 py-8 text-center text-xs font-semibold text-school-green">Este alumno ya no tiene actividades pendientes.</div>`}
         </div>
       </section>
     </div>
   `;
 }
 
-function regularizationGradeModal({ activity, student, currentGrade, displayNumber = "", hasNext = false }) {
+function regularizationGradeModal({ activity, student, currentGrade, attendanceState = "", pendingReason = "", displayNumber = "", hasNext = false }) {
   if (!activity || !student) return "";
   const subject = findSubject(activity.materiaId);
   const max = Math.max(1, Math.min(100, Number(activity.maximo || 100)));
   const quickValues = max <= 20 ? Array.from({ length: max }, (_, index) => index + 1) : [];
   const currentValue = Number(currentGrade?.valor || "");
+  const currentDeliveryState = deliveryStateForGrade(currentGrade);
+  const attendanceInfo = regularizationAttendanceInfo(attendanceState);
+  const responsibilityValue = attendanceInfo.id === "licencia" || currentDeliveryState === DELIVERY_STATES.ON_TIME ? 100 : 50;
   return `
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-3 py-5">
       <section class="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl">
@@ -2690,15 +2793,28 @@ function regularizationGradeModal({ activity, student, currentGrade, displayNumb
             <div class="min-w-0">
               <p class="text-[10px] font-black uppercase tracking-[.16em] text-white/75">Regularizacion</p>
               <h3 class="mt-0.5 truncate text-lg font-black">${escapeHtml(displayNumber)}. ${escapeHtml(student.nombre)}</h3>
-              <p class="mt-1 truncate text-xs font-bold text-white/80">${escapeHtml(subject?.nombre || activity.materiaId)} · ${escapeHtml(activity.titulo || "Actividad")}</p>
+              <p class="mt-1 truncate text-xs font-bold text-white/80">${activity.cursoNombre ? `${escapeHtml(activity.cursoNombre)} · ` : ""}${escapeHtml(subject?.nombre || activity.materiaId)} · ${escapeHtml(activity.titulo || "Actividad")}</p>
             </div>
             <button type="button" data-close-regularization-grade class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/10 text-white hover:bg-white/20">${icon("x", "h-5 w-5")}</button>
           </div>
         </div>
         <div class="space-y-3 p-4">
-          <div class="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-            <p class="text-[11px] font-black uppercase tracking-[.14em] text-slate-400">Nota maxima</p>
-            <p class="text-xl font-black text-slate-900">${max}</p>
+          <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-stretch overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+            <span class="regularization-attendance-rail flex min-h-20 items-center justify-center border-r px-1.5 py-2 text-[9px] font-semibold uppercase ${attendanceInfo.railTone}">${escapeHtml(attendanceInfo.label)}</span>
+            <div class="self-center px-3 py-2">
+              <p class="text-[10px] font-semibold uppercase text-slate-500">Estado de la actividad</p>
+              <span class="mt-1 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold ring-1 ring-inset ${regularizationPendingTone(pendingReason)}">
+                ${icon(regularizationPendingIcon(pendingReason), "h-3.5 w-3.5")} No presentó
+              </span>
+              <p class="mt-1 text-[10px] text-slate-500">${escapeHtml(attendanceInfo.detail)}</p>
+            </div>
+            <div class="self-center px-3 py-2 text-right">
+              <p class="text-[10px] font-semibold uppercase text-slate-500">Sobre</p>
+              <p class="text-xl font-semibold text-slate-900">${max}</p>
+            </div>
+          </div>
+          <div class="rounded-xl border px-3 py-2 text-xs font-semibold ${responsibilityValue === 100 ? "border-green-200 bg-green-50 text-green-800" : "border-amber-200 bg-amber-50 text-amber-800"}">
+            ${responsibilityValue === 100 ? "Licencia justificada: puede regularizar sin perder puntos de Responsabilidad." : "Entrega posterior: conservará su calificación y aportará 50 a Responsabilidad."}
           </div>
           ${quickValues.length ? `
             <div class="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
@@ -2726,58 +2842,40 @@ function regularizationGradeModal({ activity, student, currentGrade, displayNumb
 
 async function renderRegularization(context) {
   const container = document.querySelector("[data-teacher-regularization]");
-  const course = selectedCourse(context);
+  const courses = context?.courses || [];
+  const primaryCourse = courses[0] || null;
+  const coursesById = Object.fromEntries(courses.map((item) => [item.id, item]));
+  const showCourse = courses.length > 1;
   if (!container) return;
-  if (!course) {
+  if (!primaryCourse) {
     container.innerHTML = emptyState("Sin cursos asignados", "Admin debe asignarte un curso antes de revisar regularizacion.");
     return;
   }
 
-  const cacheMeta = getTeacherDataCacheMeta(context, "notas", course.id, teacherState.trimesterId);
-  const snapshot = await getTeacherNotesSnapshot(context, course, teacherState.trimesterId);
-  if (!snapshot) {
-    function compactGradeActivityButton(item, widthClass = "") {
-    const subject = findSubject(item.materiaId);
-    const courseItem = coursesById[item.cursoId] || {};
-    const courseNumber = String(courseItem.corto || courseItem.nombre || "").replace(/\D/g, "") || "I";
-    const accent = showCourse ? courseAccent(item.cursoId) : (subject?.color || "#e2e8f0");
-    const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
-    const active = item.id === teacherState.gradeModalActivityId;
-    return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-1.5">
-          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
-        </span>
-        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
-      </button>
-    `;
-  }
+  const courseSnapshots = await Promise.all(courses.map(async (course) => ({
+    course,
+    cacheMeta: getTeacherDataCacheMeta(context, "notas", course.id, teacherState.trimesterId),
+    snapshot: await getTeacherNotesSnapshot(context, course, teacherState.trimesterId)
+  })));
+  const availableSnapshots = courseSnapshots.filter((entry) => entry.snapshot);
+  const latestCacheMeta = availableSnapshots
+    .map((entry) => entry.cacheMeta)
+    .filter(Boolean)
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0] || null;
+  const refreshAllRegularization = async () => {
+    await Promise.all(courses.map((course) => refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId)));
+  };
 
-  function compactGradeDateCard(dateKey) {
-    const dayActivities = activities.filter((item) => (item.fecha || gradeDate) === dateKey);
-    if (!dayActivities.length) return "";
-    const label = planningDayLabel(dateKey);
-    return `
-      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
-          <div class="min-w-0">
-            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
-            <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
-          </div>
-          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
-        </div>
-        <div class="grid gap-1.5">
-          ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
-        </div>
-      </article>
-    `;
-  }
-  container.innerHTML = `
-      <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft">
-        <p class="text-xs font-black uppercase tracking-[.18em] text-school-green">${escapeHtml(course.nombre)} · ${escapeHtml(selectedTrimester().label)}</p>
-        <h2 class="mt-1 text-2xl font-black text-slate-900">Regularizacion</h2>
-        <p class="mt-2 max-w-2xl font-semibold text-slate-500">Carga las notas del curso para detectar estudiantes con actividades no presentadas o notas bajas.</p>
+  if (!availableSnapshots.length) {
+    container.innerHTML = `
+      <section class="teacher-module-surface rounded-3xl border border-slate-200 bg-white p-5 shadow-soft">
+        ${teacherModuleHeading({
+          title: "Regularizacion",
+          course: showCourse ? `${courses.length} cursos asignados` : primaryCourse.nombre,
+          trimester: selectedTrimester().label,
+          detail: "Entregas pendientes"
+        })}
+        <p class="mt-3 max-w-2xl text-sm font-normal text-slate-500">Carga los datos para revisar solamente actividades cerradas que siguen sin presentarse.</p>
         <button type="button" data-refresh-regularization-cache class="mt-4 inline-flex items-center gap-2 rounded-2xl bg-school-green px-4 py-3 text-sm font-black text-white shadow-soft transition hover:bg-school-navy">
           ${icon("cloud-download", "h-4 w-4")} Cargar regularizacion
         </button>
@@ -2787,290 +2885,254 @@ async function renderRegularization(context) {
       const button = event.currentTarget;
       button.disabled = true;
       button.textContent = "Cargando...";
-      await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
+      await refreshAllRegularization();
       await renderRegularization(context);
     });
     refreshIcons();
     return;
   }
 
-  const { students = [], activities = [], gradesList = [], attendanceRows = [] } = snapshot;
+  const students = availableSnapshots.flatMap(({ course, snapshot }) => (snapshot.students || []).map((student) => ({
+    ...student,
+    cursoId: student.cursoId || course.id,
+    cursoNombre: course.nombre
+  })));
+  const activities = availableSnapshots.flatMap(({ course, snapshot }) => (snapshot.activities || []).map((activity) => ({
+    ...activity,
+    cursoId: activity.cursoId || course.id,
+    cursoNombre: course.nombre
+  })));
+  const gradesList = availableSnapshots.flatMap(({ snapshot }) => snapshot.gradesList || []);
+  const attendanceRows = availableSnapshots.flatMap(({ snapshot }) => snapshot.attendanceRows || []);
   const studentsByName = sortStudentsByName(students);
   const regularizationOrderMap = new Map(studentsByName.map((student, index) => [student.id, index + 1]));
   const gradesMap = gradeByActivityAndStudent(gradesList);
   const currentDate = todayIso();
-  const lowLimit = 50;
   const activitiesToReview = activities
-    .filter((item) => course.materias.includes(item.materiaId))
-    .filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
+    .filter((item) => coursesById[item.cursoId]?.materias?.includes(item.materiaId))
+    .filter((item) => !item.interno && !["ser", "auto"].includes(String(item.tipo || "").toLowerCase()))
     .filter((item) => !isMaterialActivity(item) || isScoredMaterialActivity(item))
     .filter((item) => !item.fecha || item.fecha <= currentDate)
-    .filter((item) => activityHasGrades(item, gradesMap))
+    .map((item) => {
+      const activityGrades = gradesMap[item.id] || {};
+      const reviewState = resolvedActivityReviewState(item, activityGrades);
+      const reviewStarted = ["en_proceso", "cerrada"].includes(reviewState);
+      const availableFrom = String(item.regularizacionDesde || "").slice(0, 10);
+      const closedDate = String(item.revisionFinalizadaFecha || "").slice(0, 10);
+      const closedAndAvailable = reviewState === "cerrada" && (
+        availableFrom ? availableFrom <= currentDate : (!closedDate || closedDate < currentDate)
+      );
+      return {
+        ...item,
+        regularizacionRevisionIniciada: reviewStarted,
+        regularizacionCerradaDisponible: closedAndAvailable
+      };
+    })
+    .filter((item) => item.regularizacionRevisionIniciada)
     .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+  const activitiesStillInGrading = activitiesToReview.filter((item) => !item.regularizacionCerradaDisponible).length;
 
   const pendingByStudent = [];
   studentsByName.forEach((student) => {
     const pending = [];
     activitiesToReview.forEach((activity) => {
+      if (String(activity.cursoId || "") !== String(student.cursoId || "")) return;
       const grade = gradesMap[activity.id]?.[student.id];
       const attendanceState = attendanceStateForDate(student.id, activity.fecha, attendanceRows);
       const pendingReason = regularizationPendingReason(grade, attendanceState);
-      if (pendingReason) pending.push({ ...activity, pendienteMotivo: pendingReason, nota: 35 });
+      const deliveryState = deliveryStateForGrade(grade);
+      const explicitNoSubmission = deliveryState === DELIVERY_STATES.NOT_SUBMITTED;
+      const absentOnActivityDate = ["falta", "permiso", "licencia"].includes(String(attendanceState || "").toLowerCase());
+      const visibleImmediately = explicitNoSubmission || (!grade && absentOnActivityDate);
+      if (pendingReason && (activity.regularizacionCerradaDisponible || visibleImmediately)) {
+        pending.push({
+          ...activity,
+          pendienteMotivo: pendingReason,
+          pendienteAsistencia: attendanceState,
+          pendienteTipo: isSaberActivity(activity) ? "saber" : "hacer"
+        });
+      }
     });
     if (pending.length) pendingByStudent.push({ student, items: pending });
   });
 
   const pendingTotal = pendingByStudent.reduce((total, item) => total + item.items.length, 0);
+  const attendancePendingTotals = pendingByStudent
+    .flatMap((item) => item.items)
+    .reduce((totals, activity) => {
+      const attendanceInfo = regularizationAttendanceInfo(activity.pendienteAsistencia);
+      totals[attendanceInfo.id] = (totals[attendanceInfo.id] || 0) + 1;
+      return totals;
+    }, {});
+  const licenseTotal = attendancePendingTotals.licencia || 0;
+  const absenceTotal = attendancePendingTotals.falta || 0;
+  const presentTotal = attendancePendingTotals.presente || 0;
   const clearSearch = regularizationSearchKey(teacherState.regularizationSearch);
-  const pendingByStudentMap = new Map(pendingByStudent.map((item) => [item.student.id, item.items]));
-  const subjectIds = (course.materias || []).filter(Boolean);
-  const activitiesBySubject = new Map(subjectIds.map((subjectId) => [
-    subjectId,
-    activitiesToReview.filter((activity) => activity.materiaId === subjectId)
-  ]));
-  const selectedSortSubjectId = subjectIds.includes(teacherState.regularizationSortSubjectId)
-    ? teacherState.regularizationSortSubjectId
-    : "";
-  if (selectedSortSubjectId !== teacherState.regularizationSortSubjectId) {
-    teacherState.regularizationSortSubjectId = "";
-    sessionStorage.removeItem("docenteRegularizacionOrdenMateria");
-  }
-  const matrixRows = studentsByName
-    .filter((student) => !clearSearch || regularizationSearchKey(student.nombre).includes(clearSearch))
-    .map((student) => {
-    const pendingItems = pendingByStudentMap.get(student.id) || [];
-    const summaries = new Map(subjectIds.map((subjectId) => {
-      const subjectActivities = activitiesBySubject.get(subjectId) || [];
-      const subjectPending = pendingItems.filter((activity) => activity.materiaId === subjectId);
-      const scores = subjectActivities.map((activity) => {
-        const grade = gradesMap[activity.id]?.[student.id];
-        return grade ? gradeNumber(grade.nota) : 35;
-      });
-      const lowCount = subjectActivities.reduce((total, activity) => {
-        const grade = gradesMap[activity.id]?.[student.id];
-        return total + (grade && Number(grade.valor || 0) > 0 && gradeNumber(grade.nota) < lowLimit ? 1 : 0);
-      }, 0);
-      return [subjectId, {
-        activityCount: subjectActivities.length,
-        average: scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : null,
-        lowCount,
-        pendingItems: subjectPending
-      }];
-    }));
-    const lowCount = [...summaries.values()].reduce((total, summary) => total + summary.lowCount, 0);
-    return { student, pendingItems, summaries, lowCount };
-  })
+  const pendingRows = pendingByStudent
+    .filter(({ student }) => !clearSearch || regularizationSearchKey(student.nombre).includes(clearSearch))
     .sort((a, b) => {
-      if (selectedSortSubjectId) {
-        const summaryA = a.summaries.get(selectedSortSubjectId);
-        const summaryB = b.summaries.get(selectedSortSubjectId);
-        const hasDataA = Boolean(summaryA?.activityCount);
-        const hasDataB = Boolean(summaryB?.activityCount);
-        return Number(hasDataB) - Number(hasDataA)
-          || (summaryA?.average ?? 101) - (summaryB?.average ?? 101)
-          || (summaryB?.lowCount || 0) - (summaryA?.lowCount || 0)
-          || b.pendingItems.length - a.pendingItems.length
-          || String(a.student.nombre || "").localeCompare(String(b.student.nombre || ""), "es", { sensitivity: "base" });
-      }
-      return regularizationPendingPriority(a.pendingItems) - regularizationPendingPriority(b.pendingItems)
-        || b.pendingItems.length - a.pendingItems.length
-        || b.lowCount - a.lowCount
+      return regularizationPendingPriority(a.items) - regularizationPendingPriority(b.items)
+        || b.items.length - a.items.length
         || String(a.student.nombre || "").localeCompare(String(b.student.nombre || ""), "es", { sensitivity: "base" });
     });
-  const regularizationQueue = matrixRows.flatMap(({ student }) => [...(pendingByStudentMap.get(student.id) || [])]
+  const regularizationQueue = pendingRows.flatMap(({ student, items }) => [...items]
     .sort((a, b) => regularizationPendingPriority([a]) - regularizationPendingPriority([b])
       || String(a.fecha || "").localeCompare(String(b.fecha || "")))
     .map((activity) => ({ activity, student })));
-  const selectedRegularizationActivity = activitiesToReview.find((item) => item.id === teacherState.regularizationGradeActivityId) || null;
-  const selectedRegularizationStudent = studentsByName.find((item) => item.id === teacherState.regularizationGradeStudentId) || null;
-  const selectedRegularizationReportStudent = studentsByName.find((item) => item.id === teacherState.regularizationReportStudentId) || null;
-  const selectedRegularizationReportSubjectId = subjectIds.includes(teacherState.regularizationReportSubjectId)
-    ? teacherState.regularizationReportSubjectId
-    : "";
-  if (!selectedRegularizationReportSubjectId && teacherState.regularizationReportSubjectId) {
-    teacherState.regularizationReportSubjectId = "";
-  }
+  const selectedRegularizationTarget = regularizationQueue.find(({ activity, student }) => (
+    activity.id === teacherState.regularizationGradeActivityId
+    && student.id === teacherState.regularizationGradeStudentId
+  )) || null;
+  const selectedRegularizationActivity = selectedRegularizationTarget?.activity || null;
+  const selectedRegularizationStudent = selectedRegularizationTarget?.student || null;
+  const selectedRegularizationReportEntry = pendingByStudent.find(({ student }) => student.id === teacherState.regularizationReportStudentId) || null;
+  const selectedRegularizationReportStudent = selectedRegularizationReportEntry?.student || null;
   const selectedRegularizationGrade = selectedRegularizationActivity && selectedRegularizationStudent
     ? gradesMap[selectedRegularizationActivity.id]?.[selectedRegularizationStudent.id]
     : null;
+  const selectedRegularizationAttendanceState = selectedRegularizationActivity && selectedRegularizationStudent
+    ? attendanceStateForDate(selectedRegularizationStudent.id, selectedRegularizationActivity.fecha, attendanceRows)
+    : "";
+  const selectedRegularizationPendingReason = regularizationPendingReason(selectedRegularizationGrade, selectedRegularizationAttendanceState);
   const currentQueueIndex = regularizationQueue.findIndex(({ activity, student }) => activity.id === selectedRegularizationActivity?.id && student.id === selectedRegularizationStudent?.id);
   const nextRegularizationTarget = currentQueueIndex >= 0 ? regularizationQueue[currentQueueIndex + 1] || null : null;
 
   container.innerHTML = `
     <section class="space-y-3 sm:space-y-4">
-      <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-4">
-        <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between sm:gap-3">
-          <div class="min-w-0">
-            <p class="text-[9px] font-semibold uppercase tracking-[.12em] text-school-green sm:text-[10px] sm:tracking-[.16em]">Regularizacion</p>
-            <h2 class="mt-0.5 text-lg font-semibold text-slate-900 sm:text-xl">${escapeHtml(course.nombre)}</h2>
-            <p class="mt-0.5 text-[10px] text-slate-500 sm:text-xs">${escapeHtml(selectedTrimester().label)} · ${activitiesToReview.length} actividad(es) revisadas</p>
-          </div>
-          <div class="flex min-w-0 flex-col gap-1.5 lg:items-end sm:gap-2">
-            ${regularizationCourseTabs(context, course)}
-            <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <span class="inline-flex items-center gap-1 rounded-md border border-green-100 bg-green-50 px-2 py-1 text-[9px] font-medium text-school-green sm:gap-2 sm:rounded-lg sm:px-3 sm:py-1.5 sm:text-[10px]">${icon("calendar-check", "h-3 w-3 sm:h-3.5 sm:w-3.5")} ${cacheMeta ? `Copia: ${escapeHtml(cacheMeta.label)}` : "Sin copia local"}</span>
+      <div class="teacher-module-surface rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-4">
+        <div class="teacher-module-header flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          ${teacherModuleHeading({
+            title: "Regularizacion",
+            course: showCourse ? `${courses.length} cursos asignados` : primaryCourse.nombre,
+            trimester: selectedTrimester().label,
+            detail: "Entregas pendientes y ausencias"
+          })}
+          <div class="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
+              <span class="inline-flex items-center gap-1 rounded-md border border-green-100 bg-green-50 px-2 py-1 text-[9px] font-medium text-school-green sm:gap-2 sm:rounded-lg sm:px-3 sm:py-1.5 sm:text-[10px]">${icon("calendar-check", "h-3 w-3 sm:h-3.5 sm:w-3.5")} ${latestCacheMeta ? `Copia: ${escapeHtml(latestCacheMeta.label)}` : "Sin copia local"}</span>
+              ${showCourse ? `<span class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[9px] font-medium text-slate-600 sm:rounded-lg sm:px-3 sm:py-1.5 sm:text-[10px]">${availableSnapshots.length}/${courses.length} cursos cargados</span>` : ""}
               <button type="button" data-refresh-regularization-cache class="inline-flex items-center gap-1 rounded-md border border-school-green bg-white px-2 py-1 text-[9px] font-semibold text-school-green transition hover:bg-school-green hover:text-white sm:gap-2 sm:rounded-lg sm:px-3 sm:py-1.5 sm:text-[10px]">
                 ${icon("refresh-cw", "h-3 w-3 sm:h-4 sm:w-4")} Actualizar
               </button>
-            </div>
           </div>
         </div>
+        <div class="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
+          <div class="rounded-lg bg-slate-50 px-2.5 py-2">
+            <p class="text-[8px] font-semibold uppercase text-slate-500 sm:text-[9px]">Alumnos</p>
+            <p class="mt-0.5 text-lg font-semibold text-slate-900">${pendingByStudent.length}</p>
+          </div>
+          <div class="rounded-lg bg-amber-50 px-2.5 py-2">
+            <p class="text-[8px] font-semibold uppercase text-amber-800 sm:text-[9px]">Presentes</p>
+            <p class="mt-0.5 text-lg font-semibold text-amber-800">${presentTotal}</p>
+          </div>
+          <div class="rounded-lg bg-red-50 px-2.5 py-2">
+            <p class="text-[8px] font-semibold uppercase text-red-700 sm:text-[9px]">Faltas</p>
+            <p class="mt-0.5 text-lg font-semibold text-red-700">${absenceTotal}</p>
+          </div>
+          <div class="rounded-lg bg-purple-50 px-2.5 py-2">
+            <p class="text-[8px] font-semibold uppercase text-purple-700 sm:text-[9px]">Licencias</p>
+            <p class="mt-0.5 text-lg font-semibold text-purple-700">${licenseTotal}</p>
+          </div>
+        </div>
+        ${activitiesStillInGrading ? `
+          <div class="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] leading-snug text-amber-900 sm:text-xs">
+            ${icon("clock-3", "mt-0.5 h-3.5 w-3.5 shrink-0")}
+            <span><strong class="font-semibold">${activitiesStillInGrading} actividad(es)</strong> siguen abiertas en Calificar. Los demás pendientes aparecerán al terminar su revisión.</span>
+          </div>
+        ` : ""}
       </div>
 
       <div class="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-soft sm:rounded-3xl sm:p-4">
-        <div class="flex flex-col gap-2.5 lg:flex-row lg:items-end lg:justify-between">
+        <div class="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <h3 class="text-sm font-semibold text-slate-900 sm:text-base">Seguimiento por estudiante</h3>
+              <h3 class="text-sm font-semibold text-slate-900 sm:text-base">Alumnos por regularizar</h3>
               <span class="rounded-full bg-red-50 px-2 py-0.5 text-[9px] font-semibold text-red-600 sm:text-[10px]">${pendingTotal} pendiente(s)</span>
             </div>
-            <p class="mt-0.5 text-[9px] leading-tight text-slate-500 sm:text-[10px]">Los alumnos con licencia o actividades pendientes aparecen primero.</p>
+            <p class="mt-0.5 text-[9px] leading-tight text-slate-500 sm:text-[10px]">${pendingByStudent.length ? "Todos figuran como No presentó; el color lateral indica su asistencia ese día." : "Aquí aparecerán solamente los alumnos que ya pueden regularizar una entrega."}</p>
           </div>
-          <label class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-slate-500 focus-within:border-school-green focus-within:bg-white lg:max-w-sm">
+          ${pendingByStudent.length ? `<label class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-slate-500 focus-within:border-school-green focus-within:bg-white lg:max-w-sm">
               ${icon("search", "h-3.5 w-3.5 sm:h-4 sm:w-4")}
-              <input type="search" value="${escapeHtml(teacherState.regularizationSearch)}" data-regularization-search placeholder="Buscar cualquier alumno..." class="min-w-0 flex-1 bg-transparent text-[11px] text-slate-800 outline-none sm:text-xs">
+              <input type="search" value="${escapeHtml(teacherState.regularizationSearch)}" data-regularization-search placeholder="Buscar alumno con pendientes..." class="min-w-0 flex-1 bg-transparent text-[11px] text-slate-800 outline-none sm:text-xs">
               ${teacherState.regularizationSearch ? `<button type="button" data-clear-regularization-search class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Limpiar busqueda">${icon("x", "h-3.5 w-3.5")}</button>` : ""}
-          </label>
+          </label>` : ""}
         </div>
-        <div class="mt-2 flex flex-wrap gap-1.5 text-[8px] sm:mt-3 sm:text-[9px]">
-          <span class="rounded-md bg-purple-50 px-1.5 py-1 text-purple-700 ring-1 ring-inset ring-purple-200">P · Licencia</span>
-          <span class="rounded-md bg-red-50 px-1.5 py-1 text-red-700 ring-1 ring-inset ring-red-200">P · Falta</span>
-          <span class="rounded-md bg-amber-50 px-1.5 py-1 text-amber-800 ring-1 ring-inset ring-amber-200">P · No presento</span>
-          <span class="rounded-md bg-slate-100 px-1.5 py-1 text-slate-700 ring-1 ring-inset ring-slate-200">P · Sin calificar</span>
-        </div>
-        <div class="mt-2 overflow-x-auto rounded-xl border border-slate-200 sm:mt-3">
-          <table class="w-full table-fixed text-left text-[9px] sm:text-[10px]" style="min-width:${Math.max(880, 400 + subjectIds.length * 92)}px">
-            <thead class="bg-school-green text-white">
-              <tr>
-                <th class="sticky left-0 z-20 w-10 bg-school-green px-2 py-2 text-center font-semibold">N°</th>
-                <th class="sticky left-10 z-20 w-56 bg-school-green px-2.5 py-2 font-semibold">Alumno</th>
-                ${subjectIds.map((subjectId) => {
-                  const subject = findSubject(subjectId);
-                  const active = selectedSortSubjectId === subjectId;
-                  return `
-                    <th class="w-[92px] px-1 py-1.5 text-center font-semibold ${active ? "border-x-2 border-school-gold" : ""}" title="${active ? "Quitar orden de" : "Ordenar por"} ${escapeHtml(subject?.nombre || subjectId)}">
-                      <button type="button" data-regularization-sort-subject="${subjectId}" class="inline-flex w-full items-center justify-center gap-1 rounded-md px-1 py-1 transition ${active ? "bg-white text-school-green" : "text-white hover:bg-white/10"}">
-                        ${escapeHtml(subject?.corto || subject?.nombre || subjectId)}${active ? icon("arrow-up-narrow-wide", "h-3 w-3") : ""}
-                      </button>
-                    </th>
-                  `;
-                }).join("")}
-                <th class="w-16 px-1.5 py-2 text-center font-semibold" title="Cantidad total de notas menores a 50">Bajas</th>
-                <th class="w-28 px-2 py-2 text-center font-semibold">Estado</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-              ${matrixRows.length ? matrixRows.map(({ student, pendingItems, summaries, lowCount }) => {
-                const hasLicense = pendingItems.some((item) => item.pendienteMotivo === "Licencia");
-                const rowBackground = hasLicense ? "bg-purple-50/40" : pendingItems.length ? "bg-red-50/25" : "bg-white";
-                const stickyBackground = hasLicense ? "bg-purple-50" : pendingItems.length ? "bg-red-50" : "bg-white";
-                const primaryReason = regularizationPriorityReason(pendingItems);
-                return `
-                  <tr class="${rowBackground} hover:bg-green-50/60">
-                    <td class="sticky left-0 z-10 px-2 py-1.5 text-center ${stickyBackground}">
-                      <span class="inline-grid h-6 min-w-6 place-items-center rounded-md bg-school-sky px-1 font-semibold text-school-green">${regularizationOrderMap.get(student.id) || "-"}</span>
-                    </td>
-                    <td class="sticky left-10 z-10 px-2.5 py-1.5 ${stickyBackground}">
-                      <button type="button" data-regularization-report-student="${student.id}" class="block w-full truncate text-left font-medium text-slate-900 hover:text-school-green" title="${escapeHtml(student.nombre)}">${escapeHtml(student.nombre)}</button>
-                    </td>
-                    ${subjectIds.map((subjectId) => {
-                      const summary = summaries.get(subjectId);
-                      const activeColumn = selectedSortSubjectId === subjectId ? "border-x-2 border-school-gold bg-yellow-50/70" : "";
-                      if (!summary?.activityCount) return `<td class="px-1 py-1.5 text-center text-slate-300 ${activeColumn}">-</td>`;
-                      if (summary.pendingItems.length) {
-                        const reason = regularizationPriorityReason(summary.pendingItems);
-                        return `
-                          <td class="px-1 py-1 ${activeColumn}">
-                            <button type="button" data-regularization-report-student="${student.id}" data-regularization-report-subject="${subjectId}" class="w-full rounded-md px-1 py-1 text-center ring-1 ring-inset ${regularizationPendingTone(reason)}" title="Ver actividades de ${escapeHtml(findSubject(subjectId)?.nombre || subjectId)}: ${escapeHtml(reason)}">
-                              <span class="block text-[10px] font-semibold">P${summary.pendingItems.length > 1 ? ` ${summary.pendingItems.length}` : ""}</span>
-                              <span class="block truncate text-[7px] leading-tight sm:text-[8px]">${escapeHtml(reason)}</span>
-                            </button>
-                          </td>
-                        `;
-                      }
-                      return `
-                        <td class="px-1 py-1 ${activeColumn}">
-                          <button type="button" data-regularization-report-student="${student.id}" data-regularization-report-subject="${subjectId}" class="w-full rounded-md px-1 py-1 text-center ${summary.average < lowLimit ? "bg-red-50 text-red-600" : "bg-green-50 text-school-green"}" title="Ver actividades de ${escapeHtml(findSubject(subjectId)?.nombre || subjectId)}">
-                            <span class="block text-[10px] font-semibold">${summary.average}</span>
-                            <span class="block text-[7px] leading-tight opacity-70 sm:text-[8px]">${summary.activityCount} act.</span>
-                          </button>
-                        </td>
-                      `;
-                    }).join("")}
-                    <td class="px-1 py-1.5 text-center">
-                      <button type="button" data-regularization-report-student="${student.id}" class="inline-flex min-w-7 justify-center rounded-md px-1.5 py-1 font-semibold ${lowCount ? "bg-red-50 text-red-600" : "bg-slate-50 text-slate-400"}" title="${lowCount} nota(s) menor(es) a 50">${lowCount}</button>
-                    </td>
-                    <td class="px-1.5 py-1.5 text-center">
-                      <button type="button" data-regularization-report-student="${student.id}" class="w-full rounded-md px-1.5 py-1 ${pendingItems.length ? regularizationPendingTone(primaryReason) + " ring-1 ring-inset" : "bg-green-50 text-school-green"}">
-                        <span class="block text-[9px] font-semibold">${pendingItems.length ? `P ${pendingItems.length}` : "Sin pendientes"}</span>
-                        ${pendingItems.length ? `<span class="block truncate text-[7px] leading-tight sm:text-[8px]">${escapeHtml(primaryReason)}</span>` : ""}
-                      </button>
-                    </td>
-                  </tr>
-                `;
-              }).join("") : `
-                <tr>
-                  <td colspan="${subjectIds.length + 4}" class="px-4 py-8 text-center text-xs text-slate-500">No se encontro ningun alumno con esa busqueda.</td>
-                </tr>
-              `}
-            </tbody>
-          </table>
-        </div>
-        <div class="mt-2 flex flex-wrap items-center justify-between gap-1.5 text-[9px] text-slate-500 sm:text-[10px]">
-          <span>Mostrando ${matrixRows.length} de ${studentsByName.length} alumno(s)</span>
-          <span>${selectedSortSubjectId ? `Menor promedio en ${escapeHtml(findSubject(selectedSortSubjectId)?.nombre || selectedSortSubjectId)}` : `${pendingByStudent.length} con pendientes · ${Math.max(0, studentsByName.length - pendingByStudent.length)} sin pendientes`}</span>
+        ${pendingByStudent.length ? `<div class="mt-2 flex flex-wrap gap-1.5 text-[8px] sm:mt-3 sm:text-[9px]">
+          <span class="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-1 text-red-700 ring-1 ring-inset ring-red-200">${icon("circle-x", "h-3 w-3")} Estado: No presentó</span>
+          <span class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-1 text-amber-800 ring-1 ring-inset ring-amber-200">${icon("user-check", "h-3 w-3")} Presente</span>
+          <span class="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-1 text-red-700 ring-1 ring-inset ring-red-200">${icon("user-x", "h-3 w-3")} Falta</span>
+          <span class="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-1 text-purple-700 ring-1 ring-inset ring-purple-200">${icon("shield-check", "h-3 w-3")} Licencia prioritaria</span>
+        </div>` : ""}
+        <div class="mt-3 grid gap-2 lg:grid-cols-2">
+          ${pendingRows.length ? pendingRows.map(({ student, items }) => {
+            const attendanceCounts = items.reduce((counts, item) => {
+              const attendanceInfo = regularizationAttendanceInfo(item.pendienteAsistencia);
+              const current = counts[attendanceInfo.id] || { info: attendanceInfo, count: 0 };
+              counts[attendanceInfo.id] = { ...current, count: current.count + 1 };
+              return counts;
+            }, {});
+            const attendanceSummaries = Object.values(attendanceCounts).sort((a, b) => a.info.priority - b.info.priority);
+            const studentCourse = coursesById[student.cursoId] || coursesById[items[0]?.cursoId] || primaryCourse;
+            const courseNumber = String(studentCourse?.corto || studentCourse?.nombre || "")
+              .replace(/\D/g, "") || "I";
+            const courseColor = courseAccent(studentCourse?.id || student.cursoId);
+            return `
+              <button type="button" data-regularization-report-student="${student.id}" class="group grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-stretch gap-2 overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 text-left transition hover:border-school-green/50 hover:shadow-soft sm:p-3">
+                <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-school-sky text-sm font-semibold text-school-green">${regularizationOrderMap.get(student.id) || "-"}</span>
+                <span class="min-w-0">
+                  <span class="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <span class="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900 sm:text-sm" title="${escapeHtml(student.nombre)}">${escapeHtml(student.nombre)}</span>
+                    <span class="rounded-full bg-red-50 px-2 py-0.5 text-[9px] font-semibold text-red-600">${items.length} sin presentar</span>
+                    ${showCourse ? `<span class="rounded-md px-1.5 py-0.5 text-[8px] font-semibold text-white" style="background:${courseColor}">${escapeHtml(studentCourse?.nombre || "Curso")}</span>` : ""}
+                  </span>
+                  <span class="mt-2 grid grid-cols-2 gap-2">
+                    ${regularizationPendingBar(items, "hacer")}
+                    ${regularizationPendingBar(items, "saber")}
+                  </span>
+                </span>
+                <span class="flex min-h-14 shrink-0 items-stretch gap-1">
+                  ${attendanceSummaries.map(({ info, count }) => `<span class="regularization-attendance-rail flex min-h-14 w-5 items-center justify-center rounded-md border px-1 py-1 text-[8px] font-semibold uppercase ${info.railTone}" title="${escapeHtml(`${info.label}: ${count} pendiente(s)`)}">${escapeHtml(info.label)} ${count}</span>`).join("")}
+                  ${showCourse ? `<span class="flex w-9 shrink-0 flex-col items-center justify-center rounded-lg text-white shadow-sm" style="background:${courseColor}" title="${escapeHtml(studentCourse?.nombre || "Curso")}"><span class="text-sm font-semibold leading-none">${escapeHtml(courseNumber)}</span><span class="mt-0.5 text-[7px] font-medium uppercase leading-none text-white/80">Curso</span></span>` : ""}
+                </span>
+              </button>
+            `;
+          }).join("") : `
+            <div class="lg:col-span-2 rounded-xl border ${pendingByStudent.length ? "border-slate-200 bg-slate-50 text-slate-600" : activitiesStillInGrading ? "border-amber-200 bg-amber-50 text-amber-900" : "border-green-200 bg-green-50 text-school-green"} px-4 py-7 text-center sm:py-8">
+              ${icon(pendingByStudent.length ? "search-x" : activitiesStillInGrading ? "clock-3" : "circle-check-big", "mx-auto h-7 w-7")}
+              <p class="mt-2 text-sm font-semibold">${pendingByStudent.length ? "No se encontro un alumno con esa busqueda." : activitiesStillInGrading ? "Todavia hay revisiones abiertas en Calificar." : "No hay alumnos pendientes de regularizacion."}</p>
+              ${!pendingByStudent.length && activitiesStillInGrading ? `
+                <p class="mx-auto mt-1 max-w-lg text-[10px] leading-relaxed text-amber-800 sm:text-xs">Finaliza la revisión de esas actividades para enviar aquí a quienes no presentaron.</p>
+                <a href="#/docente/calificar" class="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-school-green px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-school-navy sm:text-xs">${icon("clipboard-check", "h-3.5 w-3.5")} Ir a Calificar</a>
+              ` : ""}
+            </div>
+          `}
         </div>
       </div>
       ${regularizationStudentReportModal({
         student: selectedRegularizationReportStudent,
-        activities: activitiesToReview,
+        activities: selectedRegularizationReportEntry?.items || [],
         gradesMap,
         attendanceRows,
-        lowLimit,
         displayNumber: selectedRegularizationReportStudent ? regularizationOrderMap.get(selectedRegularizationReportStudent.id) || "" : "",
-        subjectId: selectedRegularizationReportSubjectId
+        course: selectedRegularizationReportStudent ? coursesById[selectedRegularizationReportStudent.cursoId] : null
       })}
       ${regularizationGradeModal({
         activity: selectedRegularizationActivity,
         student: selectedRegularizationStudent,
         currentGrade: selectedRegularizationGrade,
+        attendanceState: selectedRegularizationAttendanceState,
+        pendingReason: selectedRegularizationPendingReason,
         displayNumber: selectedRegularizationStudent ? regularizationOrderMap.get(selectedRegularizationStudent.id) || "" : "",
         hasNext: Boolean(nextRegularizationTarget)
       })}
     </section>
   `;
 
-  container.querySelectorAll("[data-regularization-course]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      teacherState.selectedCourseId = button.dataset.regularizationCourse;
-      teacherState.regularizationReportStudentId = "";
-      teacherState.regularizationReportSubjectId = "";
-      teacherState.regularizationSortSubjectId = "";
-      sessionStorage.setItem("docenteCursoId", teacherState.selectedCourseId);
-      sessionStorage.removeItem("docenteRegularizacionOrdenMateria");
-      await renderRegularization(context);
-    });
-  });
   container.querySelector("[data-refresh-regularization-cache]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
     button.textContent = "Actualizando...";
-    await refreshTeacherNotesSnapshot(context, course, teacherState.trimesterId);
+    await refreshAllRegularization();
     await renderRegularization(context);
-  });
-  container.querySelectorAll("[data-regularization-sort-subject]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const requestedSubjectId = button.dataset.regularizationSortSubject || "";
-      teacherState.regularizationSortSubjectId = teacherState.regularizationSortSubjectId === requestedSubjectId
-        ? ""
-        : requestedSubjectId;
-      if (teacherState.regularizationSortSubjectId) {
-        sessionStorage.setItem("docenteRegularizacionOrdenMateria", teacherState.regularizationSortSubjectId);
-      } else {
-        sessionStorage.removeItem("docenteRegularizacionOrdenMateria");
-      }
-      await renderRegularization(context);
-    });
   });
   container.querySelector("[data-regularization-search]")?.addEventListener("input", (event) => {
     teacherState.regularizationSearch = event.currentTarget.value || "";
@@ -3097,13 +3159,11 @@ async function renderRegularization(context) {
   container.querySelectorAll("[data-regularization-report-student]").forEach((button) => {
     button.addEventListener("click", async () => {
       teacherState.regularizationReportStudentId = button.dataset.regularizationReportStudent || "";
-      teacherState.regularizationReportSubjectId = button.dataset.regularizationReportSubject || "";
       await renderRegularization(context);
     });
   });
   container.querySelector("[data-close-regularization-report]")?.addEventListener("click", async () => {
     teacherState.regularizationReportStudentId = "";
-    teacherState.regularizationReportSubjectId = "";
     await renderRegularization(context);
   });
   container.querySelector("[data-close-regularization-grade]")?.addEventListener("click", async () => {
@@ -3114,13 +3174,37 @@ async function renderRegularization(context) {
   const saveRegularizationGrade = async (value, advance = false) => {
     if (!selectedRegularizationActivity || !selectedRegularizationStudent) return;
     const status = container.querySelector("[data-regularization-grade-status]");
+    const max = Math.max(1, Math.min(100, Number(selectedRegularizationActivity.maximo || 100)));
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0 || numericValue > max) {
+      if (status) {
+        status.className = "rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700";
+        status.textContent = `Ingrese un puntaje entre 0 y ${max}.`;
+      }
+      return;
+    }
     container.querySelectorAll("[data-regularization-grade-value], [data-save-regularization-grade-input], [data-save-next-regularization-grade-input]").forEach((item) => { item.disabled = true; });
     if (status) {
       status.classList.remove("hidden");
       status.textContent = "Guardando nota...";
     }
     try {
-      const savedGrade = await saveGrade({ activity: selectedRegularizationActivity, student: selectedRegularizationStudent, value });
+      const previousState = deliveryStateForGrade(selectedRegularizationGrade);
+      const attendanceInfo = regularizationAttendanceInfo(selectedRegularizationAttendanceState);
+      const estadoEntrega = numericValue <= 0
+        ? DELIVERY_STATES.NOT_SUBMITTED
+        : [DELIVERY_STATES.ON_TIME, DELIVERY_STATES.LATE].includes(previousState)
+          ? previousState
+          : attendanceInfo.id === "licencia"
+            ? DELIVERY_STATES.ON_TIME
+            : DELIVERY_STATES.LATE;
+      const savedGrade = await saveGrade({
+        activity: selectedRegularizationActivity,
+        student: selectedRegularizationStudent,
+        value: numericValue,
+        estadoEntrega,
+        fechaEntrega: selectedRegularizationGrade?.fechaEntrega || todayIso()
+      });
       upsertTeacherNotesSnapshotGrade(context, selectedRegularizationActivity, savedGrade);
       if (status) status.textContent = advance && nextRegularizationTarget ? "Nota guardada. Abriendo siguiente..." : "Nota guardada";
       teacherState.regularizationGradeActivityId = advance && nextRegularizationTarget ? nextRegularizationTarget.activity.id : "";
@@ -3141,11 +3225,11 @@ async function renderRegularization(context) {
   });
   container.querySelector("[data-save-regularization-grade-input]")?.addEventListener("click", async () => {
     const input = container.querySelector("[data-regularization-grade-input]");
-    await saveRegularizationGrade(Number(input?.value || 0));
+    await saveRegularizationGrade(input?.value?.trim() === "" ? Number.NaN : Number(input.value));
   });
   container.querySelector("[data-save-next-regularization-grade-input]")?.addEventListener("click", async () => {
     const input = container.querySelector("[data-regularization-grade-input]");
-    await saveRegularizationGrade(Number(input?.value || 0), true);
+    await saveRegularizationGrade(input?.value?.trim() === "" ? Number.NaN : Number(input.value), true);
   });
   refreshIcons();
 }
@@ -3163,48 +3247,15 @@ async function renderNotes(context) {
   const notesCacheMeta = getTeacherDataCacheMeta(context, "notas", course.id, activeTrimesterId);
   const notesSnapshot = await getTeacherNotesSnapshot(context, course, activeTrimesterId);
   if (!notesSnapshot) {
-    function compactGradeActivityButton(item, widthClass = "") {
-    const subject = findSubject(item.materiaId);
-    const courseItem = coursesById[item.cursoId] || {};
-    const courseNumber = String(courseItem.corto || courseItem.nombre || "").replace(/\D/g, "") || "I";
-    const accent = showCourse ? courseAccent(item.cursoId) : (subject?.color || "#e2e8f0");
-    const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
-    const active = item.id === teacherState.gradeModalActivityId;
-    return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-1.5">
-          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
-        </span>
-        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
-      </button>
-    `;
-  }
-
-  function compactGradeDateCard(dateKey) {
-    const dayActivities = activities.filter((item) => (item.fecha || gradeDate) === dateKey);
-    if (!dayActivities.length) return "";
-    const label = planningDayLabel(dateKey);
-    return `
-      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
-          <div class="min-w-0">
-            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
-            <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
-          </div>
-          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
-        </div>
-        <div class="grid gap-1.5">
-          ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
-        </div>
-      </article>
-    `;
-  }
-  container.innerHTML = `
-      <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
-        <p class="text-xs font-black uppercase tracking-[.18em] text-school-green">${escapeHtml(course.nombre)} · ${escapeHtml(selectedTrimester().label)}</p>
-        <h2 class="mt-1 text-2xl font-black text-slate-900">Notas por materia</h2>
-        <p class="mt-2 max-w-2xl font-semibold text-slate-500">Para ahorrar lecturas, las notas se cargan manualmente y luego quedan guardadas en este dispositivo.</p>
+    container.innerHTML = `
+      <div class="teacher-module-surface rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
+        ${teacherModuleHeading({
+          title: "Notas por materia",
+          course: course.nombre,
+          trimester: selectedTrimester().label,
+          detail: "Sin copia local"
+        })}
+        <p class="mt-3 max-w-2xl text-sm font-normal text-slate-500">Para ahorrar lecturas, las notas se cargan manualmente y luego quedan guardadas en este dispositivo.</p>
         <button type="button" data-refresh-notes-cache class="mt-4 inline-flex items-center gap-2 rounded-2xl bg-school-navy px-4 py-3 text-sm font-black text-white shadow-soft transition hover:bg-school-green">
           ${icon("cloud-download", "h-4 w-4")} Cargar notas
         </button>
@@ -3229,10 +3280,36 @@ async function renderNotes(context) {
     sessionStorage.setItem("docenteMateriaId", teacherState.selectedSubjectId);
   }
   const selectedSubject = findSubject(teacherState.selectedSubjectId);
-  const subjectActivitiesAll = visibleActivities.filter((item) => item.materiaId === teacherState.selectedSubjectId);
-  const serCriteria = subjectActivitiesAll
-    .filter((item) => item.tipo === "ser")
-    .sort((a, b) => String(a.titulo || "").localeCompare(String(b.titulo || "")));
+  const rawSubjectActivities = visibleActivities.filter((item) => item.materiaId === teacherState.selectedSubjectId);
+  const activityTimestampMillis = (value) => {
+    if (!value) return 0;
+    if (typeof value.toMillis === "function") return value.toMillis();
+    const seconds = Number(value.seconds ?? value._seconds);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      const nanoseconds = Number(value.nanoseconds ?? value._nanoseconds ?? 0);
+      return (seconds * 1000) + Math.floor(nanoseconds / 1e6);
+    }
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const subjectActivitiesAll = rawSubjectActivities
+    .map((item, index) => {
+      const explicitOrder = Number(item.ordenCreacion || item.creadoEnMs || item.createdAtMs || 0);
+      const createdAt = activityTimestampMillis(item.createdAt);
+      const scheduledAt = item.fecha ? Date.parse(`${item.fecha}T00:00:00`) : 0;
+      const updatedAt = activityTimestampMillis(item.updatedAt);
+      return {
+        item,
+        index,
+        order: explicitOrder > 0
+          ? explicitOrder
+          : createdAt || (Number.isFinite(scheduledAt) ? scheduledAt : 0) || updatedAt || index,
+        tieBreaker: updatedAt || index
+      };
+    })
+    .sort((a, b) => a.order - b.order || a.tieBreaker - b.tieBreaker || a.index - b.index)
+    .map(({ item }) => item);
+  const serCriteria = subjectActivitiesAll.filter((item) => item.tipo === "ser");
   const autoActivity = subjectActivitiesAll.find((item) => item.tipo === "auto") || null;
   const gradesMap = gradeByActivityAndStudent(gradesList);
   const subjectActivities = subjectActivitiesAll
@@ -3286,95 +3363,142 @@ async function renderNotes(context) {
     return createdActivity;
   }
 
-  const sectionBorder = "border-l-2 border-l-slate-300";
-  const sectionHeaderBorder = "border-l-2 border-l-white/60";
+  const sectionBorder = "border-l-[3px] border-l-slate-400";
+  const sectionHeaderBorder = "border-l-[3px] border-l-white/70";
   const serHeaderCell = `${sectionBorder} bg-emerald-50/80`;
   const saberHeaderCell = `${sectionBorder} bg-amber-50/80`;
   const hacerHeaderCell = `${sectionBorder} bg-green-50/70`;
   const autoHeaderCell = `${sectionBorder} bg-slate-100/80`;
   const finalHeaderCell = `${sectionBorder} bg-emerald-100/80`;
 
-  function compactGradeActivityButton(item, widthClass = "") {
-    const subject = findSubject(item.materiaId);
-    const courseItem = coursesById[item.cursoId] || {};
-    const courseNumber = String(courseItem.corto || courseItem.nombre || "").replace(/\D/g, "") || "I";
-    const accent = showCourse ? courseAccent(item.cursoId) : (subject?.color || "#e2e8f0");
-    const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
-    const active = item.id === teacherState.gradeModalActivityId;
+  const notesEditDrafts = teacherState.notesEditDrafts || {};
+  const notesEditCount = Object.keys(notesEditDrafts).length;
+  const notesColumnCount = 2 + serColspan + (exams.length || 1) + 2 + (tasks.length || 1) + 2 + 2 + 2;
+  const notesHeaderTitles = [
+    "Asistencia",
+    "Puntualidad",
+    "Responsabilidad",
+    ...serCriteria.map((item) => item.titulo || "Nota SER"),
+    "Promedio",
+    "Puntaje",
+    ...(exams.length ? exams.map((item) => item.titulo || "Actividad SABER") : ["Sin examenes"]),
+    "Promedio",
+    "Puntaje",
+    ...(tasks.length ? tasks.map((item) => item.titulo || "Actividad HACER") : ["Sin tareas"]),
+    "Promedio",
+    "Puntaje",
+    "Nota",
+    "Puntaje",
+    "Nota final",
+    "Situacion"
+  ];
+  const longestNotesHeader = notesHeaderTitles.reduce((longest, title) => Math.max(longest, String(title || "").length), 0);
+  const notesHeaderHeight = Math.max(144, Math.min(360, (longestNotesHeader * 6) + 28));
+  const notesHeaderCell = "w-12 px-1 py-1 align-middle font-semibold";
+  const verticalHeaderLabel = (label) => `
+    <span class="inline-flex h-full w-full items-center justify-center whitespace-nowrap text-[10px] font-semibold leading-none [writing-mode:vertical-rl] rotate-180" title="${escapeHtml(label)}">
+      ${escapeHtml(label)}
+    </span>
+  `;
+  const notesTableMinWidth = Math.max(1080, 232 + ((notesColumnCount - 2) * 48));
+  const notesEditKey = (activityId, studentId) => `${activityId}::${studentId}`;
+
+  function editableGradeControl(activity, student, fallbackValue, readOnlyHtml = "") {
+    if (!teacherState.notesEditMode) return readOnlyHtml || escapeHtml(fallbackValue);
+    const grade = activity?.id ? gradesMap[activity.id]?.[student.id] : null;
+    const internalGrade = activity?.interno === true || ["ser", "auto"].includes(String(activity?.tipo || "").toLowerCase());
+    const deliveryState = deliveryStateForGrade(grade);
+    const editableDelivery = internalGrade || [DELIVERY_STATES.ON_TIME, DELIVERY_STATES.LATE].includes(deliveryState);
+    if (!grade || !editableDelivery) {
+      return `<span class="inline-flex min-h-7 items-center justify-center text-[10px] text-slate-400" title="${grade ? "Entrega pendiente; debe resolverse en Regularizacion" : "Sin calificacion registrada; debe resolverse en Calificar o Regularizacion"}">${escapeHtml(fallbackValue)}</span>`;
+    }
+    const key = notesEditKey(activity.id, student.id);
+    const maximum = Math.max(1, Math.min(100, Number(activity.maximo || grade.maximo || 100)));
+    const draft = notesEditDrafts[key];
+    const rawValue = draft ? draft.value : Number(grade.valor ?? 0);
+    const inputTone = draft?.invalid
+      ? "border-red-400 bg-red-50 focus:border-red-500 focus:ring-red-100"
+      : draft
+        ? "border-amber-400 bg-amber-50 focus:border-amber-500 focus:ring-amber-100"
+        : "border-slate-300 bg-white focus:border-school-green focus:ring-green-100";
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
-        <span class="min-w-0 flex-1 px-2.5 py-1.5">
-          <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
-          <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
-        </span>
-        ${showCourse ? `<span class="grid w-7 shrink-0 place-items-center text-xs font-semibold text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>` : ""}
-      </button>
+      <label class="mx-auto flex w-12 flex-col items-center gap-0.5" title="Puntaje original sobre ${maximum}">
+        <input type="number" min="0" max="${maximum}" step="1" value="${escapeHtml(rawValue)}"
+          data-notes-edit-grade data-activity-id="${escapeHtml(activity.id)}" data-student-id="${escapeHtml(student.id)}"
+          data-original-value="${escapeHtml(Number(grade.valor ?? 0))}" data-maximum="${maximum}"
+          class="h-7 w-12 rounded-md border ${inputTone} px-1 text-center text-[10px] font-semibold text-slate-900 outline-none transition focus:ring-2">
+        <span class="text-[8px] font-medium text-slate-400">/${maximum}</span>
+      </label>
     `;
   }
 
-  function compactGradeDateCard(dateKey) {
-    const dayActivities = activities.filter((item) => (item.fecha || gradeDate) === dateKey);
-    if (!dayActivities.length) return "";
-    const label = planningDayLabel(dateKey);
-    return `
-      <article class="min-w-0 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <div class="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
-          <div class="min-w-0">
-            <p class="text-[10px] font-semibold uppercase tracking-wide text-school-green">${escapeHtml(label.day)}</p>
-            <p class="text-[11px] font-medium text-slate-500">${escapeHtml(label.date)}</p>
-          </div>
-          <span class="rounded-full bg-school-sky px-2 py-0.5 text-[10px] font-semibold text-school-green">${dayActivities.length}</span>
-        </div>
-        <div class="grid gap-1.5">
-          ${dayActivities.map((item) => compactGradeActivityButton(item)).join("")}
-        </div>
-      </article>
-    `;
-  }
   container.innerHTML = `
     <section class="space-y-3">
-      <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:p-4">
-        <div class="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <p class="text-[11px] font-semibold uppercase tracking-[.16em] text-school-green">${escapeHtml(course.nombre)} · ${escapeHtml(selectedTrimester().label)}</p>
-            <h2 class="mt-1 text-xl font-semibold text-slate-900">Notas por materia</h2>
-          </div>
-          <div class="flex flex-col gap-2 sm:items-end">
-            <div class="flex flex-wrap justify-end gap-2">
-              <button type="button" data-print-notes class="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-school-green ring-1 ring-school-green/25 shadow-soft transition hover:bg-school-green hover:text-white">
-                ${icon("printer", "h-4 w-4")} Imprimir
-              </button>
-              <button type="button" data-export-notes-excel class="inline-flex items-center justify-center gap-2 rounded-xl bg-school-green px-3 py-2 text-xs font-semibold text-white shadow-soft transition hover:bg-school-navy">
-                ${icon("file-spreadsheet", "h-4 w-4")} Excel
-              </button>
-              <button type="button" data-refresh-notes-cache class="inline-flex items-center justify-center gap-2 rounded-xl bg-school-navy px-3 py-2 text-xs font-semibold text-white shadow-soft transition hover:bg-school-green">
-                ${icon("refresh-cw", "h-4 w-4")} Actualizar notas
-              </button>
-            </div>
-            <div class="rounded-xl bg-school-sky px-3 py-1.5 text-[11px] font-semibold text-school-navy">
-              ${notesCacheMeta ? `Copia local: ${escapeHtml(notesCacheMeta.label)}` : "Sin copia local"}
+      <div class="teacher-module-surface overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+        <div class="p-3 sm:p-4">
+          <div class="teacher-module-header flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            ${teacherModuleHeading({
+              title: "Notas por materia",
+              course: course.nombre,
+              trimester: selectedTrimester().label,
+              detail: `${selectedSubject?.nombre || "Materia"} · ${studentsByName.length} alumno(s) · ${subjectActivities.length} actividad(es)`
+            })}
+            <div class="flex flex-col gap-2 xl:items-end">
+              <div class="flex flex-wrap gap-1.5 xl:justify-end">
+                <button type="button" data-print-notes ${teacherState.notesEditMode ? "disabled" : ""} class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-school-green transition hover:border-school-green hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-40">
+                  ${icon("printer", "h-3.5 w-3.5")} Imprimir
+                </button>
+                ${teacherState.notesEditMode ? `
+                  <button type="button" data-cancel-notes-edit class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
+                    ${icon("x", "h-3.5 w-3.5")} Cancelar
+                  </button>
+                  <button type="button" data-request-notes-save ${notesEditCount ? "" : "disabled"} class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-40">
+                    ${icon("save", "h-3.5 w-3.5")} Guardar <span data-notes-edit-count>${notesEditCount}</span>
+                  </button>
+                ` : `
+                  <button type="button" data-request-notes-edit class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-school-green px-3 py-2 text-xs font-semibold text-white transition hover:bg-school-navy">
+                    ${icon("pencil", "h-3.5 w-3.5")} Editar notas
+                  </button>
+                `}
+                <button type="button" data-refresh-notes-cache ${teacherState.notesEditMode ? "disabled" : ""} class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-school-navy px-3 py-2 text-xs font-semibold text-white transition hover:bg-school-green disabled:cursor-not-allowed disabled:opacity-40">
+                  ${icon("refresh-cw", "h-3.5 w-3.5")} Actualizar
+                </button>
+              </div>
+              <span class="inline-flex items-center gap-1.5 rounded-lg bg-school-sky px-2.5 py-1.5 text-[10px] font-medium text-school-navy">
+                ${icon("hard-drive", "h-3 w-3")} ${notesCacheMeta ? `Copia: ${escapeHtml(notesCacheMeta.label)}` : "Sin copia local"}
+              </span>
             </div>
           </div>
         </div>
-        <div class="mt-3 flex gap-1.5 overflow-x-auto pb-1">
-          ${availableSubjects.map((subjectId) => {
-            const subject = findSubject(subjectId);
-            const active = subjectId === teacherState.selectedSubjectId;
-            return `<button type="button" data-note-subject="${subjectId}" class="shrink-0 rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-school-navy bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-navy/40"}">${escapeHtml(subject?.nombre || subjectId)}</button>`;
-          }).join("")}
+        <div class="border-t border-slate-100 bg-slate-50/70 px-3 py-2.5 sm:px-4">
+          <div class="flex gap-1.5 overflow-x-auto pb-0.5">
+            ${availableSubjects.map((subjectId) => {
+              const subject = findSubject(subjectId);
+              const active = subjectId === teacherState.selectedSubjectId;
+              return `<button type="button" data-note-subject="${subjectId}" ${teacherState.notesEditMode ? "disabled" : ""} class="shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-55 ${active ? "border-school-green bg-school-green text-white" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/40"}">${escapeHtml(subject?.nombre || subjectId)}</button>`;
+            }).join("")}
+          </div>
         </div>
+        ${teacherState.notesEditMode ? `
+          <div class="flex flex-col gap-1 border-t border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+            <span class="inline-flex items-center gap-1.5 font-semibold">${icon("pencil-line", "h-3.5 w-3.5")} Edicion activa · cambia solo notas ya registradas</span>
+            <span data-notes-edit-help>Los promedios se actualizaran al guardar.</span>
+          </div>
+        ` : teacherState.notesEditMessage ? `
+          <div class="border-t border-green-200 bg-green-50 px-3 py-2 text-[11px] font-semibold text-green-800 sm:px-4">${icon("circle-check", "mr-1 inline h-3.5 w-3.5")} ${escapeHtml(teacherState.notesEditMessage)}</div>
+        ` : ""}
       </div>
 
-      <div class="w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-soft">
-        <table class="w-full min-w-[980px] table-fixed text-center text-[10px] leading-tight">
-          <thead>
+      <div class="w-full overflow-auto rounded-2xl border border-slate-300 bg-white shadow-soft">
+        <table class="w-full table-fixed text-center text-[11px] leading-tight" style="min-width:${notesTableMinWidth}px">
+          <thead class="sticky top-0 z-20 shadow-sm">
             <tr class="bg-school-navy text-white">
-              <th class="w-9 px-1 py-2 font-semibold">No.</th>
-              <th class="w-44 px-2 py-2 text-left font-semibold">Alumno</th>
+              <th class="sticky left-0 z-30 w-10 bg-school-navy px-1 py-2 font-semibold">No.</th>
+              <th class="sticky left-10 z-30 w-48 bg-school-navy px-3 py-2 text-left font-semibold">Alumno</th>
               <th colspan="${serColspan}" class="${sectionHeaderBorder} px-1 py-2 font-semibold">
                 <span class="inline-flex items-center justify-center gap-1.5">
                   SER 10
-                  <button type="button" data-add-ser-criterion class="grid h-6 w-6 place-items-center rounded-md bg-white text-school-navy shadow-sm transition hover:bg-school-gold" title="Agregar nota SER">${icon("plus", "h-4 w-4")}</button>
+                  <button type="button" data-add-ser-criterion ${teacherState.notesEditMode ? "disabled" : ""} class="grid h-6 w-6 place-items-center rounded-md bg-white text-school-navy shadow-sm transition hover:bg-school-gold disabled:cursor-not-allowed disabled:opacity-40" title="Agregar nota SER">${icon("plus", "h-4 w-4")}</button>
                 </span>
               </th>
               <th colspan="${(exams.length || 1) + 2}" class="${sectionHeaderBorder} px-1 py-2 font-semibold">SABER 45</th>
@@ -3382,27 +3506,27 @@ async function renderNotes(context) {
               <th colspan="2" class="${sectionHeaderBorder} px-1 py-2 font-semibold">Auto 5</th>
               <th colspan="2" class="${sectionHeaderBorder} px-1 py-2 font-semibold">Final</th>
             </tr>
-            <tr class="border-b border-slate-200 bg-slate-50 text-[10px] font-medium text-slate-700">
-              <th class="px-1 py-1"></th>
-              <th class="px-2 py-1 text-left"></th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${serHeaderCell}">Asistencia</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-50/80">Puntualidad</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-50/80">Responsabilidad</th>
-              ${serCriteria.map((item) => `<th class="h-24 px-1 py-1 bg-emerald-50/80">
-                <button type="button" data-edit-ser-criterion="${item.id}" class="h-full w-full rounded-lg px-1 py-1 text-[10px] font-medium transition [writing-mode:vertical-rl] hover:bg-school-gold/30">${escapeHtml(item.titulo)}</button>
+            <tr class="border-b-2 border-slate-300 bg-slate-50 text-slate-700">
+              <th class="sticky left-0 z-30 bg-slate-50 px-1 py-1"></th>
+              <th class="sticky left-10 z-30 bg-slate-50 px-2 py-1 text-left"></th>
+              <th class="${notesHeaderCell} ${serHeaderCell}" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Asistencia")}</th>
+              <th class="${notesHeaderCell} bg-emerald-50/80" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Puntualidad")}</th>
+              <th class="${notesHeaderCell} bg-emerald-50/80" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Responsabilidad")}</th>
+              ${serCriteria.map((item) => `<th class="${notesHeaderCell} bg-emerald-50/80" style="height:${notesHeaderHeight}px">
+                <button type="button" data-edit-ser-criterion="${item.id}" ${teacherState.notesEditMode ? "disabled" : ""} class="flex h-full w-full items-center justify-center rounded-md p-0 transition disabled:cursor-not-allowed hover:bg-school-gold/30" title="${escapeHtml(item.titulo)}">${verticalHeaderLabel(item.titulo)}</button>
               </th>`).join("")}
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-50/80">Promedio</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-50/80">Puntaje</th>
-              ${exams.length ? exams.map((item, itemIndex) => `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-amber-50/80 ${itemIndex === 0 ? sectionBorder : ""}">${escapeHtml(item.titulo)}</th>`).join("") : `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${saberHeaderCell}">Sin examenes</th>`}
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-amber-50/80">Promedio</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-amber-50/80">Puntaje</th>
-              ${tasks.length ? tasks.map((item, itemIndex) => `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-green-50/70 ${itemIndex === 0 ? sectionBorder : ""}">${escapeHtml(item.titulo)}</th>`).join("") : `<th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${hacerHeaderCell}">Sin tareas</th>`}
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-green-50/70">Promedio</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-green-50/70">Puntaje</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${autoHeaderCell}">Nota</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-slate-100/80">Puntaje</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] ${finalHeaderCell}">Nota final</th>
-              <th class="h-24 px-1 py-1 [writing-mode:vertical-rl] bg-emerald-100/80">Situacion</th>
+              <th class="${notesHeaderCell} bg-emerald-50/80" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Promedio")}</th>
+              <th class="${notesHeaderCell} bg-emerald-50/80" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Puntaje")}</th>
+              ${exams.length ? exams.map((item, itemIndex) => `<th class="${notesHeaderCell} bg-amber-50/80 ${itemIndex === 0 ? sectionBorder : ""}" style="height:${notesHeaderHeight}px">${verticalHeaderLabel(item.titulo)}</th>`).join("") : `<th class="${notesHeaderCell} ${saberHeaderCell}" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Sin examenes")}</th>`}
+              <th class="${notesHeaderCell} bg-amber-50/80" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Promedio")}</th>
+              <th class="${notesHeaderCell} bg-amber-50/80" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Puntaje")}</th>
+              ${tasks.length ? tasks.map((item, itemIndex) => `<th class="${notesHeaderCell} bg-green-50/70 ${itemIndex === 0 ? sectionBorder : ""}" style="height:${notesHeaderHeight}px">${verticalHeaderLabel(item.titulo)}</th>`).join("") : `<th class="${notesHeaderCell} ${hacerHeaderCell}" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Sin tareas")}</th>`}
+              <th class="${notesHeaderCell} bg-green-50/70" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Promedio")}</th>
+              <th class="${notesHeaderCell} bg-green-50/70" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Puntaje")}</th>
+              <th class="${notesHeaderCell} ${autoHeaderCell}" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Nota")}</th>
+              <th class="${notesHeaderCell} bg-slate-100/80" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Puntaje")}</th>
+              <th class="${notesHeaderCell} ${finalHeaderCell}" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Nota final")}</th>
+              <th class="${notesHeaderCell} w-14 bg-emerald-100/80" style="height:${notesHeaderHeight}px">${verticalHeaderLabel("Situacion")}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -3411,18 +3535,20 @@ async function renderNotes(context) {
               const autoGradeRecord = autoGradeActivity.id ? gradesMap[autoGradeActivity.id]?.[student.id] : null;
               const autoGrade = autoGradeRecord?.nota ?? null;
               const calc = calculateStudentTerm(student, subjectActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
+              const rowSurface = index % 2 ? "bg-white" : "bg-slate-50/55";
               return `
-                <tr class="hover:bg-slate-50">
-                  <td class="px-1 py-1.5 font-medium text-school-navy">${index + 1}</td>
-                  <td class="px-2 py-1.5 text-left font-normal text-slate-800">${escapeHtml(student.nombre)}</td>
+                <tr class="${rowSurface}">
+                  <td class="sticky left-0 z-10 ${rowSurface} px-1 py-2 font-semibold text-school-navy">${index + 1}</td>
+                  <td class="sticky left-10 z-10 ${rowSurface} truncate border-r border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-800" title="${escapeHtml(student.nombre)}">${escapeHtml(student.nombre)}</td>
                   <td class="${sectionBorder} px-1 py-1.5 ${gradeTone(calc.asistencia100)}">${calc.asistencia100}</td>
                   <td class="px-1 py-1.5 ${gradeTone(calc.puntualidad100)}">${calc.puntualidad100}</td>
                   <td class="px-1 py-1.5 ${gradeTone(calc.responsabilidad100)}">${calc.responsabilidad100}</td>
                   ${serCriteria.map((item) => {
                     const grade = gradesMap[item.id]?.[student.id];
                     const value = grade?.nota;
+                    const readOnly = `<button type="button" data-ser-grade="${item.id}" data-student-id="${student.id}" class="mx-auto min-w-8 rounded-md px-2 py-1 text-[10px] font-medium transition hover:ring-2 hover:ring-school-green ${value ? gradeTone(value) : "bg-slate-100 text-slate-500"}">${value || "+"}</button>`;
                     return `<td class="px-1 py-1.5">
-                      <button type="button" data-ser-grade="${item.id}" data-student-id="${student.id}" class="mx-auto min-w-8 rounded-lg px-2 py-1 text-[10px] font-medium transition hover:ring-2 hover:ring-school-green ${value ? gradeTone(value) : "bg-slate-100 text-slate-500"}">${value || "+"}</button>
+                      ${editableGradeControl(item, student, value || "+", readOnly)}
                     </td>`;
                   }).join("")}
                   <td class="px-1 py-1.5 ${gradeTone(calc.ser100)}">${calc.ser100}</td>
@@ -3430,19 +3556,19 @@ async function renderNotes(context) {
                   ${exams.length ? exams.map((item) => {
                     const value = studentActivityGrade(item, student.id, gradesMap);
                     const firstExam = item.id === exams[0]?.id;
-                    return `<td class="${firstExam ? sectionBorder : ""} px-1 py-1.5 ${gradeTone(value)}">${value}</td>`;
+                    return `<td class="${firstExam ? sectionBorder : ""} px-1 py-1.5 ${teacherState.notesEditMode ? "bg-white" : gradeTone(value)}">${editableGradeControl(item, student, value)}</td>`;
                   }).join("") : `<td class="${sectionBorder} px-1 py-1.5 text-slate-400">35</td>`}
                   <td class="px-1 py-1.5 ${gradeTone(calc.saber100)}">${calc.saber100}</td>
                   <td class="px-1 py-1.5 bg-blue-50 font-medium text-school-navy">${calc.saber45}</td>
                   ${tasks.length ? tasks.map((item) => {
                     const value = studentActivityGrade(item, student.id, gradesMap);
                     const firstTask = item.id === tasks[0]?.id;
-                    return `<td class="${firstTask ? sectionBorder : ""} px-1 py-1.5 ${gradeTone(value)}">${value}</td>`;
+                    return `<td class="${firstTask ? sectionBorder : ""} px-1 py-1.5 ${teacherState.notesEditMode ? "bg-white" : gradeTone(value)}">${editableGradeControl(item, student, value)}</td>`;
                   }).join("") : `<td class="${sectionBorder} px-1 py-1.5 text-slate-400">35</td>`}
                   <td class="px-1 py-1.5 ${gradeTone(calc.hacer100)}">${calc.hacer100}</td>
                   <td class="px-1 py-1.5 bg-blue-50 font-medium text-school-navy">${calc.hacer40}</td>
                   <td class="${sectionBorder} px-1 py-1.5">
-                    <button type="button" data-auto-grade="${student.id}" class="mx-auto min-w-8 rounded-lg px-2 py-1 text-[10px] font-medium transition hover:ring-2 hover:ring-school-green ${autoGradeRecord ? gradeTone(calc.auto100) : "bg-slate-100 text-slate-500"}">${autoGradeRecord ? calc.auto100 : "+"}</button>
+                    ${editableGradeControl(autoGradeActivity, student, autoGradeRecord ? calc.auto100 : "+", `<button type="button" data-auto-grade="${student.id}" class="mx-auto min-w-8 rounded-md px-2 py-1 text-[10px] font-medium transition hover:ring-2 hover:ring-school-green ${autoGradeRecord ? gradeTone(calc.auto100) : "bg-slate-100 text-slate-500"}">${autoGradeRecord ? calc.auto100 : "+"}</button>`)}
                   </td>
                   <td class="px-1 py-1.5 bg-blue-50 font-medium text-school-navy">${calc.auto5}</td>
                   <td class="${sectionBorder} px-1 py-1.5 text-xs font-semibold ${calc.final <= 50 ? "bg-red-600 text-white" : "bg-green-700 text-white"}">${calc.final}</td>
@@ -3456,8 +3582,130 @@ async function renderNotes(context) {
 
       ${notesCriterionModal(selectedCriterion)}
       ${notesGradeModal({ activity: selectedGradeActivity, student: selectedGradeStudent, currentGrade: currentNotesGrade, totalStudents: studentsByName.length, currentIndex: selectedGradeIndex })}
+      ${notesEditConfirmationModal(teacherState.notesEditConfirmation, notesEditCount)}
     </section>
   `;
+
+  const closeNotesEditConfirmation = async () => {
+    teacherState.notesEditConfirmation = "";
+    await renderNotes(context);
+  };
+  const updateNotesEditControls = () => {
+    const drafts = Object.values(teacherState.notesEditDrafts || {});
+    const invalidCount = drafts.filter((item) => item.invalid).length;
+    const countElement = container.querySelector("[data-notes-edit-count]");
+    const saveButton = container.querySelector("[data-request-notes-save]");
+    const help = container.querySelector("[data-notes-edit-help]");
+    if (countElement) countElement.textContent = String(drafts.length);
+    if (saveButton) saveButton.disabled = !drafts.length || invalidCount > 0;
+    if (help) {
+      help.textContent = invalidCount
+        ? `Corrige ${invalidCount} puntaje(s) marcado(s) en rojo.`
+        : drafts.length
+          ? `${drafts.length} cambio(s) sin guardar.`
+          : "Los promedios se actualizaran al guardar.";
+    }
+  };
+
+  container.querySelector("[data-request-notes-edit]")?.addEventListener("click", async () => {
+    closeNotesModals();
+    teacherState.notesEditConfirmation = "enable";
+    teacherState.notesEditMessage = "";
+    await renderNotes(context);
+  });
+  container.querySelector("[data-confirm-notes-edit]")?.addEventListener("click", async () => {
+    teacherState.notesEditMode = true;
+    teacherState.notesEditDrafts = {};
+    teacherState.notesEditConfirmation = "";
+    teacherState.notesEditMessage = "";
+    closeNotesModals();
+    await renderNotes(context);
+  });
+  container.querySelectorAll("[data-close-notes-edit-confirmation]").forEach((button) => {
+    button.addEventListener("click", closeNotesEditConfirmation);
+  });
+  container.querySelector("[data-notes-edit-confirmation-backdrop]")?.addEventListener("click", async (event) => {
+    if (event.target.matches("[data-notes-edit-confirmation-backdrop]")) await closeNotesEditConfirmation();
+  });
+  container.querySelector("[data-cancel-notes-edit]")?.addEventListener("click", async () => {
+    const changed = Object.keys(teacherState.notesEditDrafts || {}).length;
+    if (changed && !confirm(`Descartar ${changed} cambio(s) sin guardar?`)) return;
+    teacherState.notesEditMode = false;
+    teacherState.notesEditDrafts = {};
+    teacherState.notesEditConfirmation = "";
+    teacherState.notesEditMessage = "Edicion cancelada; no se modifico ninguna nota.";
+    await renderNotes(context);
+  });
+  container.querySelectorAll("[data-notes-edit-grade]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const activityId = input.dataset.activityId || "";
+      const studentId = input.dataset.studentId || "";
+      const key = notesEditKey(activityId, studentId);
+      const rawValue = input.value.trim();
+      const numericValue = Number(rawValue);
+      const originalValue = Number(input.dataset.originalValue || 0);
+      const maximum = Number(input.dataset.maximum || 100);
+      const invalid = rawValue === "" || !Number.isFinite(numericValue) || numericValue < 0 || numericValue > maximum;
+      if (!invalid && numericValue === originalValue) {
+        delete teacherState.notesEditDrafts[key];
+      } else {
+        teacherState.notesEditDrafts[key] = { key, activityId, studentId, value: rawValue, maximum, invalid };
+      }
+      input.classList.remove("border-slate-300", "bg-white", "border-amber-400", "bg-amber-50", "border-red-400", "bg-red-50", "focus:border-school-green", "focus:ring-green-100", "focus:border-amber-500", "focus:ring-amber-100", "focus:border-red-500", "focus:ring-red-100");
+      if (invalid) input.classList.add("border-red-400", "bg-red-50", "focus:border-red-500", "focus:ring-red-100");
+      else if (teacherState.notesEditDrafts[key]) input.classList.add("border-amber-400", "bg-amber-50", "focus:border-amber-500", "focus:ring-amber-100");
+      else input.classList.add("border-slate-300", "bg-white", "focus:border-school-green", "focus:ring-green-100");
+      updateNotesEditControls();
+    });
+  });
+  container.querySelector("[data-request-notes-save]")?.addEventListener("click", async () => {
+    const drafts = Object.values(teacherState.notesEditDrafts || {});
+    if (!drafts.length || drafts.some((item) => item.invalid)) return;
+    teacherState.notesEditConfirmation = "save";
+    await renderNotes(context);
+  });
+  container.querySelector("[data-confirm-notes-save]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const drafts = Object.values(teacherState.notesEditDrafts || {});
+    if (!drafts.length || drafts.some((item) => item.invalid)) return;
+    button.disabled = true;
+    button.textContent = "Guardando...";
+    let savedCount = 0;
+    try {
+      for (const draft of drafts) {
+        const activity = subjectActivitiesAll.find((item) => item.id === draft.activityId);
+        const student = studentsByName.find((item) => item.id === draft.studentId);
+        const previousGrade = gradesMap[draft.activityId]?.[draft.studentId];
+        const numericValue = Number(draft.value);
+        if (!activity || !student || !previousGrade) throw new Error("No se encontro una de las calificaciones a editar.");
+        if (!Number.isFinite(numericValue) || numericValue < 0 || numericValue > Number(draft.maximum || 100)) {
+          throw new Error(`Puntaje invalido para ${student.nombre}.`);
+        }
+        const savedGrade = await saveGrade({
+          activity,
+          student,
+          value: numericValue,
+          estadoEntrega: previousGrade.estadoEntrega || "",
+          fechaEntrega: previousGrade.fechaEntrega || "",
+          asistenciaActividad: previousGrade.asistenciaActividad || attendanceStateForDate(student.id, activity.fecha, attendanceRows)
+        });
+        upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
+        delete teacherState.notesEditDrafts[draft.key];
+        savedCount += 1;
+      }
+      teacherState.notesEditMode = false;
+      teacherState.notesEditConfirmation = "";
+      teacherState.notesEditMessage = `${savedCount} calificacion(es) actualizada(s) correctamente.`;
+      await renderNotes(context);
+    } catch (error) {
+      teacherState.notesEditConfirmation = "";
+      teacherState.notesEditMessage = savedCount
+        ? `${savedCount} cambio(s) se guardaron antes del error. Revisa los pendientes.`
+        : "No se guardaron los cambios.";
+      await renderNotes(context);
+      alert(error?.code === "permission-denied" ? "Sin permiso para editar las notas." : (error.message || "No se pudieron guardar las notas."));
+    }
+  });
 
   container.querySelectorAll("[data-note-subject]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -3489,21 +3737,6 @@ async function renderNotes(context) {
       attendanceRows,
       calculateStudentTerm,
       teacherName: context?.teacher?.nombre || context?.profile?.nombre || context?.user?.displayName || ""
-    });
-  });
-  container.querySelector("[data-export-notes-excel]")?.addEventListener("click", () => {
-    exportNotesToExcel({
-      course,
-      selectedSubject,
-      selectedTrimesterLabel: selectedTrimester().label,
-      students: studentsByName,
-      subjectActivities,
-      serCriteria,
-      autoActivity,
-      gradesMap,
-      attendanceRows,
-      studentActivityGrade,
-      calculateStudentTerm
     });
   });
   container.querySelector("[data-add-ser-criterion]")?.addEventListener("click", () => {
@@ -3715,10 +3948,14 @@ async function renderSummary(context) {
     `;
   }
   container.innerHTML = `
-      <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
-        <p class="text-xs font-black uppercase tracking-[.18em] text-school-green">Resumen Asistencia</p>
-        <h2 class="mt-1 text-2xl font-black text-slate-900">${escapeHtml(course.nombre)}</h2>
-        <p class="mt-2 max-w-2xl font-semibold text-slate-500">${escapeHtml(selectedTrimester().label)} · Para ahorrar lecturas, el resumen se carga manualmente y luego queda guardado en este dispositivo.</p>
+      <div class="teacher-module-surface rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
+        ${teacherModuleHeading({
+          title: "Resumen de asistencia",
+          course: course.nombre,
+          trimester: selectedTrimester().label,
+          detail: "Sin copia local"
+        })}
+        <p class="mt-3 max-w-2xl text-sm font-normal text-slate-500">Para ahorrar lecturas, el resumen se carga manualmente y luego queda guardado en este dispositivo.</p>
         <button type="button" data-refresh-summary-cache class="mt-4 inline-flex items-center gap-2 rounded-2xl bg-school-navy px-4 py-3 text-sm font-black text-white shadow-soft transition hover:bg-school-green">
           ${icon("cloud-download", "h-4 w-4")} Cargar resumen
         </button>
@@ -3791,14 +4028,15 @@ async function renderSummary(context) {
     `;
   }
   container.innerHTML = `
-    <div class="rounded-3xl border border-slate-200 bg-white shadow-soft">
+    <div class="teacher-module-surface rounded-3xl border border-slate-200 bg-white shadow-soft">
       <div class="border-b border-slate-100 p-4 sm:p-5">
-        <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div class="min-w-0">
-            <p class="text-xs font-black uppercase tracking-[.18em] text-school-green">Resumen Asistencia</p>
-            <h2 class="mt-1 text-2xl font-black text-slate-900">${escapeHtml(course.nombre)}</h2>
-            <p class="font-semibold text-slate-500">${escapeHtml(selectedTrimester().label)} · ${dates.length} fecha(s) registradas</p>
-          </div>
+        <div class="teacher-module-header flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          ${teacherModuleHeading({
+            title: "Resumen de asistencia",
+            course: course.nombre,
+            trimester: selectedTrimester().label,
+            detail: `${dates.length} fecha(s) registradas`
+          })}
           <div class="flex flex-col gap-3 xl:items-end">
             <div class="flex flex-wrap gap-2 xl:justify-end">
               <button type="button" data-print-summary-attendance class="inline-flex items-center justify-center gap-2 rounded-2xl border border-school-green bg-white px-4 py-2 text-sm font-black text-school-green shadow-sm transition hover:bg-green-50">
@@ -3943,14 +4181,15 @@ async function renderTeacherSchedule(context) {
     `;
   }
   container.innerHTML = `
-    <div class="rounded-3xl border border-slate-200 bg-white shadow-soft">
+    <div class="teacher-module-surface rounded-3xl border border-slate-200 bg-white shadow-soft">
       <div class="border-b border-slate-100 p-4">
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div class="min-w-0">
-            <p class="text-xs font-black uppercase tracking-[.18em] text-school-green">${context.courses.length === 1 ? escapeHtml(context.courses[0].nombre) : `${context.courses.length} cursos asignados`}</p>
-            <h2 class="text-2xl font-black text-school-bark">Horario semanal</h2>
-            <p class="mt-1 text-sm font-semibold text-slate-500">${scheduleCache ? `Copia local: ${escapeHtml(scheduleCache.label)}` : "Carga el horario para guardar una copia local."}</p>
-          </div>
+        <div class="teacher-module-header flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          ${teacherModuleHeading({
+            title: "Horario semanal",
+            course: context.courses.length === 1 ? context.courses[0].nombre : `${context.courses.length} cursos asignados`,
+            trimester: "Horario general",
+            detail: scheduleCache ? `Copia local: ${scheduleCache.label}` : "Sin copia local"
+          })}
           <div class="flex flex-col gap-2 lg:max-w-xl lg:items-end">
             <button type="button" data-refresh-teacher-schedule class="inline-flex items-center justify-center gap-2 rounded-2xl bg-school-navy px-4 py-2 text-sm font-black text-white shadow-soft transition hover:bg-school-green">
               ${icon("cloud-download", "h-4 w-4")} Cargar horario
