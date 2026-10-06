@@ -5,7 +5,8 @@ import {
   attendancePercent,
   attendanceTotals,
   calculateCourseGrades,
-  listDirectorActivities,
+  listDirectorAllActivities,
+  listDirectorAttendanceByTrimester,
   listDirectorRecentAttendance,
   listDirectorAudit,
   listDirectorGrades,
@@ -15,15 +16,16 @@ import {
 } from "../../services/directorData.js";
 import { DirectorShell, directorCard, directorStat } from "./DirectorShell.js";
 import { escapeDirectorHtml, refreshDirectorIcons } from "./DirectorUtils.js";
+import { academicTrimester } from "../../services/calculoAcademico.js";
+import { fechaEscolarIso } from "../../services/fechaEscolar.js";
+import { auth } from "../../firebase/client.js";
+import { claveCache } from "../../services/rutasFirestore.js";
 
-const DASHBOARD_CACHE_KEY = "director_dashboard_resumen_v2";
-const DASHBOARD_CACHE_VERSION = 3;
+const dashboardCacheKey = () => claveCache("director_panel", auth.currentUser?.uid || "");
+const DASHBOARD_CACHE_VERSION = 4;
 
 function localIso(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return fechaEscolarIso(date);
 }
 
 function lastSevenDays() {
@@ -53,7 +55,7 @@ function dayFromIso(iso) {
 
 function readDashboardCache() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(DASHBOARD_CACHE_KEY) || "null");
+    const parsed = JSON.parse(localStorage.getItem(dashboardCacheKey()) || "null");
     return parsed?.version === DASHBOARD_CACHE_VERSION && parsed?.snapshot ? parsed.snapshot : null;
   } catch {
     return null;
@@ -62,7 +64,7 @@ function readDashboardCache() {
 
 function writeDashboardCache(snapshot) {
   try {
-    localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify({ version: DASHBOARD_CACHE_VERSION, snapshot }));
+    localStorage.setItem(dashboardCacheKey(), JSON.stringify({ version: DASHBOARD_CACHE_VERSION, snapshot }));
   } catch {
     // El panel sigue disponible aunque el navegador bloquee localStorage.
   }
@@ -224,34 +226,15 @@ function courseHasClasses(schedule, dayId) {
   return Object.values(schedule?.clases || {}).some((days) => Boolean(days?.[dayId]));
 }
 
-function studentRiskRows(students, activities, grades) {
-  const gradeByKey = new Map(grades.map((grade) => [`${grade.actividadId}|${grade.alumnoId}`, grade]));
-  const startedActivityIds = new Set(grades.map((grade) => grade.actividadId).filter(Boolean));
-  const activitiesByCourse = activities.reduce((acc, activity) => {
-    if (!startedActivityIds.has(activity.id)) return acc;
-    acc[activity.cursoId] = acc[activity.cursoId] || [];
-    acc[activity.cursoId].push(activity);
-    return acc;
-  }, {});
+function studentRiskRows(courseSummaries) {
   const courseNames = new Map(COURSES.map((course) => [course.id, course.nombre]));
-
-  return students.map((student) => {
-    const studentActivities = activitiesByCourse[student.cursoId] || [];
-    if (!studentActivities.length) return null;
-    const total = studentActivities.reduce((sum, activity) => {
-      const grade = gradeByKey.get(`${activity.id}|${student.id}`);
-      const rawNote = Number(grade?.nota ?? 35);
-      return sum + Math.max(35, Number.isFinite(rawNote) ? rawNote : 35);
-    }, 0);
-    const score = Math.round(total / studentActivities.length);
-    if (score >= 51) return null;
-    return {
-      name: student.nombre || "-",
-      course: courseNames.get(student.cursoId) || student.cursoId || "-",
-      score,
-      status: score < 46 ? "Critico" : "En riesgo"
-    };
-  }).filter(Boolean).sort((a, b) => a.score - b.score || a.name.localeCompare(b.name)).slice(0, 8);
+  return courseSummaries.flatMap((course) => course.studentResults)
+    .filter((result) => result.average > 0 && result.average < 51)
+    .map(({ student, average: score }) => ({
+      name: student.nombre || "-", course: courseNames.get(student.cursoId) || student.cursoId || "-",
+      score, status: score < 46 ? "Critico" : "En riesgo"
+    }))
+    .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name)).slice(0, 8);
 }
 
 async function buildDashboardSnapshot() {
@@ -261,10 +244,12 @@ async function buildDashboardSnapshot() {
     listDirectorTeachers(),
     listDirectorRecentAttendance(),
     listDirectorAudit(8),
-    listDirectorActivities(),
+    listDirectorAllActivities(),
     listDirectorGrades(),
     listDirectorSchedules()
   ]);
+  const trimestreId = academicTrimester(activities, grades, sessionStorage.getItem("directorNotasTrimestre") || "");
+  const termAttendance = await listDirectorAttendanceByTrimester(trimestreId);
   const recentDates = [...new Set(attendanceRows.map((item) => item.fecha).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b))
     .slice(-7);
@@ -288,14 +273,14 @@ async function buildDashboardSnapshot() {
   }, {});
   const courseSummaries = activeCoursesWithCounts(students).map((course) => ({
     ...course,
-    ...calculateCourseGrades({ students, activities, grades, courseId: course.id })
+    ...calculateCourseGrades({ students, activities, grades, attendanceRows: termAttendance, courseId: course.id, trimestreId })
   }));
   const dayIds = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
   const todayDayId = dayIds[new Date(`${todayIso}T12:00:00`).getDay()];
   const scheduledCourses = courseSummaries.filter((course) => course.total > 0 && courseHasClasses(schedules[course.id], todayDayId));
   const coursesWithoutAttendance = scheduledCourses.filter((course) => !(attendanceByCourse[course.id] || []).length).length;
   const pendingGrades = courseSummaries.reduce((sum, item) => sum + Number(item.pending || 0), 0);
-  const risks = studentRiskRows(students, activities, grades);
+  const risks = studentRiskRows(courseSummaries);
   const riskTotal = courseSummaries.reduce((sum, item) => sum + Number(item.risk || 0), 0);
   const alertItems = [];
 

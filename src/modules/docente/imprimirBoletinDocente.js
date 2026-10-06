@@ -1,6 +1,7 @@
 import { SUBJECTS } from "../../data/catalog.js";
 import { icon } from "../../ui/dom.js";
 import { TRIMESTERS } from "../../services/teacherData.js";
+import { gestionActual } from "../../services/rutasFirestore.js";
 import {
   activityHasGrades,
   calculateStudentTerm,
@@ -92,7 +93,7 @@ function bulletinSheet(payload, trimesterIds) {
   const info = courseInfo(payload.course);
   const baseUrl = import.meta.env.BASE_URL || "/";
   const logoUrl = `${window.location.origin}${baseUrl}images/logo-nueva-bolivia.png`;
-  const year = new Date().getFullYear();
+  const year = gestionActual();
   const subjectColumnCount = subjects.length + 1;
   const noteColumnCount = Math.max(1, trimesterIds.length * subjectColumnCount);
   const termCount = trimesterIds.length;

@@ -1,162 +1,245 @@
-﻿rules_version = '2';
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
-    }
-
+    function signedIn() { return request.auth != null; }
     function isMainAdmin() {
-      return signedIn() && (
-        request.auth.uid == "6GJAf3WiBaVBXypSDDR1xKLalnq2" ||
-        request.auth.token.email == "smichmev@gmail.com"
-      );
+      return signedIn() && (request.auth.uid == "6GJAf3WiBaVBXypSDDR1xKLalnq2" ||
+        request.auth.token.email == "smichmev@gmail.com");
     }
-
-    function userProfile() {
-      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
-    }
-
+    function profile() { return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data; }
     function hasRole(role) {
-      return signedIn() && (
-        isMainAdmin() ||
-        (
-          exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
-          userProfile().rol == role &&
-          userProfile().activo == true
-        )
+      return signedIn() && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+        profile().rol == role && profile().activo == true;
+    }
+    function isAdmin() { return isMainAdmin() || hasRole("admin"); }
+    function isDocente() { return hasRole("docente"); }
+    function isDirector() { return hasRole("director"); }
+    function activeYear() { return get(/databases/$(database)/documents/configuracion/sistema).data.gestionActivaId; }
+    function validYear(year) { return year is string && year.matches("20[0-9]{2}"); }
+    function writableYear(year) { return validYear(year) && year == activeYear(); }
+    function validTerm(term) { return term in ["t1", "t2", "t3"]; }
+    function isAlumno() {
+      return hasRole("alumno") && profile().get("alumnoId", "") != "" &&
+        exists(/databases/$(database)/documents/alumnos/$(profile().alumnoId)) &&
+        get(/databases/$(database)/documents/alumnos/$(profile().alumnoId)).data.activo == true;
+    }
+    function ownStudent(id) { return isAlumno() && profile().alumnoId == id; }
+    function enrollment(year, id) { return get(/databases/$(database)/documents/gestiones/$(year)/matriculas/$(id)).data; }
+    function member(year, id, course) {
+      return exists(/databases/$(database)/documents/gestiones/$(year)/matriculas/$(id)) && enrollment(year, id).cursoId == course;
+    }
+    function activeMember(year, id, course) {
+      return member(year, id, course) && enrollment(year, id).estado == "activo";
+    }
+    function ownEnrolledStudent(year, id) {
+      return ownStudent(id) && exists(/databases/$(database)/documents/gestiones/$(year)/matriculas/$(id)) &&
+        enrollment(year, id).estado == "activo";
+    }
+    function assignments(year) {
+      let data = get(/databases/$(database)/documents/gestiones/$(year)/asignaciones/$(request.auth.uid)).data;
+      return data.get("cursos", data.get("asignaciones", {}));
+    }
+    function teacherCourse(year, course) {
+      return isDocente() && exists(/databases/$(database)/documents/gestiones/$(year)/asignaciones/$(request.auth.uid)) &&
+        assignments(year) is map && course in assignments(year);
+    }
+    function teacherSubjects(year, course) {
+      let data = assignments(year)[course];
+      return data is list ? data : data.get("materias", data.get("subjects", data));
+    }
+    function teacherSubject(year, course, subject) {
+      return teacherCourse(year, course) &&
+        ((teacherSubjects(year, course) is list && subject in teacherSubjects(year, course)) ||
+          (teacherSubjects(year, course) is map && teacherSubjects(year, course).get(subject, false) == true));
+    }
+    function teacherStudent(year, id) {
+      return exists(/databases/$(database)/documents/gestiones/$(year)/matriculas/$(id)) &&
+        teacherCourse(year, enrollment(year, id).cursoId);
+    }
+    function readCourse(year, course) {
+      return isAdmin() || isDirector() || teacherCourse(year, course) ||
+        (isAlumno() && ownEnrolledStudent(year, profile().alumnoId) && enrollment(year, profile().alumnoId).cursoId == course);
+    }
+    function activity(year, id) { return get(/databases/$(database)/documents/gestiones/$(year)/actividades/$(id)).data; }
+    function preservesGradedActivity() {
+      let before = resource.data;
+      let next = request.resource.data;
+      return !before.get("tieneCalificaciones", false) || (
+        next.get("tieneCalificaciones", false) == true &&
+        next.cursoId == before.cursoId && next.materiaId == before.materiaId &&
+        next.get("trimestreId", "t1") == before.get("trimestreId", "t1") &&
+        next.get("fecha", "") == before.get("fecha", "") && next.get("tipo", "tarea") == before.get("tipo", "tarea") &&
+        next.get("maximo", 100) == before.get("maximo", 100) && next.get("calificable", false) == before.get("calificable", false)
       );
     }
-
-    function isAdmin() {
-      return isMainAdmin() || hasRole("admin");
+    function validGrade(year, data) {
+      return writableYear(year) && exists(/databases/$(database)/documents/gestiones/$(year)/actividades/$(data.actividadId)) &&
+        teacherSubject(year, activity(year, data.actividadId).cursoId, activity(year, data.actividadId).materiaId) &&
+        data.cursoId == activity(year, data.actividadId).cursoId &&
+        data.materiaId == activity(year, data.actividadId).materiaId &&
+        data.trimestreId == activity(year, data.actividadId).trimestreId &&
+        activeMember(year, data.alumnoId, data.cursoId) && data.calificadoPorUid == request.auth.uid &&
+        data.maximo is number && data.maximo - data.maximo == 0 &&
+        data.maximo == activity(year, data.actividadId).get("maximo", 100) && data.maximo > 0 &&
+        data.valor is number && data.valor >= 0 && data.valor <= data.maximo &&
+        data.nota is number && data.nota >= 35 && data.nota <= 100 && matchingGradeScore(data) &&
+        getAfter(/databases/$(database)/documents/gestiones/$(year)/actividades/$(data.actividadId)).data.get("tieneCalificaciones", false) == true;
+    }
+    function matchingGradeScore(data) {
+      let normalized = math.round((data.valor * 1.0 / data.maximo) * 100.0);
+      return data.nota == (normalized < 35 ? 35 : normalized);
+    }
+    function validPreferences() {
+      let next = request.resource.data.get("preferencias", {});
+      let previous = resource.data.get("preferencias", {});
+      let terms = next.get("trimestresPorGestion", {});
+      return next is map && next.keys().hasOnly(["trimestresPorGestion"]) && terms is map &&
+        terms.diff(previous.get("trimestresPorGestion", {})).affectedKeys().hasOnly([activeYear()]) &&
+        (!(activeYear() in terms) || validTerm(terms[activeYear()]));
+    }
+    function validEmailChange() {
+      return !("authEmail" in request.resource.data.diff(resource.data).affectedKeys()) ||
+        request.resource.data.authEmail == request.auth.token.email;
     }
 
-    function isDocente() {
-      return hasRole("docente");
+    match /configuracion/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+      allow update: if isDirector() && id == "sistema" &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["limiteFaltasDirector", "actualizadoPorUid", "actualizadoPor", "updatedAt"]) &&
+        request.resource.data.limiteFaltasDirector is number && request.resource.data.limiteFaltasDirector >= 0 &&
+        request.resource.data.limiteFaltasDirector <= 30 && request.resource.data.actualizadoPorUid == request.auth.uid;
     }
-
-    function isDirector() {
-      return hasRole("director");
+    match /catalogos/{catalogo} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+      match /{document=**} { allow read: if signedIn(); allow write: if isAdmin(); }
     }
-
-    function onlyAccountEmailFields() {
-      return request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(["authEmail", "correoRecuperacion", "trimestreActivo", "trimestreActivoUpdatedAt", "updatedAt"]);
-    }
-
-    function validAccountPreferences() {
-      return !("trimestreActivo" in request.resource.data) ||
-        request.resource.data.trimestreActivo in ["t1", "t2", "t3"];
-    }
-    function validTeacherPreference(uid) {
-      return request.resource.data.keys().hasOnly(["uid", "trimestreActivo", "trimestreActivoUpdatedAt", "updatedAt"]) &&
-        request.resource.data.uid == uid &&
-        request.resource.data.trimestreActivo in ["t1", "t2", "t3"];
-    }
-
     match /usuarios/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin() || isDirector());
       allow create, update, delete: if isAdmin();
-      allow update: if signedIn() && request.auth.uid == uid && onlyAccountEmailFields() && validAccountPreferences();
+      allow update: if signedIn() && request.auth.uid == uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["authEmail", "correoRecuperacion", "preferencias", "updatedAt"]) &&
+        validEmailChange() && validPreferences();
+      match /seguimientos/{id} {
+        function ownTeacher() { return isDocente() && request.auth.uid == uid; }
+        function validTracking() {
+          let data = request.resource.data;
+          return data.keys().hasOnly(["gestionId", "alumnoId", "trimestreId", "avisosVistos", "ultimaFaltaAtendida", "updatedAt"]) &&
+            validYear(data.gestionId) && validTerm(data.trimestreId) && data.alumnoId is string &&
+            id == data.gestionId + "_" + data.trimestreId + "_" + data.alumnoId && teacherStudent(data.gestionId, data.alumnoId) &&
+            data.get("avisosVistos", []) is list && data.get("avisosVistos", []).size() <= 2000 &&
+            (!("ultimaFaltaAtendida" in data) || (data.ultimaFaltaAtendida is string && data.ultimaFaltaAtendida.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")));
+        }
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow create: if ownTeacher() && validTracking();
+        allow update: if ownTeacher() && validTracking() && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["avisosVistos", "ultimaFaltaAtendida", "updatedAt"]);
+        allow delete: if isAdmin();
+      }
     }
-
-    match /usuarios_por_nombre/{usuarioKey} {
+    match /indice_accesos/{username} {
+      function validIndex() {
+        return request.resource.data.keys().hasOnly(["uid", "authEmail"]) &&
+          request.resource.data.uid is string && request.resource.data.authEmail is string;
+      }
       allow get: if true;
-      allow list: if signedIn();
-      allow create, update, delete: if isAdmin();
-      allow update: if signedIn() && resource.data.uid == request.auth.uid && onlyAccountEmailFields() && validAccountPreferences();
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && validIndex();
+      allow delete: if isAdmin();
+      allow update: if signedIn() && resource.data.uid == request.auth.uid && validIndex() &&
+        request.resource.data.uid == resource.data.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["authEmail"]) &&
+        request.resource.data.authEmail == request.auth.token.email &&
+        getAfter(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.authEmail == request.resource.data.authEmail;
     }
-
-    match /accesos_alumnos/{usuarioKey} {
-      allow get: if true;
-      allow list: if false;
-      allow create, update, delete: if isAdmin();
-    }
-
-    match /cursos/{id} {
-      allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
-    }
-
-    match /materias_escuela/{id} {
-      allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
-    }
-
-    match /materias_por_curso/{id} {
-      allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
-    }
-
     match /alumnos/{id} {
-      allow get: if true;
-      allow list: if signedIn();
+      allow get: if isAdmin() || isDirector() || ownStudent(id) || teacherStudent(activeYear(), id);
+      allow list: if isAdmin() || isDirector();
       allow create, update, delete: if isAdmin();
-      allow update: if isDirector() && request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(["advertenciaAsistencia", "updatedAt"]);
+      match /avisos/{aviso} {
+        allow read: if isAdmin() || isDirector() || ownStudent(id);
+        allow create: if (isAdmin() || isDirector()) &&
+          request.resource.data.alumnoId == id && validYear(request.resource.data.gestionId) && validTerm(request.resource.data.trimestreId) &&
+          member(request.resource.data.gestionId, id, request.resource.data.cursoId) && request.resource.data.creadaPorUid == request.auth.uid &&
+          request.resource.data.activa == true && request.resource.data.mensaje is string &&
+          request.resource.data.mensaje.size() > 0 && request.resource.data.mensaje.size() <= 500;
+        allow update: if (isAdmin() || isDirector()) && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["activa", "cerradoPorUid", "cerradoAt", "updatedAt"]) && request.resource.data.activa == false &&
+          request.resource.data.cerradoPorUid == request.auth.uid;
+        allow delete: if isAdmin();
+      }
     }
+    // Required for the director's active-warning collection-group query.
+    match /{path=**}/avisos/{aviso} { allow read: if isAdmin() || isDirector(); }
 
-    match /docentes/{id} {
-      allow read: if isAdmin() || isDirector() || (signedIn() && request.auth.uid == id);
-      allow create, update, delete: if isAdmin();
-      allow update: if signedIn() && request.auth.uid == id && onlyAccountEmailFields() && validAccountPreferences();
-    }
-
-    match /director/{id} {
-      allow read: if isAdmin() || isDirector();
-      allow create, update, delete: if isAdmin();
-      allow update: if signedIn() && request.auth.uid == id && onlyAccountEmailFields() && validAccountPreferences();
-    }
-
-    match /configuracion_director/{id} {
-      allow read: if isAdmin() || isDirector();
-      allow create, update: if isAdmin() || isDirector();
-      allow delete: if isAdmin();
-    }
-
-    match /preferencias_docente/{uid} {
-      allow read: if signedIn() && (request.auth.uid == uid || isAdmin() || isDirector());
-      allow create, update: if signedIn() && request.auth.uid == uid && validTeacherPreference(uid);
-      allow delete: if isAdmin();
-    }
-    match /asignaciones/{id} {
-      allow read: if isAdmin() || isDirector() || isDocente();
-      allow create, update, delete: if isAdmin();
-    }
-
-    match /horarios/{id} {
+    match /gestiones/{gestion} {
       allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow write: if isAdmin() && validYear(gestion);
+      match /matriculas/{id} {
+        allow get: if isAdmin() || isDirector() || ownStudent(id) || teacherCourse(gestion, resource.data.cursoId);
+        allow list: if isAdmin() || isDirector() || teacherCourse(gestion, resource.data.cursoId) || ownStudent(resource.data.alumnoId);
+        allow create, update: if isAdmin() && request.resource.data.alumnoId == id && request.resource.data.estado in ["activo", "retirado"] &&
+          request.resource.data.cursoId is string && request.resource.data.numeroAgregacion is number && request.resource.data.numeroAgregacion > 0;
+        allow delete: if isAdmin();
+      }
+      match /asignaciones/{uid} {
+        allow read: if isAdmin() || isDirector() || (isDocente() && request.auth.uid == uid);
+        allow write: if isAdmin();
+      }
+      match /horarios/{curso} { allow read: if signedIn(); allow write: if isAdmin(); }
+      match /actividades/{id} {
+        allow get: if isAdmin() || (isDocente() && !exists(/databases/$(database)/documents/gestiones/$(gestion)/actividades/$(id)));
+        allow read: if readCourse(gestion, resource.data.cursoId);
+        allow create: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, request.resource.data.cursoId, request.resource.data.materiaId) &&
+          request.resource.data.creadoPorUid == request.auth.uid && validTerm(request.resource.data.trimestreId));
+        allow update: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, resource.data.cursoId, resource.data.materiaId) &&
+          teacherSubject(gestion, request.resource.data.cursoId, request.resource.data.materiaId) &&
+          request.resource.data.get("creadoPorUid", "") == resource.data.get("creadoPorUid", "") && validTerm(request.resource.data.trimestreId) && preservesGradedActivity());
+        allow delete: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, resource.data.cursoId, resource.data.materiaId) &&
+          resource.data.get("tieneCalificaciones", false) == false);
+      }
+      match /asistencias/{id} {
+        function validAttendance() {
+          let data = request.resource.data;
+          return writableYear(gestion) && teacherCourse(gestion, data.cursoId) && activeMember(gestion, data.alumnoId, data.cursoId) &&
+            data.registradoPorUid == request.auth.uid && data.estado in ["presente", "falta", "atraso", "permiso", "licencia"] &&
+            validTerm(data.trimestreId) && data.fecha is string && data.fecha.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}");
+        }
+        allow read: if isAdmin() || isDirector() || teacherCourse(gestion, resource.data.cursoId) || ownEnrolledStudent(gestion, resource.data.alumnoId);
+        allow create: if isAdmin() || validAttendance();
+        allow update: if isAdmin() || (validAttendance() && request.resource.data.cursoId == resource.data.cursoId &&
+          request.resource.data.alumnoId == resource.data.alumnoId && request.resource.data.fecha == resource.data.fecha);
+        allow delete: if isAdmin();
+      }
+      match /calificaciones/{id} {
+        allow read: if isAdmin() || isDirector() || teacherCourse(gestion, resource.data.cursoId) ||
+          (isDocente() && teacherCourse(gestion, activity(gestion, resource.data.actividadId).cursoId)) || ownEnrolledStudent(gestion, resource.data.alumnoId);
+        allow create: if isAdmin() || validGrade(gestion, request.resource.data);
+        allow update: if isAdmin() || (request.resource.data.actividadId == resource.data.actividadId &&
+          request.resource.data.alumnoId == resource.data.alumnoId && validGrade(gestion, request.resource.data));
+        allow delete: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, activity(gestion, resource.data.actividadId).cursoId, activity(gestion, resource.data.actividadId).materiaId));
+      }
+      match /comunicados/{id} {
+        allow read: if isAdmin() || isDirector() || isDocente();
+        allow create: if (isAdmin() || isDirector()) && request.resource.data.keys().hasOnly([
+          "titulo", "motivo", "fechaEvento", "horaEvento", "activo", "destinatariosRol", "creadoPorUid", "createdAt", "updatedAt"
+        ]) && request.resource.data.creadoPorUid == request.auth.uid && request.resource.data.activo == true &&
+          request.resource.data.destinatariosRol == ["docente"] && request.resource.data.titulo is string &&
+          request.resource.data.titulo.size() > 0 && request.resource.data.titulo.size() <= 100 && request.resource.data.motivo is string &&
+          request.resource.data.motivo.size() > 0 && request.resource.data.motivo.size() <= 500 && request.resource.data.fechaEvento is string &&
+          request.resource.data.fechaEvento.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}") && request.resource.data.horaEvento is string &&
+          request.resource.data.horaEvento.matches("([01][0-9]|2[0-3]):[0-5][0-9]");
+        allow update: if (isAdmin() || isDirector()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["activo", "updatedAt"]) &&
+          request.resource.data.activo == false;
+        allow delete: if isAdmin();
+      }
     }
-
-    match /asistencias/{id} {
-      allow read: if true;
-      allow create, update: if isAdmin() || isDocente();
-      allow delete: if isAdmin();
-    }
-
-    match /actividades/{id} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin() || isDocente();
-    }
-
-    match /calificaciones/{id} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin() || isDocente();
-    }
-
     match /auditoria/{id} {
       allow read: if isAdmin() || isDirector();
-      allow create: if signedIn();
+      allow create: if signedIn() && request.resource.data.usuarioUid == request.auth.uid;
       allow update, delete: if false;
     }
-
-    match /{document=**} {
-      allow read, write: if false;
-    }
+    match /{document=**} { allow read, write: if false; }
   }
 }
-
-
-

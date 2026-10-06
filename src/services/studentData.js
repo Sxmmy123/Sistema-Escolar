@@ -1,6 +1,18 @@
-﻿import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { coleccionGestion, documentoGestion, gestionActual } from "./rutasFirestore.js";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { findCourse, findSubject, SUBJECTS } from "../data/catalog.js";
 import { auth, firestore } from "../firebase/client.js";
+import { actividadPendienteRegularizacion } from "./revisionActividad.js";
+import { calculateSubjectTerm, gradeByActivityAndStudent, isAttendanceValue, isMaterialActivity } from "./calculoAcademico.js";
+import { fechaEscolarIso } from "./fechaEscolar.js";
+import { studentIdFromProfile } from "./identidadAlumno.js";
+import { alumnoConMatricula } from "./matriculas.js";
+
+const defaultClients = { auth, firestore };
+
+function verifyStudentSession(clients, uid) {
+  if (clients.auth.currentUser?.uid !== uid) throw new Error("La sesion del alumno cambio. Vuelve a ingresar.");
+}
 
 export const STUDENT_TRIMESTERS = [
   { id: "t1", label: "1er trimestre" },
@@ -8,16 +20,8 @@ export const STUDENT_TRIMESTERS = [
   { id: "t3", label: "3er trimestre" }
 ];
 
-function currentUid() {
-  return sessionStorage.getItem("sesionUid") || auth.currentUser?.uid || "";
-}
-
-function currentLocalStudentId() {
-  return sessionStorage.getItem("sesionAlumnoId") || "";
-}
-
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return fechaEscolarIso();
 }
 
 function trimesterLabel(trimestreId) {
@@ -51,235 +55,49 @@ function inferActiveTrimester({ activities = [], grades = [], attendance = [] })
   }, "t1");
 }
 
-function gradeNumber(value) {
-  const number = Math.round(Number(value || 0));
-  return Math.max(35, Math.min(100, number || 35));
-}
-
-function weightedGrade(value, weight) {
-  return Math.round((gradeNumber(value) * weight) / 100);
-}
-
-function averageGrades(values) {
-  if (!values.length) return 35;
-  return gradeNumber(values.reduce((total, value) => total + gradeNumber(value), 0) / values.length);
-}
-
-function isSaberActivity(activity = {}) {
-  return ["examen", "saber"].includes(String(activity?.tipo || "").toLowerCase());
-}
-
-function isMaterialActivity(activity = {}) {
-  return ["material", "materiales"].includes(String(activity?.tipo || "").toLowerCase());
-}
-
-function isScoredMaterialActivity(activity = {}) {
-  const scoreEnabled = activity?.calificable === true || activity?.calificable === 1 || activity?.calificable === "true";
-  return isMaterialActivity(activity) && scoreEnabled && Number(activity?.maximo || 0) > 0;
-}
-
-function isAttendanceValue(state) {
-  return ["presente", "atraso", "permiso", "licencia"].includes(String(state || "").toLowerCase());
-}
-
-function isPunctualValue(state) {
-  return ["presente", "permiso", "licencia"].includes(String(state || "").toLowerCase());
-}
-
-function attendanceScore(studentId, attendanceRows = []) {
-  const registeredDates = [...new Set(attendanceRows.filter((item) => item.fecha).map((item) => item.fecha))];
-  if (!registeredDates.length) return 35;
-  const byDate = new Map(attendanceRows.map((item) => [item.fecha, item.estado || "falta"]));
-  const attended = registeredDates.filter((date) => isAttendanceValue(byDate.get(date) || "falta")).length;
-  return gradeNumber((attended * 100) / registeredDates.length);
-}
-
-function punctualityScore(studentId, attendanceRows = []) {
-  const states = attendanceRows
-    .filter((item) => item.fecha)
-    .map((item) => item.estado || "falta")
-    .filter(isAttendanceValue);
-  if (!states.length) return 35;
-  const punctual = states.filter(isPunctualValue).length;
-  return gradeNumber((punctual * 100) / states.length);
-}
-
-function gradeByActivityAndStudent(grades = []) {
-  const map = {};
-  grades.forEach((grade) => {
-    if (!grade.actividadId || !grade.alumnoId) return;
-    if (!map[grade.actividadId]) map[grade.actividadId] = {};
-    map[grade.actividadId][grade.alumnoId] = grade;
-  });
-  return map;
-}
-
-function studentActivityGrade(activity, studentId, gradesMap) {
-  return gradeNumber(gradesMap[activity.id]?.[studentId]?.nota || 35);
-}
-
-function deliveryStateForGrade(grade = null) {
-  const storedState = String(grade?.estadoEntrega || "").toLowerCase();
-  if (["a_tiempo", "tardia", "no_presento", "pendiente_licencia", "sin_revisar"].includes(storedState)) {
-    return storedState;
-  }
-  if (!grade) return "sin_revisar";
-  return Number(grade.valor || 0) > 0 ? "a_tiempo" : "no_presento";
-}
-
-function responsibilityContribution(task, studentId, gradesMap, attendanceRows = []) {
-  const grade = gradesMap[task.id]?.[studentId] || null;
-  const state = deliveryStateForGrade(grade);
-  if (state === "a_tiempo") return 100;
-  if (state === "tardia") return 50;
-  if (state === "no_presento") return 0;
-  if (["pendiente_licencia", "sin_revisar"].includes(state) && grade) return null;
-
-  const reviewState = String(task.estadoRevision || "").toLowerCase();
-  if (["sin_iniciar", "en_proceso"].includes(reviewState)) return null;
-  const attendanceState = attendanceRows.find((item) => item.alumnoId === studentId && item.fecha === task.fecha)?.estado || "";
-  if (["permiso", "licencia"].includes(String(attendanceState).toLowerCase())) return null;
-  return 0;
-}
-
-function responsibilityScore(tasks, studentId, gradesMap, attendanceRows = []) {
-  const values = tasks
-    .map((task) => responsibilityContribution(task, studentId, gradesMap, attendanceRows))
-    .filter((value) => value != null);
-  if (!values.length) return 35;
-  return gradeNumber(values.reduce((total, value) => total + value, 0) / values.length);
-}
-
-function materialResponsibilityScore(materials, studentId, gradesMap) {
-  const scoredMaterials = materials.filter(isScoredMaterialActivity);
-  const possible = scoredMaterials.reduce((total, material) => total + Math.max(Number(material.maximo || 0), 0), 0);
-  if (!possible) return null;
-  const obtained = scoredMaterials.reduce((total, material) => {
-    const maximum = Math.max(Number(material.maximo || 0), 0);
-    const rawValue = Number(gradesMap[material.id]?.[studentId]?.valor ?? 0);
-    const safeValue = Number.isFinite(rawValue) ? Math.max(0, Math.min(maximum, rawValue)) : 0;
-    return total + safeValue;
-  }, 0);
-  return gradeNumber((obtained * 100) / possible);
-}
-
-function calculateStudentTerm(student, activities, gradesMap, attendanceRows, serExtras = [], autoGrade = null) {
-  const materials = activities.filter(isMaterialActivity);
-  const tasks = activities.filter((activity) => !isSaberActivity(activity) && !isMaterialActivity(activity));
-  const exams = activities.filter(isSaberActivity);
-  const hacer100 = averageGrades(tasks.map((activity) => studentActivityGrade(activity, student.id, gradesMap)));
-  const saber100 = averageGrades(exams.map((activity) => studentActivityGrade(activity, student.id, gradesMap)));
-  const asistencia100 = attendanceScore(student.id, attendanceRows);
-  const puntualidad100 = punctualityScore(student.id, attendanceRows);
-  const materialScore = materialResponsibilityScore(materials, student.id, gradesMap);
-  const taskResponsibilityValues = tasks
-    .map((task) => responsibilityContribution(task, student.id, gradesMap, attendanceRows))
-    .filter((value) => value != null);
-  const responsibilityValues = materialScore == null
-    ? taskResponsibilityValues
-    : [...taskResponsibilityValues, materialScore];
-  const responsabilidad100 = responsibilityValues.length
-    ? gradeNumber(responsibilityValues.reduce((total, value) => total + value, 0) / responsibilityValues.length)
-    : 35;
-  const ser100 = averageGrades([asistencia100, puntualidad100, responsabilidad100, ...serExtras]);
-  const auto100 = autoGrade ?? 35;
-  const ser10 = weightedGrade(ser100, 10);
-  const saber45 = weightedGrade(saber100, 45);
-  const hacer40 = weightedGrade(hacer100, 40);
-  const auto5 = weightedGrade(auto100, 5);
-  return {
-    ser100,
-    saber100,
-    hacer100,
-    auto100,
-    ser10,
-    saber45,
-    hacer40,
-    auto5,
-    final: ser10 + saber45 + hacer40 + auto5
-  };
-}
-
-export async function getStudentContext(uid = currentUid()) {
-  const localStudentId = currentLocalStudentId();
-  if (localStudentId) {
-    const studentSnap = await getDoc(doc(firestore, "alumnos", localStudentId));
-    if (!studentSnap.exists()) throw new Error("No se encontro el alumno vinculado.");
-    const student = { id: studentSnap.id, ...studentSnap.data() };
-    const profile = {
-      rol: "alumno",
-      usuario: sessionStorage.getItem("sesionUsuario") || student.usuario || student.ci || student.id,
-      alumnoId: localStudentId,
-      ci: student.ci || "",
-      cursoId: student.cursoId || sessionStorage.getItem("sesionAlumnoCursoId") || ""
-    };
-    return {
-      uid: `alumno:${localStudentId}`,
-      profile,
-      student,
-      course: findCourse(student.cursoId || profile.cursoId)
-    };
-  }
-
-  if (!uid) throw new Error("No hay sesion de alumno.");
-
+export async function getStudentContext(clients = defaultClients) {
+  const { auth, firestore } = clients;
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error("No hay sesion de alumno autenticada.");
   const profileSnap = await getDoc(doc(firestore, "usuarios", uid));
   if (!profileSnap.exists()) throw new Error("No se encontro el perfil del alumno.");
-
-  const profile = profileSnap.data() || {};
-  const studentId = profile.alumnoId || profile.ci || profile.usuario;
-  const studentSnap = studentId ? await getDoc(doc(firestore, "alumnos", studentId)) : null;
-  const student = studentSnap?.exists() ? { id: studentSnap.id, ...studentSnap.data() } : {
-    id: studentId,
-    nombre: profile.nombre,
-    ci: profile.ci || profile.usuario,
-    cursoId: profile.cursoId
-  };
-
-  return {
-    uid,
-    profile,
-    student,
-    course: findCourse(student.cursoId || profile.cursoId)
-  };
+  const profile = profileSnap.data();
+  const studentId = studentIdFromProfile(profile);
+  const studentSnap = await getDoc(doc(firestore, "alumnos", studentId));
+  if (!studentSnap.exists() || studentSnap.data().activo === false) throw new Error("El alumno no esta habilitado.");
+  const matricula = await getDoc(documentoGestion(firestore, "matriculas", studentId));
+  if (!matricula.exists() || matricula.data().estado !== "activo") throw new Error("El alumno no tiene matricula activa en esta gestion.");
+  verifyStudentSession(clients, uid);
+  const student = alumnoConMatricula(studentSnap.id, studentSnap.data(), matricula.data());
+  return { uid, profile, student, gestionId: gestionActual(), course: findCourse(student.cursoId) };
 }
 
-function buildBulletin({ student, activities, grades, attendance, trimesterId }) {
+export function buildBulletin({ student, activities, grades, attendance, trimesterId }) {
   const gradesMap = gradeByActivityAndStudent(grades);
-  return SUBJECTS.map((subject) => {
-    const subjectActivities = activities.filter((activity) => activity.materiaId === subject.id);
-    const gradedSubjectActivities = subjectActivities.filter((activity) => gradesMap[activity.id]?.[student.id]);
-    const serCriteria = subjectActivities.filter((activity) => String(activity.tipo || "").toLowerCase() === "ser");
-    const autoActivity = subjectActivities.find((activity) => String(activity.tipo || "").toLowerCase() === "auto");
-    const visibleActivities = gradedSubjectActivities.filter((activity) => !activity.interno && !["ser", "auto"].includes(String(activity.tipo || "").toLowerCase()));
-    const internalActivities = serCriteria.concat(autoActivity ? [autoActivity] : []);
-    const hasData = visibleActivities.length || internalActivities.some((activity) => gradesMap[activity.id]?.[student.id]);
-    const serExtraValues = serCriteria.map((item) => studentActivityGrade(item, student.id, gradesMap));
-    const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota ?? null : null;
-    const calc = calculateStudentTerm(student, visibleActivities, gradesMap, attendance, serExtraValues, autoGrade);
-    return {
-      subjectId: subject.id,
-      subjectName: subject.nombre,
-      subjectShort: subject.corto || subject.nombre,
-      color: subject.color,
-      trimesterId,
-      hasData,
-      ...calc
-    };
-  });
+  return SUBJECTS.map((subject) => ({
+    subjectId: subject.id,
+    subjectName: subject.nombre,
+    subjectShort: subject.corto || subject.nombre,
+    color: subject.color,
+    trimesterId,
+    ...calculateSubjectTerm(student, subject.id, activities, gradesMap, attendance)
+  }));
 }
 
-export async function getStudentDashboardData() {
-  const context = await getStudentContext();
-  const courseId = context.student.cursoId || context.profile.cursoId;
+export async function getStudentDashboardData(clients = defaultClients) {
+  const { firestore } = clients;
+  const context = await getStudentContext(clients);
+  const courseId = context.student.cursoId;
   const studentId = context.student.id;
   const now = todayIso();
 
-  const [activitiesSnap, gradesSnap, attendanceSnap] = await Promise.all([
-    courseId ? getDocs(query(collection(firestore, "actividades"), where("cursoId", "==", courseId))) : { docs: [] },
-    studentId ? getDocs(query(collection(firestore, "calificaciones"), where("alumnoId", "==", studentId))) : { docs: [] },
-    studentId ? getDocs(query(collection(firestore, "asistencias"), where("alumnoId", "==", studentId))) : { docs: [] }
+  const [activitiesSnap, gradesSnap, attendanceSnap, avisosSnap] = await Promise.all([
+    courseId ? getDocs(query(coleccionGestion(firestore, "actividades"), where("cursoId", "==", courseId))) : { docs: [] },
+    studentId ? getDocs(query(coleccionGestion(firestore, "calificaciones"), where("alumnoId", "==", studentId))) : { docs: [] },
+    studentId ? getDocs(query(coleccionGestion(firestore, "asistencias"), where("alumnoId", "==", studentId))) : { docs: [] },
+    getDocs(query(collection(firestore, "alumnos", studentId, "avisos"), where("gestionId", "==", gestionActual()), where("activa", "==", true)))
   ]);
+  verifyStudentSession(clients, context.uid);
 
   const allActivities = activitiesSnap.docs
     .map((item) => ({ id: item.id, ...item.data() }))
@@ -287,20 +105,22 @@ export async function getStudentDashboardData() {
   const allGrades = gradesSnap.docs.map((item) => ({ id: item.id, ...item.data() }));
   const allAttendance = attendanceSnap.docs.map((item) => ({ id: item.id, ...item.data() }));
 
-  const preferredTrimester = normalizeTrimester(context.profile.trimestreActivo || context.student.trimestreActivo);
+  const preferredTrimester = normalizeTrimester(context.profile.preferencias?.trimestresPorGestion?.[gestionActual()]);
   const trimesterId = preferredTrimester || inferActiveTrimester({ activities: allActivities, grades: allGrades, attendance: allAttendance });
   const activities = allActivities.filter((activity) => (activity.trimestreId || "t1") === trimesterId);
   const grades = allGrades.filter((grade) => (grade.trimestreId || "t1") === trimesterId);
   const attendance = allAttendance.filter((item) => (item.trimestreId || "t1") === trimesterId);
   const gradeByActivity = new Map(grades.map((grade) => [grade.actividadId, grade]));
-  const storedAttendanceWarning = context.student.advertenciaAsistencia;
-  const attendanceWarning = storedAttendanceWarning?.activa === true && storedAttendanceWarning?.trimestreId === trimesterId
-    ? storedAttendanceWarning
-    : null;
+  const attendanceWarning = avisosSnap.docs.map((item) => ({ id: item.id, ...item.data() }))
+    .filter((item) => item.trimestreId === trimesterId)
+    .sort((a, b) => (b.updatedAt?.toMillis?.() || 0) - (a.updatedAt?.toMillis?.() || 0))[0] || null;
 
   const materials = activities.filter((activity) => !activity.interno && isMaterialActivity(activity) && String(activity.fecha || "") >= now);
   const programmed = activities.filter((activity) => !activity.interno && !isMaterialActivity(activity) && String(activity.fecha || "") >= now);
-  const missing = activities.filter((activity) => !activity.interno && !isMaterialActivity(activity) && String(activity.fecha || "") < now && !gradeByActivity.has(activity.id));
+  const missing = activities.filter((activity) => {
+    return !activity.interno && !isMaterialActivity(activity)
+      && actividadPendienteRegularizacion(activity, gradeByActivity.get(activity.id), now);
+  });
   const attendanceCount = attendance.length;
   const presentCount = attendance.filter((item) => isAttendanceValue(item.estado)).length;
   const bulletin = buildBulletin({ student: context.student, activities, grades, attendance, trimesterId });

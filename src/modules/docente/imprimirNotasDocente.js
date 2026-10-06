@@ -1,6 +1,7 @@
 ﻿import { findSubject } from "../../data/catalog.js";
 import { gradeByActivityAndStudent, isMaterialActivity, isSaberActivity, studentActivityGrade } from "./AcademicoDocente.js";
 import { escapeHtml } from "./UtilidadesDocente.js";
+import { gestionActual } from "../../services/rutasFirestore.js";
 
 const SCHOOL_NAME = "ECOLOGICA NUEVA BOLIVIA";
 const SCHOOL_LEVEL = "PRIMARIA COMUNITARIA VOCACIONAL";
@@ -106,7 +107,7 @@ function subjectSheet({
         </colgroup>
         <thead>
           <tr>
-            <th colspan="8" class="brand-top">REGISTRO DE EVALUACION&nbsp;&nbsp; 2026&nbsp;&nbsp; ${escapeHtml(normalizeText(trimesterLabel))}</th>
+            <th colspan="8" class="brand-top">REGISTRO DE EVALUACION&nbsp;&nbsp; ${gestionActual()}&nbsp;&nbsp; ${escapeHtml(normalizeText(trimesterLabel))}</th>
             <th colspan="${Math.max(1, fullSpan - 13)}" class="top-fill"></th>
             <th colspan="3" class="meta-cell">ANO DE ESCOLARIDAD:</th>
             <th colspan="2" class="meta-value">${escapeHtml(info.grade)}</th>
@@ -169,7 +170,7 @@ function subjectSheet({
             if (!student) {
               return `<tr><td>${rowIndex + 1}</td><td class="student-name">&nbsp;</td>${emptyCells(noteCount)}</tr>`;
             }
-            const serExtraValues = serCriteriaRaw.map((item) => studentActivityGrade(item, student.id, gradesMap));
+            const serExtraValues = serCriteriaRaw.filter((item) => gradesMap[item.id]?.[student.id]).map((item) => studentActivityGrade(item, student.id, gradesMap));
             const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota : null;
             const calc = calculateStudentTerm(student, gradedActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
             return `<tr>

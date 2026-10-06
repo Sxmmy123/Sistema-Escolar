@@ -1,7 +1,9 @@
 ﻿import { COURSES, DAYS, SUBJECTS, findCourse, findSubject, periodsForCourse } from "../../data/catalog.js";
-import { getAdminCounts, getAllSchedules, getSchedule, importHistoricalAttendance, importHistoricalGrades, importSchedulesPayload, importStudents, listStudents, saveScheduleCell, seedSchoolCatalog, setStudentActive, saveTeacherAssignments } from "../../services/adminData.js";
+import { getAdminCounts, getAllSchedules, getSchedule, importHistoricalAttendance, importHistoricalGrades, importSchedulesPayload, importStudents, listStudents, saveScheduleCell } from "../../services/adminData.js";
+import { prepararGestion } from "../../services/configuracionSistema.js";
 import { createSystemUser, listUsersByRole } from "../../services/users.js";
-import { ensureStudentLocalAccess, setStudentAccessActive } from "../../services/studentAccess.js";
+import { setStudentAccessActive } from "../../services/studentAccess.js";
+import { openStudentAccessMigration } from "./AccesosAlumnos.js";
 import { listAudit, safeAudit } from "../../services/auditData.js";
 
 const state = {
@@ -376,11 +378,9 @@ function bindCreateForms() {
           username: data.get("username"),
           emailRecuperacion: data.get("emailRecuperacion"),
           password: data.get("password"),
-          rol: role
+          rol: role,
+          asignaciones: assignments
         });
-        if (role === "docente") {
-          await saveTeacherAssignments(createdUser.id, assignments);
-        }
         await safeAudit({
           tipo: "usuarios",
           accion: `crear_${role}`,
@@ -424,11 +424,11 @@ function renderStudentRows(students) {
 
   tbody.innerHTML = students.map((student) => `
     <tr>
-      <td class="px-3 py-2.5 font-medium text-slate-700">${student.numeroLista || "-"}</td>
-      <td class="px-3 py-2.5 font-medium text-slate-900">${student.nombre || "-"}</td>
-      <td class="px-3 py-2.5 text-slate-600">${student.ci || "-"}</td>
+      <td class="px-3 py-2.5 font-medium text-slate-700">${escapeHtml(student.numeroLista || "-")}</td>
+      <td class="px-3 py-2.5 font-medium text-slate-900">${escapeHtml(student.nombre || "-")}</td>
+      <td class="px-3 py-2.5 text-slate-600">${escapeHtml(student.ci || "-")}</td>
       <td class="px-3 py-2.5"><span class="rounded-full ${student.activo === false ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"} px-2.5 py-1 text-[10px] font-medium">${student.activo === false ? "Retirado" : "Activo"}</span></td>
-      <td class="px-3 py-2.5"><button class="rounded-md border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-school-green hover:bg-green-50" data-toggle-student="${student.id}" data-active="${student.activo !== false}">${student.activo === false ? "Habilitar" : "Retirar"}</button></td>
+      <td class="px-3 py-2.5"><button class="rounded-md border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-school-green hover:bg-green-50" data-toggle-student="${escapeHtml(student.id)}" data-active="${student.activo !== false}">${student.activo === false ? "Habilitar" : "Retirar"}</button></td>
     </tr>
   `).join("");
 
@@ -437,15 +437,21 @@ function renderStudentRows(students) {
       button.disabled = true;
       const nextActive = button.dataset.active !== "true";
       const student = students.find((item) => item.id === button.dataset.toggleStudent);
-      await setStudentActive(button.dataset.toggleStudent, nextActive);
-      if (student) await setStudentAccessActive(student, nextActive);
-      await safeAudit({
-        tipo: "alumnos",
-        accion: nextActive ? "habilitar" : "retirar",
-        detalle: `${nextActive ? "Habilito" : "Retiro"} alumno ${button.dataset.toggleStudent}`,
-        datos: { alumnoId: button.dataset.toggleStudent, activo: nextActive, cursoId: state.studentsCourseId }
-      });
-      await refreshStudents();
+      try {
+        if (!student) throw new Error("No se encontro el alumno.");
+        await setStudentAccessActive(student, nextActive);
+        await safeAudit({
+          tipo: "alumnos",
+          accion: nextActive ? "habilitar" : "retirar",
+          detalle: `${nextActive ? "Habilito" : "Retiro"} alumno ${button.dataset.toggleStudent}`,
+          datos: { alumnoId: button.dataset.toggleStudent, activo: nextActive, cursoId: state.studentsCourseId }
+        });
+        await refreshStudents();
+      } catch (error) {
+        statusFor(document.querySelector("[data-students-panel]"), "[data-students-access-status]", error.message || "No se pudo actualizar el acceso del alumno.", "error");
+      } finally {
+        button.disabled = false;
+      }
     });
   });
 }
@@ -465,46 +471,8 @@ async function refreshStudents() {
 }
 
 async function generateStudentAccessesForCourse() {
-  const panel = document.querySelector("[data-students-panel]");
-  const button = document.querySelector("[data-action='generate-student-accesses']");
   const course = findCourse(state.studentsCourseId);
-  if (!panel || !button || !course) return;
-
-  button.disabled = true;
-  statusFor(panel, "[data-students-access-status]", `Generando accesos para ${course.nombre}...`);
-  try {
-    const students = await listStudents(course.id);
-    if (!students.length) {
-      statusFor(panel, "[data-students-access-status]", "No hay alumnos en este curso para generar accesos.", "error");
-      return;
-    }
-
-    let created = 0;
-    let updated = 0;
-    let failed = 0;
-    for (const student of students) {
-      try {
-        const result = await ensureStudentLocalAccess(student, course);
-        if (result.created) created += 1;
-        else updated += 1;
-      } catch (error) {
-        failed += 1;
-      }
-    }
-
-    await safeAudit({
-      tipo: "alumnos",
-      accion: "generar_accesos",
-      detalle: `Genero accesos de alumnos para ${course.nombre}`,
-      datos: { cursoId: course.id, cantidad: students.length, nuevos: created, actualizados: updated, fallidos: failed }
-    });
-
-    statusFor(panel, "[data-students-access-status]", `${students.length} accesos revisados. Usuario y contrasena: CI del alumno. Nuevos: ${created}, actualizados: ${updated}${failed ? `, fallidos: ${failed}` : ""}.`);
-  } catch (error) {
-    statusFor(panel, "[data-students-access-status]", error.message || "No se pudo generar accesos.", "error");
-  } finally {
-    button.disabled = false;
-  }
+  if (course) await openStudentAccessMigration(course, refreshStudents);
 }
 
 function bindStudentsPage() {
@@ -530,25 +498,14 @@ function bindStudentsPage() {
     statusFor(form, "[data-students-status]", "Subiendo alumnos a Firebase...");
     try {
       const students = await importStudents(course, data.get("students"));
-      const accessResults = [];
-      for (const student of students) {
-        try {
-          accessResults.push({ ok: true, value: await ensureStudentLocalAccess(student, course) });
-        } catch (error) {
-          accessResults.push({ ok: false, error });
-        }
-      }
-      const createdAccess = accessResults.filter((item) => item.ok && item.value.created).length;
-      const existingAccess = accessResults.filter((item) => item.ok && !item.value.created && !item.value.skipped).length;
-      const failedAccess = accessResults.filter((item) => !item.ok || item.value?.skipped).length;
       await safeAudit({
         tipo: "alumnos",
         accion: "importar",
         detalle: `Importo ${students.length} alumnos en ${course.nombre}`,
-        datos: { cursoId: course.id, cantidad: students.length, accesosCreados: createdAccess, accesosExistentes: existingAccess, accesosFallidos: failedAccess }
+        datos: { cursoId: course.id, cantidad: students.length }
       });
       state.studentsCourseId = course.id;
-      statusFor(form, "[data-students-status]", `${students.length} alumnos importados. Accesos: ${createdAccess} nuevos, ${existingAccess} actualizados${failedAccess ? `, ${failedAccess} sin crear` : ""}. Usuario y contrasena: CI del alumno.`);
+      statusFor(form, "[data-students-status]", `${students.length} alumnos importados. Usa Crear accesos para preparar sus cuentas y descargar las contrasenas temporales.`);
       form.querySelector("textarea").value = "";
       updateTabs(document.querySelector("[data-course-tabs]"), state.studentsCourseId);
       await refreshStudents();
@@ -802,7 +759,6 @@ function bindSchedulePage() {
 async function hydrateAdminDashboard() {
   document.querySelectorAll("[data-admin-count]").forEach((node) => { node.textContent = "..."; });
   try {
-    await seedSchoolCatalog();
     const counts = await getAdminCounts();
     document.querySelector('[data-admin-count="students"]')?.replaceChildren(String(counts.students));
     document.querySelector('[data-admin-count="teachers"]')?.replaceChildren(String(counts.teachers));
@@ -1689,8 +1645,6 @@ function bindAuditPage() {
   loadAuditPage();
 }
 export function bindAdminPages(route) {
-  if (route.startsWith("/admin")) seedSchoolCatalog().catch(() => {});
-
   if (["/admin/docentes", "/admin/director"].includes(route)) {
     const role = route === "/admin/docentes" ? "docente" : "director";
     bindCreateForms();
@@ -1701,7 +1655,28 @@ export function bindAdminPages(route) {
   if (route === "/admin/alumnos") bindStudentsPage();
   if (route === "/admin/horarios") bindSchedulePage();
   if (route === "/admin/carga-historica") bindHistoricalPage();
-  if (route === "/admin") hydrateAdminDashboard();
+  if (route === "/admin") {
+    hydrateAdminDashboard();
+    document.querySelector("[data-gestion-form]")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const gestion = new FormData(form).get("gestion");
+      if (!confirm(`Activar la gestion ${gestion}? Los registros anteriores se conservan. Las nuevas operaciones se guardaran en esta gestion.`)) return;
+      const button = form.querySelector("button");
+      const status = document.querySelector("[data-gestion-status]");
+      button.disabled = true;
+      status.textContent = "Preparando gestion...";
+      try {
+        await prepararGestion(gestion);
+        window.location.reload();
+      } catch (error) {
+        status.textContent = error?.code === "permission-denied"
+          ? "Publica primero las nuevas reglas de Firestore y vuelve a intentar."
+          : error.message || "No se pudo preparar la gestion.";
+        button.disabled = false;
+      }
+    });
+  }
   if (route === "/admin/auditoria") bindAuditPage();
 }
 

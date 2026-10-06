@@ -1,8 +1,7 @@
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { APP_VERSION } from "../../firebase/config.js";
 import { auth } from "../../firebase/client.js";
 import { authEmailForLogin } from "../../services/users.js";
-import { loginStudentAccess } from "../../services/studentAccess.js";
 import { resolveUserRole } from "../../services/authSession.js";
 import { icon } from "../../ui/dom.js";
 
@@ -86,10 +85,6 @@ function friendlyAuthError(error, login) {
   return `${error?.message || "No se pudo ingresar. Revisa usuario y contrasena."} (${code || "sin-codigo"})`;
 }
 
-function looksLikeStudentLogin(login) {
-  return /^[a-z0-9._-]+$/i.test(String(login || "").trim()) && /\d/.test(String(login || ""));
-}
-
 export function bindLogin() {
   const form = document.querySelector("[data-login-form]");
   form?.addEventListener("submit", async (event) => {
@@ -97,30 +92,14 @@ export function bindLogin() {
     const button = form.querySelector("button[type='submit']");
     const data = new FormData(form);
     const login = String(data.get("login") || "").trim();
-    const email = await authEmailForLogin(login);
     const password = String(data.get("password") || "");
 
     button.disabled = true;
     setStatus("Verificando cuenta...");
 
-    let studentLoginError = null;
+    let email = "";
     try {
-      if (!login.includes("@")) {
-        try {
-          const studentAccess = await loginStudentAccess(login, password);
-          sessionStorage.setItem("sesionRol", "alumno");
-          sessionStorage.setItem("sesionUsuario", studentAccess.usuario);
-          sessionStorage.setItem("sesionUid", `alumno:${studentAccess.alumnoId}`);
-          sessionStorage.setItem("sesionAlumnoId", studentAccess.alumnoId);
-          sessionStorage.setItem("sesionAlumnoCursoId", studentAccess.cursoId || "");
-          window.location.hash = "#/alumno";
-          return;
-        } catch (studentError) {
-          studentLoginError = studentError;
-          console.info("No ingreso como alumno local, se intentara Firebase Auth.", studentError?.message || studentError);
-        }
-      }
-
+      email = await authEmailForLogin(login);
       const credential = await signInWithEmailAndPassword(auth, email, password);
       const user = credential.user;
       const role = await resolveUserRole(user);
@@ -128,14 +107,12 @@ export function bindLogin() {
       sessionStorage.setItem("sesionRol", role);
       sessionStorage.setItem("sesionUsuario", user.email || email);
       sessionStorage.setItem("sesionUid", user.uid);
+      sessionStorage.removeItem("sesionAlumnoId");
+      sessionStorage.removeItem("sesionAlumnoCursoId");
       window.location.hash = `#/${role}`;
     } catch (error) {
-      console.error("Login Firebase error", { code: error?.code, message: error?.message, login, email });
-      if (!login.includes("@") && looksLikeStudentLogin(login) && studentLoginError?.message) {
-        setStatus(`${studentLoginError.message} Si el alumno ya fue cargado, revisa que exista en accesos_alumnos y que las reglas de Firestore esten publicadas.`, "error");
-      } else {
-        setStatus(friendlyAuthError(error, login), "error");
-      }
+      await signOut(auth).catch(() => {});
+      setStatus(friendlyAuthError(error, login), "error");
     } finally {
       button.disabled = false;
     }

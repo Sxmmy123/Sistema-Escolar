@@ -245,7 +245,7 @@ function buildStudentReport(student, data) {
       .filter((activity) => activityHasGrades(activity, gradesMap));
     const serCriteria = subjectActivities.filter((activity) => String(activity.tipo || "").toLowerCase() === "ser");
     const autoActivity = subjectActivities.find((activity) => String(activity.tipo || "").toLowerCase() === "auto") || null;
-    const serExtraValues = serCriteria.map((activity) => studentActivityGrade(activity, student.id, gradesMap));
+    const serExtraValues = serCriteria.filter((activity) => gradesMap[activity.id]?.[student.id]).map((activity) => studentActivityGrade(activity, student.id, gradesMap));
     const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota ?? null : null;
     const calculation = calculateStudentTerm(student, gradedActivities, gradesMap, attendance, serExtraValues, autoGrade);
     return {

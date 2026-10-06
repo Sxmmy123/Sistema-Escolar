@@ -1,4 +1,5 @@
 import { icon } from "../../ui/dom.js";
+import { normalizarEstadoAsistencia as normalizeAttendanceState } from "../../services/calculoAcademico.js";
 import {
   COURSES,
   attendancePercent,
@@ -49,11 +50,6 @@ function consumeRequestedStudent() {
   sessionStorage.removeItem("directorAsistenciaCursoSolicitado");
   sessionStorage.removeItem("directorAsistenciaTrimestreSolicitado");
   return studentId;
-}
-
-function normalizeAttendanceState(value = "") {
-  const key = String(value || "").toLowerCase();
-  return key === "licencia" ? "permiso" : key;
 }
 
 function currentTrimester() {

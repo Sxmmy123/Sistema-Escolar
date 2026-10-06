@@ -1,35 +1,30 @@
 import {
   collection,
-  deleteField,
   doc,
   getCountFromServer,
   getDoc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
   writeBatch
 } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
 import { COURSES, SUBJECTS, periodsForCourse } from "../data/catalog.js";
+import { claveActividad } from "./identificadoresActividad.js";
+import { coleccionGestion, documentoGestion, gestionActual } from "./rutasFirestore.js";
+import { listarAlumnosMatriculados } from "./matriculas.js";
+import { parseStudentsBulk } from "./parsearAlumnos.js";
+export { parseStudentsBulk } from "./parsearAlumnos.js";
 
 function cleanText(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
 
-function studentDocId(ci) {
-  return String(ci || "").replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
-}
-
 function attendanceDocId(courseId, date, studentId) {
   return `${date}_${courseId}_${studentId}`.replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
-}
-
-function activityDocId(courseId, subjectId, date, title) {
-  const clean = String(title || "actividad").replace(/[^a-z0-9]+/gi, "_").slice(0, 32).toLowerCase();
-  return `${date || "sin_fecha"}_${courseId}_${subjectId}_${clean}`.replace(/_+/g, "_").toLowerCase();
 }
 
 function gradeDocId(activityId, studentId) {
@@ -37,104 +32,78 @@ function gradeDocId(activityId, studentId) {
 }
 
 function normalizeGrade(value, maximo = 100) {
-  const raw = Number(value);
+  const rawValue = Number(value);
   const max = Math.max(Number(maximo) || 100, 1);
-  if (Number.isNaN(raw)) return null;
+  if (!Number.isFinite(rawValue) || !Number.isFinite(max)) return null;
+  const raw = Math.max(0, Math.min(max, rawValue));
   const percent = Math.max(0, Math.min(100, Math.round((raw / max) * 100)));
   const nota = percent <= 0 ? 35 : Math.max(35, percent);
   return { valor: raw, porcentaje: percent, nota };
 }
 
-export async function seedSchoolCatalog() {
-  await Promise.all([
-    ...COURSES.map((course) => setDoc(doc(firestore, "cursos", course.id), {
-      nombre: course.nombre,
-      corto: course.corto,
-      orden: course.orden,
-      activo: true,
-      updatedAt: serverTimestamp()
-    }, { merge: true })),
-    ...SUBJECTS.map((subject, index) => setDoc(doc(firestore, "materias_escuela", subject.id), {
-      nombre: subject.nombre,
-      corto: subject.corto,
-      color: subject.color,
-      orden: index,
-      activo: true,
-      updatedAt: serverTimestamp()
-    }, { merge: true }))
-  ]);
-}
-
-export function parseStudentsBulk(text, courseId) {
-  return String(text || "")
-    .split(/\r?\n/)
-    .map((line) => cleanText(line))
-    .filter(Boolean)
-    .map((line, index) => {
-      const parts = line.split(/\t| {2,}/).map((part) => cleanText(part)).filter(Boolean);
-      let nombre = parts[0] || line;
-      let ci = parts[1] || "";
-
-      if (!ci) {
-        const match = line.match(/(.+?)\s+([A-Za-z0-9._-]{4,})$/);
-        if (match) {
-          nombre = cleanText(match[1]);
-          ci = cleanText(match[2]);
-        }
-      }
-
-      ci = ci || `sin_ci_${courseId}_${index + 1}`;
-      return {
-        id: studentDocId(ci),
-        ci: String(ci),
-        nombre: cleanText(nombre).toUpperCase(),
-        cursoId: courseId,
-        numeroLista: index + 1,
-        activo: true,
-        retirado: false
-      };
-    });
-}
-
-export async function importStudents(course, rawText) {
+export async function importStudents(course, rawText, db = firestore, opciones = {}) {
+  const gestionId = opciones.gestionId || gestionActual();
+  if (!COURSES.some((item) => item.id === course?.id)) throw new Error("Selecciona un curso valido.");
   const students = parseStudentsBulk(rawText, course.id);
   if (!students.length) throw new Error("No hay alumnos para importar.");
-
-  await Promise.all(students.map((student) => {
-    const { id, ...studentData } = student;
-    return setDoc(doc(firestore, "alumnos", id), {
-      ...studentData,
-      course: deleteField(),
-      cursoNombre: deleteField(),
-      order: deleteField(),
-      password: deleteField(),
-      updatedAt: serverTimestamp()
-    }, { merge: true });
-  }));
-
-  return students;
+  if (students.length > 200) throw new Error("Importa hasta 200 alumnos por carga.");
+  const controlRef = doc(db, "configuracion", "sistema");
+  const control = await getDoc(controlRef);
+  if (!control.exists() || control.data().versionModelo !== 2) throw new Error("Primero prepara la gestion desde el panel.");
+  const revision = Number(control.data().revisionAlumnos || 0);
+  const [registry, enrollments] = await Promise.all([
+    getDocs(collection(db, "alumnos")), getDocs(coleccionGestion(db, "matriculas", gestionId))
+  ]);
+  const existentes = registry.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const matriculas = new Map(enrollments.docs.map((item) => [item.id, item.data()]));
+  let numero = Math.max(0, ...[...matriculas.values()].filter((item) => item.cursoId === course.id).map((item) => Number(item.numeroAgregacion || 0)));
+  const escrituras = [];
+  const resultado = [];
+  for (const student of students) {
+    const candidatos = existentes.filter((item) => student.ci ? item.ci === student.ci : item.nombre === student.nombre);
+    if (candidatos.length > 1) throw new Error(`Hay registros ambiguos para ${student.nombre}. Revisa el carnet.`);
+    const anterior = candidatos[0];
+    if (!anterior && student.ci && existentes.some((item) => item.nombre === student.nombre)) {
+      throw new Error(`${student.nombre} ya existe con otro carnet. Revisa su identidad antes de importar.`);
+    }
+    if (anterior && anterior.nombre !== student.nombre) throw new Error(`El carnet ${student.ci} pertenece a ${anterior.nombre}. No se guardo la carga.`);
+    if (anterior?.activo === false) throw new Error(`${student.nombre} esta retirado. Reactivalo expresamente antes de matricularlo.`);
+    const id = anterior?.id || doc(collection(db, "alumnos")).id;
+    const matricula = matriculas.get(id);
+    if (matricula && matricula.cursoId !== course.id) throw new Error(`${student.nombre} ya esta matriculado en otro curso de esta gestion.`);
+    if (matricula && matricula.estado !== "activo") throw new Error(`${student.nombre} tiene una matricula retirada. Reactivala primero.`);
+    if (!anterior) escrituras.push({ ref: doc(db, "alumnos", id), data: {
+      nombre: student.nombre, ci: student.ci, activo: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    } });
+    const numeroAgregacion = matricula?.numeroAgregacion || ++numero;
+    escrituras.push({ ref: documentoGestion(db, "matriculas", id, gestionId), data: {
+      alumnoId: id, cursoId: course.id, numeroAgregacion, estado: "activo",
+      ...(!matricula ? { createdAt: serverTimestamp() } : {}), updatedAt: serverTimestamp()
+    } });
+    resultado.push({ ...anterior, ...student, id, numeroLista: numeroAgregacion, numeroAgregacion, activo: true });
+  }
+  try {
+    await runTransaction(db, async (transaction) => {
+      const actual = await transaction.get(controlRef);
+      if (Number(actual.data()?.revisionAlumnos || 0) !== revision) {
+        const error = new Error("Otra carga de alumnos termino mientras se preparaba esta carga.");
+        error.code = "importacion/concurrente";
+        throw error;
+      }
+      for (const item of escrituras) transaction.set(item.ref, item.data, { merge: true });
+      transaction.update(controlRef, { revisionAlumnos: revision + 1, updatedAt: serverTimestamp() });
+    });
+  } catch (error) {
+    if (error.code === "importacion/concurrente" && (opciones.intento || 0) < 3) {
+      return importStudents(course, rawText, db, { gestionId, intento: (opciones.intento || 0) + 1 });
+    }
+    throw error;
+  }
+  return resultado;
 }
 
 export async function listStudents(courseId) {
-  const snap = await getDocs(query(
-    collection(firestore, "alumnos"),
-    where("cursoId", "==", courseId)
-  ));
-  return snap.docs
-    .map((item) => ({ id: item.id, ...item.data() }))
-    .sort((a, b) => Number(a.numeroLista || 0) - Number(b.numeroLista || 0));
-}
-
-export async function setStudentActive(studentId, active) {
-  await updateDoc(doc(firestore, "alumnos", studentId), {
-    activo: Boolean(active),
-    retirado: !Boolean(active),
-    course: deleteField(),
-    cursoNombre: deleteField(),
-    order: deleteField(),
-    password: deleteField(),
-    updatedAt: serverTimestamp()
-  });
+  return listarAlumnosMatriculados(courseId);
 }
 
 export async function getSchedule(courseId) {
@@ -143,7 +112,7 @@ export async function getSchedule(courseId) {
     periodos: periodsForCourse(courseId),
     clases: {}
   };
-  const snap = await getDoc(doc(firestore, "horarios", courseId));
+  const snap = await getDoc(documentoGestion(firestore, "horarios", courseId));
   if (!snap.exists()) return localShape;
 
   const data = snap.data() || {};
@@ -154,7 +123,7 @@ export async function getSchedule(courseId) {
 }
 
 export async function saveScheduleCell(courseId, periodId, dayId, subjectId) {
-  await setDoc(doc(firestore, "horarios", courseId), {
+  await setDoc(documentoGestion(firestore, "horarios", courseId), {
     clases: {
       [periodId]: {
         [dayId]: subjectId || null
@@ -165,7 +134,7 @@ export async function saveScheduleCell(courseId, periodId, dayId, subjectId) {
 }
 
 export async function getAllSchedules() {
-  const snap = await getDocs(collection(firestore, "horarios"));
+  const snap = await getDocs(coleccionGestion(firestore, "horarios"));
   const schedules = {};
   snap.docs.forEach((item) => {
     const data = item.data() || {};
@@ -179,7 +148,7 @@ export async function getAllSchedules() {
 }
 
 export async function saveFullSchedule(courseId, schedule) {
-  await setDoc(doc(firestore, "horarios", courseId), {
+  await setDoc(documentoGestion(firestore, "horarios", courseId), {
     clases: schedule?.clases || {},
     updatedAt: serverTimestamp()
   }, { merge: true });
@@ -225,7 +194,7 @@ export async function importHistoricalAttendance({ course, rows, trimestreId }) 
     const batch = writeBatch(firestore);
     chunk.forEach((row) => {
       const id = attendanceDocId(course.id, row.fecha, row.student.id);
-      batch.set(doc(firestore, "asistencias", id), {
+      batch.set(documentoGestion(firestore, "asistencias", id), {
         cursoId: course.id,
         alumnoId: row.student.id,
         fecha: row.fecha,
@@ -252,9 +221,13 @@ export async function importHistoricalGrades({ course, materiaId, rows, activiti
   if (!Array.isArray(rows) || !rows.length) throw new Error("No hay notas para guardar.");
 
   const subject = SUBJECTS.find((item) => item.id === materiaId);
+  const existingSnapshot = await getDocs(query(coleccionGestion(firestore, "actividades"), where("cursoId", "==", course.id), where("trimestreId", "==", trimestreId)));
+  const existingIds = new Map(existingSnapshot.docs.map((item) => [claveActividad(item.data()), item.id]));
   const activityMap = new Map();
   activities.forEach((activity) => {
-    const id = activityDocId(course.id, materiaId, activity.fecha, activity.titulo);
+    const key = claveActividad({ ...activity, cursoId: course.id, materiaId, trimestreId });
+    const id = existingIds.get(key) || doc(coleccionGestion(firestore, "actividades")).id;
+    existingIds.set(key, id);
     activityMap.set(activity.key, {
       id,
       cursoId: course.id,
@@ -267,6 +240,7 @@ export async function importHistoricalGrades({ course, materiaId, rows, activiti
       creadoPorUid: auth.currentUser?.uid || "",
       creadoPor: auth.currentUser?.email || "admin",
       origen: "carga_historica",
+      estadoRevision: "cerrada",
       activo: true,
       updatedAt: serverTimestamp()
     });
@@ -274,15 +248,16 @@ export async function importHistoricalGrades({ course, materiaId, rows, activiti
 
   const writes = [];
   activityMap.forEach((activity) => {
-    writes.push({ ref: doc(firestore, "actividades", activity.id), data: activity });
+    writes.push({ ref: documentoGestion(firestore, "actividades", activity.id), data: activity });
   });
 
   rows.forEach((row) => {
     const activity = activityMap.get(row.activityKey);
     const normalized = normalizeGrade(row.valor, activity?.maximo);
     if (!activity || !normalized) return;
+    activity.tieneCalificaciones = true;
     writes.push({
-      ref: doc(firestore, "calificaciones", gradeDocId(activity.id, row.student.id)),
+      ref: documentoGestion(firestore, "calificaciones", gradeDocId(activity.id, row.student.id)),
       data: {
         actividadId: activity.id,
         cursoId: course.id,
@@ -319,17 +294,17 @@ export async function importHistoricalGrades({ course, materiaId, rows, activiti
 
 export async function saveTeacherAssignments(teacherUid, assignments) {
   if (!teacherUid) throw new Error("Falta el docente para guardar asignaciones.");
-  await setDoc(doc(firestore, "asignaciones", teacherUid), {
+  await setDoc(documentoGestion(firestore, "asignaciones", teacherUid), {
     cursos: assignments || {},
     updatedAt: serverTimestamp()
   }, { merge: true });
 }
 export async function getAdminCounts() {
   const [students, teachers, directors, schedules] = await Promise.all([
-    getCountFromServer(query(collection(firestore, "alumnos"), where("activo", "==", true))),
-    getCountFromServer(query(collection(firestore, "docentes"), where("activo", "==", true))),
-    getCountFromServer(query(collection(firestore, "director"), where("activo", "==", true))),
-    getCountFromServer(collection(firestore, "horarios"))
+    getCountFromServer(query(coleccionGestion(firestore, "matriculas"), where("estado", "==", "activo"))),
+    getCountFromServer(query(collection(firestore, "usuarios"), where("rol", "==", "docente"), where("activo", "==", true))),
+    getCountFromServer(query(collection(firestore, "usuarios"), where("rol", "==", "director"), where("activo", "==", true))),
+    getCountFromServer(coleccionGestion(firestore, "horarios"))
   ]);
 
   return {

@@ -8,12 +8,7 @@ import {
   listDirectorStudents,
   subjectName
 } from "../../services/directorData.js";
-import {
-  activityHasGrades,
-  calculateStudentTerm,
-  gradeByActivityAndStudent,
-  studentActivityGrade
-} from "../docente/AcademicoDocente.js";
+import { calculateCourseTerm, calculateSubjectTerm, gradeByActivityAndStudent } from "../../services/calculoAcademico.js";
 import { DirectorShell } from "./DirectorShell.js";
 import { escapeDirectorHtml, refreshDirectorIcons } from "./DirectorUtils.js";
 
@@ -57,11 +52,6 @@ function termOf(item) {
 function gradeValue(value) {
   const parsed = Number(value);
   return Math.max(35, Math.min(100, Number.isFinite(parsed) ? Math.round(parsed) : 35));
-}
-
-function average(values = []) {
-  const valid = values.filter((value) => Number.isFinite(value));
-  return valid.length ? Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length) : 0;
 }
 
 function percentage(part, total) {
@@ -190,33 +180,25 @@ function rowsForCourse(courseId, activities, grades) {
     .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" }));
   const courseActivities = activities.filter((activity) => activity.cursoId === courseId);
   const gradeByKey = new Map(grades.map((grade) => [`${grade.actividadId}|${grade.alumnoId}`, grade]));
-  const subjects = SUBJECTS.filter((subject) => courseActivities.some((activity) => activity.materiaId === subject.id));
+  const courseTerm = calculateCourseTerm({
+    students, activities: notesData.allActivities, grades: notesData.grades,
+    attendanceRows: notesData.attendanceByTrimester[notesState.trimesterId] || [],
+    courseId, trimestreId: notesState.trimesterId
+  });
+  const resultsByStudent = new Map(courseTerm.studentResults.map((result) => [result.student.id, result]));
+  const subjects = SUBJECTS.filter((subject) => courseTerm.studentResults.some((result) => result.subjectResults[subject.id]));
 
   const rows = students.map((student, index) => {
-    const scores = [];
-    let pending = 0;
-    const subjectPending = {};
-    const subjectScores = Object.fromEntries(subjects.map((subject) => {
-      const subjectActivities = courseActivities.filter((activity) => activity.materiaId === subject.id);
-      const values = subjectActivities.map((activity) => {
-        const grade = gradeByKey.get(`${activity.id}|${student.id}`);
-        if (!grade) {
-          pending += 1;
-          subjectPending[subject.id] = (subjectPending[subject.id] || 0) + 1;
-        }
-        const value = gradeValue(grade?.nota);
-        scores.push(value);
-        return value;
-      });
-      return [subject.id, average(values)];
-    }));
+    const result = resultsByStudent.get(student.id);
+    const subjectScores = Object.fromEntries(subjects.map((subject) => [subject.id, result.subjectResults[subject.id]?.hasData ? result.subjectResults[subject.id].final : 0]));
+    const subjectPending = Object.fromEntries(subjects.map((subject) => [subject.id, result.subjectResults[subject.id]?.pendingCount || 0]));
     return {
       student,
       number: index + 1,
       subjectScores,
       subjectPending,
-      average: average(scores),
-      pending
+      average: result.average,
+      pending: result.pending
     };
   });
 
@@ -475,10 +457,18 @@ function hasAttendanceForTrimester(trimesterId) {
 }
 
 async function ensureAttendanceForTrimester(trimesterId) {
-  if (!notesData) return [];
-  if (hasAttendanceForTrimester(trimesterId)) return notesData.attendanceByTrimester[trimesterId];
-  const records = await listDirectorAttendanceByTrimester(trimesterId);
-  notesData.attendanceByTrimester[trimesterId] = records;
+  const data = notesData;
+  if (!data) return [];
+  if (Object.prototype.hasOwnProperty.call(data.attendanceByTrimester, trimesterId)) return data.attendanceByTrimester[trimesterId];
+  const pending = data.attendancePromises[trimesterId] || listDirectorAttendanceByTrimester(trimesterId);
+  data.attendancePromises[trimesterId] = pending;
+  let records;
+  try {
+    records = await pending;
+  } finally {
+    delete data.attendancePromises[trimesterId];
+  }
+  data.attendanceByTrimester[trimesterId] = records;
   return records;
 }
 
@@ -506,35 +496,11 @@ async function openStudentDetails(studentId) {
 }
 
 function subjectReportData(courseView, row, subject) {
-  const termActivities = (notesData.allActivities || []).filter((activity) => (
-    termOf(activity) === notesState.trimesterId &&
-    activity.cursoId === courseView.course.id &&
-    activity.materiaId === subject.id
-  ));
-  const termActivityIds = new Set(termActivities.map((activity) => activity.id));
-  const termGrades = notesData.grades.filter((grade) => termActivityIds.has(grade.actividadId));
-  const gradesMap = gradeByActivityAndStudent(termGrades);
-  const gradedActivities = termActivities
-    .filter((activity) => !activity.interno && !["ser", "auto"].includes(String(activity.tipo || "").toLowerCase()))
-    .filter((activity) => activityHasGrades(activity, gradesMap));
-  const serCriteria = termActivities.filter((activity) => String(activity.tipo || "").toLowerCase() === "ser");
-  const autoActivity = termActivities.find((activity) => String(activity.tipo || "").toLowerCase() === "auto") || null;
-  const autoGradeRecord = autoActivity ? gradesMap[autoActivity.id]?.[row.student.id] : null;
-  const serExtraValues = serCriteria.map((activity) => studentActivityGrade(activity, row.student.id, gradesMap));
-  const courseStudentIds = new Set(courseView.rows.map((item) => item.student.id));
-  const attendanceRows = (notesData.attendanceByTrimester?.[notesState.trimesterId] || []).filter((record) => (
-    record.cursoId ? record.cursoId === courseView.course.id : courseStudentIds.has(record.alumnoId)
-  ));
-  const calc = calculateStudentTerm(
-    row.student,
-    gradedActivities,
-    gradesMap,
-    attendanceRows,
-    serExtraValues,
-    autoGradeRecord?.nota ?? null
-  );
-  const pendingCount = gradedActivities.filter((activity) => !gradesMap[activity.id]?.[row.student.id]).length;
-  return { calc, serCriteria, autoActivity, autoGradeRecord, pendingCount };
+  const activities = (notesData.allActivities || []).filter((activity) => termOf(activity) === notesState.trimesterId && activity.cursoId === courseView.course.id);
+  const gradesMap = gradeByActivityAndStudent(notesData.grades);
+  const attendanceRows = notesData.attendanceByTrimester[notesState.trimesterId] || [];
+  const calc = calculateSubjectTerm(row.student, subject.id, activities, gradesMap, attendanceRows);
+  return { calc, serCriteria: calc.serCriteria, autoActivity: calc.autoActivity, autoGradeRecord: calc.autoGradeRecord, pendingCount: calc.pendingCount };
 }
 
 function subjectReportContent(courseView, row, subject) {
@@ -694,9 +660,17 @@ function loadingState(message = "Cargando notas...") {
   root.innerHTML = `<section class="grid min-h-72 place-items-center rounded-lg border border-slate-200 bg-white"><div class="text-center"><span class="mx-auto block h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-school-green"></span><p class="mt-3 text-xs text-slate-500">${message}</p></div></section>`;
 }
 
+function loadError(message) {
+  const root = document.querySelector("[data-director-notes-root]");
+  if (!root) return;
+  root.innerHTML = `${toolbar()}<section class="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-8 text-center"><p class="text-sm font-semibold text-red-700">${escapeDirectorHtml(message)}</p><button type="button" data-director-note-retry-load class="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700">Reintentar</button></section>`;
+  refreshDirectorIcons();
+}
+
 async function loadNotes(force = false) {
   if (notesData && !force) {
     applyRequestedStudent();
+    await ensureAttendanceForTrimester(notesState.trimesterId);
     renderNotesContent();
     return;
   }
@@ -709,9 +683,10 @@ async function loadNotes(force = false) {
   const activities = allActivities.filter((item) => (
     !item.interno && !["material", "materiales"].includes(String(item.tipo || "").toLowerCase())
   ));
-  notesData = { students, activities, allActivities, grades, attendanceByTrimester: {}, updatedAt: Date.now() };
+  notesData = { students, activities, allActivities, grades, attendanceByTrimester: {}, attendancePromises: {}, updatedAt: Date.now() };
   notesState.trimesterId = preferredTrimester(activities, grades);
   applyRequestedStudent();
+  await ensureAttendanceForTrimester(notesState.trimesterId);
   renderNotesContent();
 }
 
@@ -763,7 +738,13 @@ function bindInteractions() {
       notesState.fromStudents = false;
       notesState.reportLoading = false;
       notesState.reportError = "";
-      renderNotesContent();
+      loadingState("Calculando notas del trimestre...");
+      try {
+        await ensureAttendanceForTrimester(notesState.trimesterId);
+        renderNotesContent();
+      } catch {
+        loadError("No se pudo cargar la asistencia para calcular las notas.");
+      }
       return;
     }
     if (button.dataset.directorNoteCourse) {
@@ -820,12 +801,14 @@ function bindInteractions() {
       renderNotesContent();
       return;
     }
+    if ("directorNoteRetryLoad" in button.dataset) {
+      button.disabled = true;
+      await loadNotes(false).catch(() => loadError("No se pudieron cargar las notas."));
+      return;
+    }
     if ("directorNoteRefresh" in button.dataset) {
       button.disabled = true;
-      await loadNotes(true).catch(() => {
-        const currentRoot = document.querySelector("[data-director-notes-root]");
-        if (currentRoot) currentRoot.insertAdjacentHTML("afterbegin", `<p class="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">No se pudieron actualizar las notas.</p>`);
-      });
+      await loadNotes(true).catch(() => loadError("No se pudieron actualizar las notas."));
     }
   });
   root.addEventListener("change", (event) => {
@@ -850,7 +833,6 @@ export async function bindDirectorNotes(route) {
   try {
     await loadNotes(false);
   } catch {
-    const root = document.querySelector("[data-director-notes-root]");
-    if (root) root.innerHTML = `<section class="rounded-lg border border-red-200 bg-red-50 px-4 py-8 text-center"><p class="text-sm font-semibold text-red-700">No se pudieron cargar las notas.</p><button type="button" data-director-note-refresh class="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700">Reintentar</button></section>`;
+    loadError("No se pudieron cargar las notas.");
   }
 }

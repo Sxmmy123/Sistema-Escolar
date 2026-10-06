@@ -2,20 +2,23 @@ import { icon } from "../../ui/dom.js";
 import {
   COURSES,
   getDirectorAttendanceSettings,
-  listDirectorActivities,
+  listDirectorAllActivities,
   listDirectorAttendanceByTrimester,
   listDirectorGrades,
   listDirectorStudents
 } from "../../services/directorData.js";
 import { escapeDirectorHtml, refreshDirectorIcons } from "./DirectorUtils.js";
+import { calculateCourseTerm } from "../../services/calculoAcademico.js";
+import { auth } from "../../firebase/client.js";
+import { claveCache } from "../../services/rutasFirestore.js";
 
 const TRIMESTERS = [
   { id: "t1", label: "1er trimestre" },
   { id: "t2", label: "2do trimestre" },
   { id: "t3", label: "3er trimestre" }
 ];
-const ALERT_CACHE_KEY = "director_alertas_estudiantes_v1";
-const ALERT_CACHE_VERSION = 1;
+const alertCacheKey = () => claveCache("director_alertas", auth.currentUser?.uid || "");
+const ALERT_CACHE_VERSION = 2;
 const ALERT_CACHE_TTL = 10 * 60 * 1000;
 
 let alertsPromise = null;
@@ -51,18 +54,9 @@ function preferredTrimester(activities, grades) {
   return [...TRIMESTERS].sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0))[0]?.id || "t1";
 }
 
-function average(values = []) {
-  return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
-}
-
-function gradeValue(value) {
-  const parsed = Number(value);
-  return Math.max(35, Math.min(100, Number.isFinite(parsed) ? Math.round(parsed) : 35));
-}
-
 function readAlertCache() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(ALERT_CACHE_KEY) || "null");
+    const parsed = JSON.parse(localStorage.getItem(alertCacheKey()) || "null");
     return parsed?.version === ALERT_CACHE_VERSION ? parsed.snapshot || null : null;
   } catch {
     return null;
@@ -71,7 +65,7 @@ function readAlertCache() {
 
 function writeAlertCache(snapshot) {
   try {
-    localStorage.setItem(ALERT_CACHE_KEY, JSON.stringify({ version: ALERT_CACHE_VERSION, snapshot }));
+    localStorage.setItem(alertCacheKey(), JSON.stringify({ version: ALERT_CACHE_VERSION, snapshot }));
   } catch {
     // La campana sigue disponible aunque el navegador bloquee localStorage.
   }
@@ -102,25 +96,11 @@ function attendanceAlerts(students, records, absenceLimit) {
     .sort((a, b) => b.absences - a.absences || String(a.student.nombre || "").localeCompare(String(b.student.nombre || ""), "es"));
 }
 
-function gradeAlerts(students, activities, grades, trimesterId, threshold) {
-  const termActivities = activities.filter((activity) => termOf(activity) === trimesterId);
-  const activityIds = new Set(termActivities.map((activity) => activity.id));
-  const termGrades = grades.filter((grade) => activityIds.has(grade.actividadId));
-  const startedIds = new Set(termGrades.map((grade) => grade.actividadId).filter(Boolean));
-  const gradeByKey = new Map(termGrades.map((grade) => [`${grade.actividadId}|${grade.alumnoId}`, grade]));
-  const activitiesByCourse = termActivities.reduce((result, activity) => {
-    if (!startedIds.has(activity.id) || !activity.cursoId) return result;
-    result[activity.cursoId] = result[activity.cursoId] || [];
-    result[activity.cursoId].push(activity);
-    return result;
-  }, {});
-
-  return students.map((student) => {
-    const studentActivities = activitiesByCourse[student.cursoId] || [];
-    if (!studentActivities.length) return null;
-    const score = average(studentActivities.map((activity) => gradeValue(gradeByKey.get(`${activity.id}|${student.id}`)?.nota)));
-    return score < threshold ? { student, score } : null;
-  }).filter(Boolean)
+function gradeAlerts(students, activities, grades, attendanceRows, trimestreId, threshold) {
+  return [...new Set(students.map((student) => student.cursoId))]
+    .flatMap((courseId) => calculateCourseTerm({ students, activities, grades, attendanceRows, courseId, trimestreId }).studentResults)
+    .filter((result) => result.average > 0 && result.average < threshold)
+    .map((result) => ({ student: result.student, score: result.average }))
     .sort((a, b) => a.score - b.score || String(a.student.nombre || "").localeCompare(String(b.student.nombre || ""), "es"));
 }
 
@@ -129,7 +109,7 @@ async function buildAlertSnapshot() {
   const gradeThreshold = Math.max(35, Math.min(100, Number(sessionStorage.getItem("directorNotasMinima")) || 51));
   const [students, activities, grades, settings] = await Promise.all([
     listDirectorStudents(),
-    listDirectorActivities(),
+    listDirectorAllActivities(),
     listDirectorGrades(),
     getDirectorAttendanceSettings()
   ]);
@@ -137,7 +117,7 @@ async function buildAlertSnapshot() {
   const attendance = await listDirectorAttendanceByTrimester(trimesterId);
   const activeStudents = students.filter((student) => student.activo !== false);
   const absences = attendanceAlerts(activeStudents, attendance, settings.limiteFaltas);
-  const lowGrades = gradeAlerts(activeStudents, activities, grades, trimesterId, gradeThreshold);
+  const lowGrades = gradeAlerts(activeStudents, activities, grades, attendance, trimesterId, gradeThreshold);
   const items = [
     ...absences.slice(0, 3).map(({ student, absences: total }) => ({
       kind: "attendance",

@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Del registro de asistencia a la nota trimestral",
+    "viewBox": [1280, 860],
+    "column_fit": "spread",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "actividad",
+        "label": "Agendar y tomar asistencia",
+        "focus": ["docente", "sistema", "firestore"],
+        "note": "La actividad queda ligada a un curso, materia y trimestre; su asistencia se toma en la fecha agendada."
+      },
+      {
+        "id": "calificacion",
+        "label": "Calificar al presente",
+        "focus": ["docente", "alumno", "sistema", "firestore"],
+        "note": "Presente o atraso habilita Calificar; el switch Ignorar asistencia puede saltar ese filtro."
+      },
+      {
+        "id": "regularizacion",
+        "label": "Falta, licencia o no presentó",
+        "focus": ["alumno", "docente", "sistema", "firestore"],
+        "note": "Falta o licencia solo generan pendiente si había actividad. La licencia no recibe cero automático."
+      },
+      {
+        "id": "nota",
+        "label": "Notas y Boleta",
+        "focus": ["firestore", "notas_boleta", "sistema"],
+        "note": "La asistencia entra en SER; el puntaje de la actividad regularizada también llega al trimestre."
+      }
+    ]
+  },
+  "participants": [
+    { "id": "docente", "type": "frontend", "label": "Docente" },
+    { "id": "alumno", "type": "external", "label": "Alumno" },
+    { "id": "sistema", "type": "backend", "label": "Sistema" },
+    { "id": "firestore", "type": "database", "label": "Firestore" },
+    { "id": "notas_boleta", "type": "frontend", "label": "Notas y Boleta" }
+  ],
+  "segments": [
+    { "from": 150, "to": 240, "label": "Curso, trimestre y actividad" },
+    { "from": 248, "to": 306, "label": "Asistencia y habilitación" },
+    { "from": 314, "to": 490, "label": "Revisión del grupo" },
+    { "from": 498, "to": 626, "label": "Pendientes y regularización" },
+    { "from": 634, "to": 735, "label": "Resultado trimestral" }
+  ],
+  "messages": [
+    { "id": "seleccionar", "from": "docente", "to": "sistema", "y": 160, "label": "Selecciona curso + trimestre", "variant": "emphasis" },
+    { "id": "agendar", "from": "docente", "to": "firestore", "y": 192, "label": "Agenda materia, actividad y fecha", "variant": "default" },
+    { "id": "actividad", "from": "firestore", "to": "sistema", "y": 224, "label": "Actividad creada para ese curso", "variant": "emphasis" },
+    { "id": "asistencia", "from": "docente", "to": "firestore", "y": 256, "label": "Toma y guarda asistencia del día", "variant": "default" },
+    { "id": "estados", "from": "firestore", "to": "sistema", "y": 288, "label": "Lee el estado: presente · atraso · falta · licencia", "variant": "default" },
+    { "id": "habilitado", "from": "sistema", "to": "docente", "y": 320, "label": "Presente/atraso: habilitado para Calificar", "variant": "emphasis", "note": "Ignorar asistencia es un override manual del filtro." },
+    { "id": "ausencia", "from": "sistema", "to": "docente", "y": 352, "label": "Falta/licencia: pendiente si existe actividad", "variant": "security" },
+    { "id": "entrega", "from": "alumno", "to": "docente", "y": 384, "label": "Entrega la actividad (si la presenta)", "variant": "default" },
+    { "id": "puntaje", "from": "docente", "to": "firestore", "y": 416, "label": "Guarda puntaje y abre revisión en_proceso", "variant": "emphasis" },
+    { "id": "sin_entrega", "from": "docente", "to": "firestore", "y": 448, "label": "Presente, pero no entregó: No presentó", "variant": "security" },
+    { "id": "revision", "from": "docente", "to": "sistema", "y": 480, "label": "Termina la revisión de todo el grupo", "variant": "default" },
+    { "id": "cierre", "from": "sistema", "to": "firestore", "y": 512, "label": "Cierra lote; faltantes sin licencia quedan No presentó", "variant": "security" },
+    { "id": "regularizar", "from": "firestore", "to": "docente", "y": 544, "label": "Habilita pendientes desde el día siguiente", "variant": "emphasis" },
+    { "id": "regularizada", "from": "docente", "to": "alumno", "y": 576, "label": "Revisa y califica en Regularización", "variant": "emphasis" },
+    { "id": "guardar_regularizacion", "from": "docente", "to": "firestore", "y": 608, "label": "Guarda en la calificación de esa actividad", "variant": "default" },
+    { "id": "calificacion", "from": "firestore", "to": "notas_boleta", "y": 640, "label": "Carga puntajes calificados del trimestre", "variant": "emphasis" },
+    { "id": "asistencia_nota", "from": "firestore", "to": "notas_boleta", "y": 672, "label": "Carga también las asistencias registradas", "variant": "default" },
+    { "id": "trimestre", "from": "sistema", "to": "notas_boleta", "y": 704, "label": "Calcula el resultado y actualiza la Boleta", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "docente", "from": 158, "to": 624, "type": "frontend" },
+    { "participant": "sistema", "from": 158, "to": 548, "type": "backend" },
+    { "participant": "firestore", "from": 180, "to": 680, "type": "database" },
+    { "participant": "notas_boleta", "from": 632, "to": 714, "type": "frontend" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Quién puede calificar",
+      "items": [
+        "Presente o atraso habilita al alumno para la revisión.",
+        "El switch Ignorar asistencia permite calificar sin ese filtro.",
+        "La actividad pertenece solo al curso y trimestre con que fue agendada."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Regularización y responsabilidad",
+      "items": [
+        "Falta o licencia solo cuentan si había una actividad pendiente.",
+        "La licencia evita el cero automático; al regularizar conserva 100 en Responsabilidad.",
+        "La entrega tardía o tras una falta aporta 50 a Responsabilidad."
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Cálculo trimestral",
+      "items": [
+        "SER/10 promedia asistencia, puntualidad, responsabilidad y criterios SER.",
+        "Saber/45 + Hacer/40 + Autoevaluación/5 completan la nota final.",
+        "La nota regularizada se guarda en la actividad y aparece en Notas y Boleta."
+      ]
+    }
+  ]
+}

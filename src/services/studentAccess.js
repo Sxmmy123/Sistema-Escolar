@@ -1,88 +1,99 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { firestore } from "../firebase/client.js";
+import { createUserWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
+import { deleteField, doc, getDoc, increment, serverTimestamp, writeBatch } from "firebase/firestore";
+import { auth, creatorAuth, firestore } from "../firebase/client.js";
+import { usernameToAuthEmail } from "./users.js";
+import { generateStudentPassword, normalizeStudentAccessKey } from "./identidadAlumno.js";
+import { documentoGestion } from "./rutasFirestore.js";
 
-export function normalizeStudentAccessKey(value) {
-  return String(value || "")
-    .trim()
-    .replace(/\s+/g, "")
-    .toLowerCase();
-}
+export { normalizeStudentAccessKey } from "./identidadAlumno.js";
 
-function studentPassword(username) {
-  return String(username || "");
-}
+const defaultClients = { auth, creatorAuth, firestore };
 
-export async function ensureStudentLocalAccess(student, course = null) {
+export async function createStudentAuthAccess(student, course = null, clients = defaultClients) {
+  const adminUid = clients.auth.currentUser?.uid;
+  if (!adminUid) throw new Error("Ingresa como administrador para preparar los accesos.");
   const usuario = normalizeStudentAccessKey(student?.ci || student?.usuario || student?.id);
-  if (!usuario || !student?.id) {
-    return { created: false, skipped: true, reason: "Alumno sin usuario o id." };
+  if (!student?.id || !/^[a-z0-9._-]+$/i.test(usuario)) throw new Error("El alumno no tiene un usuario valido.");
+  const studentRef = doc(clients.firestore, "alumnos", student.id);
+  const matriculaRef = documentoGestion(clients.firestore, "matriculas", student.id);
+  const usernameRef = doc(clients.firestore, "indice_accesos", usuario);
+  const [studentSnap, matriculaSnap, usernameSnap] = await Promise.all([getDoc(studentRef), getDoc(matriculaRef), getDoc(usernameRef)]);
+  if (!studentSnap.exists()) throw new Error("El alumno ya no esta registrado. Actualiza la lista antes de crear su acceso.");
+  const registeredStudent = studentSnap.data();
+  if (normalizeStudentAccessKey(registeredStudent.ci || registeredStudent.usuario || student.id) !== usuario) {
+    throw new Error("El usuario del alumno cambio. Actualiza la lista antes de crear su acceso.");
   }
-
-  const ref = doc(firestore, "accesos_alumnos", usuario);
-  const snap = await getDoc(ref);
-  const base = {
-    alumnoId: student.id,
-    usuario,
-    ci: String(student.ci || usuario),
-    cursoId: student.cursoId || course?.id || "",
-    activo: student.activo !== false,
-    password: studentPassword(usuario),
-    updatedAt: serverTimestamp()
-  };
-
-  if (snap.exists()) {
-    await setDoc(ref, base, { merge: true });
-    return { created: false, skipped: false, usuario, password: studentPassword(usuario) };
+  const courseId = matriculaSnap.exists() ? matriculaSnap.data().cursoId : "";
+  if (!courseId || (course?.id && courseId !== course.id)) {
+    throw new Error("El curso del alumno cambio o no esta asignado. Actualiza la lista antes de crear su acceso.");
   }
+  const existingUid = registeredStudent.authUid || (usernameSnap.exists() ? usernameSnap.data().uid : "");
+  if (usernameSnap.exists() && existingUid && usernameSnap.data().uid !== existingUid) {
+    throw new Error("Ese usuario ya esta vinculado a otra cuenta. No se modifico ningun acceso.");
+  }
+  const active = registeredStudent.activo !== false && matriculaSnap.data().estado === "activo";
+  let credential = null;
+  let uid = existingUid;
+  let authEmail = registeredStudent.authEmail || usernameToAuthEmail(usuario);
+  let temporary = null;
 
-  await setDoc(ref, {
-    ...base,
-    createdAt: serverTimestamp()
-  });
+  try {
+    if (uid) {
+      const profile = await getDoc(doc(clients.firestore, "usuarios", uid));
+      if (!profile.exists() || profile.data().rol !== "alumno" || profile.data().alumnoId !== student.id) {
+        throw new Error("El usuario ya pertenece a otra cuenta. No se modifico esa cuenta.");
+      }
+      authEmail = profile.data().authEmail || authEmail;
+    } else {
+      temporary = generateStudentPassword();
+      credential = await createUserWithEmailAndPassword(clients.creatorAuth, authEmail, temporary);
+      uid = credential.user.uid;
+    }
 
-  return { created: true, skipped: false, usuario, password: studentPassword(usuario) };
+    const batch = writeBatch(clients.firestore);
+    batch.set(doc(clients.firestore, "usuarios", uid), {
+      nombre: registeredStudent.nombre || usuario, usuario, authEmail, rol: "alumno",
+      alumnoId: student.id, activo: active,
+      ...(credential ? { createdAt: serverTimestamp(), createdBy: adminUid } : {}),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    batch.set(studentRef, { authUid: uid, authEmail, password: deleteField(), updatedAt: serverTimestamp() }, { merge: true });
+    batch.set(usernameRef, { uid, authEmail });
+    if (clients.auth.currentUser?.uid !== adminUid) throw new Error("La sesion cambio antes de guardar el acceso. Vuelve a ingresar como administrador.");
+    await batch.commit();
+    return { created: Boolean(credential), usuario, uid, alumnoId: student.id, nombre: registeredStudent.nombre || usuario, password: temporary || "" };
+  } catch (error) {
+    if (credential) {
+      try {
+        await deleteUser(credential.user);
+      } catch {
+        throw new Error("No se guardo el perfil y no se pudo revertir la cuenta creada. Administracion debe revisar Firebase Authentication antes de reintentar.");
+      }
+    }
+    if (error.code === "auth/email-already-in-use") {
+      throw new Error("Ya existe una cuenta en Authentication para este usuario, pero falta vincularla. Administracion debe revisar esa cuenta; no se cambio su contrasena.");
+    }
+    throw error;
+  } finally {
+    if (credential) await signOut(clients.creatorAuth).catch(() => {});
+  }
 }
 
-export async function setStudentAccessActive(student, active) {
-  const usuario = normalizeStudentAccessKey(student?.ci || student?.usuario || student?.id);
-  if (!usuario) return;
-  await setDoc(doc(firestore, "accesos_alumnos", usuario), {
-    alumnoId: student.id,
-    usuario,
-    ci: String(student.ci || usuario),
-    cursoId: student.cursoId || "",
+export async function setStudentAccessActive(student, active, clients = defaultClients) {
+  if (!student?.id) throw new Error("No se encontro el alumno.");
+  const ref = doc(clients.firestore, "alumnos", student.id);
+  const snapshot = await getDoc(ref);
+  if (!snapshot.exists()) throw new Error("El alumno ya no esta registrado.");
+  const uid = snapshot.data().authUid || "";
+  const batch = writeBatch(clients.firestore);
+  batch.update(doc(clients.firestore, "alumnos", student.id), {
     activo: Boolean(active),
-    password: studentPassword(usuario),
     updatedAt: serverTimestamp()
-  }, { merge: true });
-}
-
-export async function loginStudentAccess(login, password) {
-  const usuario = normalizeStudentAccessKey(login);
-  if (!usuario) throw new Error("Escribe el usuario o CI del alumno.");
-
-  const snap = await getDoc(doc(firestore, "accesos_alumnos", usuario));
-  if (!snap.exists()) {
-    throw new Error("No existe acceso de alumno con ese usuario.");
-  }
-
-  const access = snap.data() || {};
-  if (access.activo === false) {
-    throw new Error("El acceso del alumno esta deshabilitado.");
-  }
-
-  if (normalizeStudentAccessKey(access.password) !== normalizeStudentAccessKey(password)) {
-    throw new Error("La contrasena del alumno no es correcta.");
-  }
-
-  if (!access.alumnoId) {
-    throw new Error("El acceso del alumno no tiene alumno vinculado.");
-  }
-
-  return {
-    usuario,
-    alumnoId: access.alumnoId,
-    cursoId: access.cursoId || "",
-    ci: access.ci || usuario
-  };
+  });
+  batch.update(documentoGestion(clients.firestore, "matriculas", student.id), {
+    estado: active ? "activo" : "retirado", updatedAt: serverTimestamp()
+  });
+  if (uid) batch.update(doc(clients.firestore, "usuarios", uid), { activo: Boolean(active), updatedAt: serverTimestamp() });
+  batch.update(doc(clients.firestore, "configuracion", "sistema"), { revisionAlumnos: increment(1), updatedAt: serverTimestamp() });
+  await batch.commit();
 }

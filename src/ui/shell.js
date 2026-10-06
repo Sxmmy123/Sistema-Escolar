@@ -205,7 +205,8 @@ export function appShell(role, activeRoute, content) {
   const items = navItems[role] || [];
   const title = role ? role.charAt(0).toUpperCase() + role.slice(1) : "Sistema";
   const isDocenteDashboard = role === "docente" && activeRoute === "/docente";
-  const docenteMainFixedClass = isDocenteDashboard ? "lg:h-screen lg:max-w-none lg:overflow-hidden" : "";
+  const docenteMainFixedClass = isDocenteDashboard ? "lg:h-[calc(100dvh-3.5rem)] lg:max-w-none lg:overflow-hidden" : "";
+  const docentePageTitle = items.find((item) => item[1] === `#${activeRoute}`)?.[0] || "Panel";
 
   if (role === "docente") {
     return `
@@ -214,15 +215,32 @@ export function appShell(role, activeRoute, content) {
           ${sidebarNav(items, activeRoute, title, "desktop")}
         </aside>
 
+        <header class="sticky top-0 z-30 hidden h-14 items-center gap-4 border-b border-slate-200 bg-white/90 px-4 shadow-sm backdrop-blur lg:flex lg:px-8">
+          <div class="min-w-0 flex-1">
+            <p class="text-[11px] text-slate-500">Area docente</p>
+            <p class="truncate text-sm font-semibold text-slate-900">${docentePageTitle}</p>
+          </div>
+          <button type="button" data-teacher-alert-toggle aria-label="Abrir notificaciones" aria-expanded="false" aria-controls="teacher-alert-panel" title="Notificaciones" class="relative grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-800 transition hover:border-green-300 hover:bg-green-50">
+            ${icon("bell", "h-5 w-5")}
+            <span data-teacher-alert-badge class="absolute -right-1 -top-1 hidden min-w-5 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-5 text-white"></span>
+          </button>
+        </header>
+
         <header class="sticky top-0 z-30 border-b border-amber-900/10 bg-white/90 shadow-sm backdrop-blur lg:hidden">
           <div class="flex h-14 items-center justify-between gap-3 px-3">
             <a href="#/docente" class="flex min-w-0 items-center gap-3 font-black text-school-bark">
               <span class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white shadow-soft ring-1 ring-amber-900/10"><img src="${SCHOOL_LOGO}" alt="Escudo Nueva Bolivia" class="h-full w-full object-contain p-1" /></span>
               <span class="truncate text-sm">Panel docente</span>
             </a>
-            <button class="grid h-9 w-9 place-items-center rounded-lg border border-amber-900/10 bg-white text-school-navy" data-action="open-menu" aria-label="Abrir menu" aria-expanded="false">
-              ${icon("menu", "h-4 w-4")}
-            </button>
+            <div class="flex shrink-0 items-center gap-2">
+              <button type="button" data-teacher-alert-toggle aria-label="Abrir notificaciones" aria-expanded="false" aria-controls="teacher-alert-panel" class="relative grid h-9 w-9 place-items-center rounded-lg border border-amber-900/10 bg-white text-school-green">
+                ${icon("bell", "h-4 w-4")}
+                <span data-teacher-alert-badge class="absolute -right-1 -top-1 hidden min-w-4 rounded-full bg-red-600 px-0.5 text-center text-[9px] leading-4 text-white"></span>
+              </button>
+              <button class="grid h-9 w-9 place-items-center rounded-lg border border-amber-900/10 bg-white text-school-navy" data-action="open-menu" aria-label="Abrir menu" aria-expanded="false">
+                ${icon("menu", "h-4 w-4")}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -230,6 +248,21 @@ export function appShell(role, activeRoute, content) {
           ${sidebarNav(items, activeRoute, title, "mobile")}
         </aside>
         <div class="fixed inset-0 z-40 hidden bg-slate-950/40 lg:hidden" data-sidebar-backdrop></div>
+        <section id="teacher-alert-panel" data-teacher-alert-panel class="teacher-notification-panel z-[65] hidden overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl" aria-label="Notificaciones del docente">
+          <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+            <h2 class="text-sm font-semibold text-slate-950">Notificaciones</h2>
+            <div class="flex items-center gap-1">
+              <button type="button" data-teacher-alert-refresh class="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="Actualizar notificaciones" title="Actualizar">${icon("refresh-cw", "h-4 w-4")}</button>
+              <button type="button" data-teacher-alert-close class="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="Cerrar notificaciones">${icon("x", "h-4 w-4")}</button>
+            </div>
+          </div>
+          <div data-teacher-alert-content class="max-h-[min(31rem,calc(100dvh-8rem))] overflow-y-auto" aria-live="polite">
+            <p class="p-4 text-sm text-slate-500">Cargando avisos...</p>
+          </div>
+        </section>
+        <div data-teacher-alert-modal class="fixed inset-0 z-[70] hidden items-center justify-center bg-slate-950/60 p-3 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="teacher-alert-modal-title">
+          <div data-teacher-alert-modal-content class="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-lg bg-white shadow-2xl"></div>
+        </div>
         ${accountSettingsModal()}
 
         <main class="mx-auto max-w-7xl px-2.5 py-2.5 sm:px-4 sm:py-4 ${docenteMainFixedClass}" data-teacher-ui>${content}</main>

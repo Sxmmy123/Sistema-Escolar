@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "avisos",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "gestionId", "order": "ASCENDING" },
+        { "fieldPath": "activa", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

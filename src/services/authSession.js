@@ -1,6 +1,7 @@
 ﻿import { doc, getDoc } from "firebase/firestore";
 import { ADMIN_USER } from "../firebase/config.js";
 import { firestore } from "../firebase/client.js";
+import { studentIdFromProfile } from "./identidadAlumno.js";
 
 const validRoles = new Set(["admin", "docente", "director", "alumno"]);
 
@@ -25,6 +26,8 @@ export async function resolveUserRole(user) {
   if (!validRoles.has(role)) {
     throw new Error("El perfil del usuario no tiene un rol valido.");
   }
+
+  if (role === "alumno") studentIdFromProfile(data);
 
   return role;
 }

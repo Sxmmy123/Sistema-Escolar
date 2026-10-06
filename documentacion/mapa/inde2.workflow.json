@@ -1,0 +1,53 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Actividad, asistencia y nota",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "recorrido", "label": "Recorrido completo", "focus": ["periodo", "agenda", "actividad", "asistencia", "revision", "entregado", "pendiente", "regularizacion", "calificacion", "notas"], "note": "La fecha de la actividad activa la asistencia. La asistencia no equivale a entrega ni a nota." },
+      { "id": "entrega", "label": "Presentó", "focus": ["actividad", "asistencia", "revision", "entregado", "calificacion", "notas"], "note": "Presente o atraso permite revisar. Una actividad recibida puede seguir pendiente de calificar." },
+      { "id": "falta", "label": "Falta o licencia", "focus": ["actividad", "asistencia", "pendiente", "regularizacion", "calificacion", "notas"], "note": "Falta o licencia con actividad agendada lleva a Regularización. Solo la entrega admitida y calificada genera nota." },
+      { "id": "no-entrego", "label": "Asistió sin entregar", "focus": ["asistencia", "revision", "pendiente", "regularizacion", "calificacion", "notas"], "note": "Estar presente no demuestra entrega. Si el docente marca No presentó, el alumno puede regularizar después." }
+    ]
+  },
+  "lanes": [
+    { "id": "docente", "label": "Docente" },
+    { "id": "sistema", "label": "Sistema" },
+    { "id": "datos", "label": "Firestore" },
+    { "id": "resultados", "label": "Notas y Boleta" },
+    { "id": "excepciones", "label": "Por regularizar", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "plan", "label": "Curso y fecha", "fromCol": 0, "toCol": 1 },
+    { "id": "dia", "label": "Día de la actividad", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "resultado", "label": "Entrega y resultado", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["periodo", "agenda", "actividad", "asistencia", "revision", "entregado", "calificacion", "notas"],
+  "nodes": [
+    { "id": "periodo", "lane": "docente", "col": 0, "type": "external", "label": "Curso y trimestre", "width": 142 },
+    { "id": "agenda", "lane": "docente", "col": 1, "type": "frontend", "label": "Agendar actividad", "tag": "fecha exacta", "width": 142 },
+    { "id": "actividad", "lane": "sistema", "col": 1, "type": "backend", "label": "Actividad agendada", "width": 142 },
+    { "id": "asistencia", "lane": "docente", "col": 2, "type": "frontend", "label": "Tomar asistencia", "tag": "P · A · F · L", "width": 142 },
+    { "id": "revision", "lane": "docente", "col": 3, "type": "frontend", "label": "Revisar entrega", "width": 142 },
+    { "id": "entregado", "lane": "sistema", "col": 4, "type": "backend", "label": "Entregó", "tag": "pendiente de calificar", "width": 142 },
+    { "id": "pendiente", "lane": "excepciones", "col": 3, "type": "security", "label": "Actividad pendiente", "width": 142 },
+    { "id": "regularizacion", "lane": "excepciones", "col": 4, "type": "frontend", "label": "Regularización", "width": 142 },
+    { "id": "calificacion", "lane": "datos", "col": 4, "type": "database", "label": "Nota registrada", "width": 142 },
+    { "id": "notas", "lane": "resultados", "col": 5, "type": "frontend", "label": "Notas y Boleta", "width": 142 }
+  ],
+  "edges": [
+    { "id": "periodo-agenda", "from": "periodo", "to": "agenda", "label": "elige curso y trimestre", "role": "main", "variant": "emphasis" },
+    { "id": "agenda-actividad", "from": "agenda", "to": "actividad", "label": "fija fecha de entrega", "role": "main" },
+    { "id": "actividad-asistencia", "from": "actividad", "to": "asistencia", "label": "llega el día señalado", "role": "main" },
+    { "id": "asistencia-revision", "from": "asistencia", "to": "revision", "label": "presente o atraso", "role": "main", "variant": "emphasis" },
+    { "id": "asistencia-pendiente", "from": "asistencia", "to": "pendiente", "label": "falta o licencia", "role": "branch", "variant": "security" },
+    { "id": "revision-entregado", "from": "revision", "to": "entregado", "label": "presentó; aún sin nota", "role": "main" },
+    { "id": "revision-pendiente", "from": "revision", "to": "pendiente", "label": "asistió y no presentó", "role": "branch", "variant": "security" },
+    { "id": "entregado-calificacion", "from": "entregado", "to": "calificacion", "label": "docente revisa y califica", "role": "main", "variant": "emphasis" },
+    { "id": "pendiente-regularizacion", "from": "pendiente", "to": "regularizacion", "label": "presenta después", "role": "branch" },
+    { "id": "regularizacion-calificacion", "from": "regularizacion", "to": "calificacion", "label": "docente admite y califica", "role": "branch", "variant": "emphasis" },
+    { "id": "calificacion-notas", "from": "calificacion", "to": "notas", "label": "se refleja en el trimestre", "role": "main", "variant": "emphasis" }
+  ]
+}

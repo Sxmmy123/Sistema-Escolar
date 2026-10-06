@@ -9,8 +9,10 @@ import {
 import { icon } from "../../ui/dom.js";
 import { DirectorShell } from "./DirectorShell.js";
 import { escapeDirectorHtml, refreshDirectorIcons } from "./DirectorUtils.js";
+import { auth } from "../../firebase/client.js";
+import { claveCache } from "../../services/rutasFirestore.js";
 
-const CACHE_KEY = "director:cursos-horarios:v2";
+const scheduleCacheKey = () => claveCache("director_horarios", auth.currentUser?.uid || "");
 const COURSE_KEY = "directorCursoHorario";
 const DAY_KEY = "directorDiaHorario";
 const VIEW_KEY = "directorVistaHorario";
@@ -104,7 +106,7 @@ function loadedCourseCount() {
 
 function readCache() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+    const parsed = JSON.parse(localStorage.getItem(scheduleCacheKey()) || "null");
     if (!parsed || typeof parsed !== "object") return null;
     return {
       schedules: parsed.schedules || {},
@@ -126,7 +128,7 @@ function writeCache(schedules, teachers) {
     asignaciones: teacher.asignaciones || {}
   }));
   const payload = { schedules: compactSchedules, teachers: compactTeachers, savedAt: Date.now() };
-  localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+  localStorage.setItem(scheduleCacheKey(), JSON.stringify(payload));
   return payload;
 }
 

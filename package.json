@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test tests/calculoAcademico.test.js tests/calcularAlertasDocente.test.js tests/revisionActividad.test.js tests/identidadAlumno.test.js tests/estructuraDatos.test.js tests/proteccionActividad.test.js tests/asistenciaCompartida.test.js tests/modulosDocente.test.js",
+    "test:seguridad": "firebase emulators:exec --only auth,firestore --project demo-sistema-seguridad --config firebase.seguridad.test.json \"node tests/seguridadFirestore.test.js\""
   },
   "dependencies": {
     "firebase": "^10.14.1",

@@ -1,4 +1,4 @@
-﻿import { attendanceShort } from "./AcademicoDocente.js";
+﻿import { attendanceShort, normalizarEstadoAsistencia } from "./AcademicoDocente.js";
 
 function publicAsset(path) {
   const base = import.meta.env.BASE_URL || "/";
@@ -70,7 +70,7 @@ function recordMap(records = []) {
     const date = normalizeDate(item.fecha);
     if (!date || !item.alumnoId) return;
     map[item.alumnoId] ||= {};
-    map[item.alumnoId][date] = item.estado || "falta";
+    map[item.alumnoId][date] = normalizarEstadoAsistencia(item.estado) || "falta";
   });
   return map;
 }

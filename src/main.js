@@ -2,13 +2,15 @@
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import "./styles.css";
 import "./firebase/client.js";
-import { auth } from "./firebase/client.js";
+import { auth, firestore } from "./firebase/client.js";
+import { cargarConfiguracion, configuracionActual, establecerConfiguracion, VERSION_MODELO } from "./services/rutasFirestore.js";
 import { setView } from "./ui/dom.js";
 import { LoginView, bindLogin } from "./modules/login/LoginView.js";
 import { AdminDashboard } from "./modules/admin/AdminDashboard.js";
 import { bindAdminPages } from "./modules/admin/AdminBindings.js";
 import { DocenteDashboard } from "./modules/docente/DocenteDashboard.js";
 import { bindDocentePages } from "./modules/docente/ControladorDocente.js";
+import { bindTeacherNotifications } from "./modules/docente/NotificacionesDocente.js";
 import { DirectorDashboard } from "./modules/director/DirectorDashboard.js";
 import { bindDirectorPages } from "./modules/director/DirectorBindings.js";
 import { DirectorAttendance } from "./modules/director/DirectorAttendance.js";
@@ -58,6 +60,7 @@ const routes = {
 };
 
 let authReady = false;
+let authRevision = 0;
 let activeUser = null;
 let activeRole = "";
 let renderLock = false;
@@ -90,19 +93,6 @@ function clearSession() {
   sessionStorage.clear();
   activeUser = null;
   activeRole = "";
-}
-
-function localStudentSession() {
-  const role = sessionStorage.getItem("sesionRol");
-  const alumnoId = sessionStorage.getItem("sesionAlumnoId");
-  if (role !== "alumno" || !alumnoId) return null;
-  return {
-    role: "alumno",
-    user: {
-      uid: `alumno:${alumnoId}`,
-      email: sessionStorage.getItem("sesionUsuario") || ""
-    }
-  };
 }
 
 async function doLogout() {
@@ -306,6 +296,7 @@ function afterRender(route) {
   createIcons({ icons });
   if (route === "/") bindLogin();
   bindShell();
+  bindTeacherNotifications(route);
   bindAdminPages(route);
   bindDocentePages(route);
   bindDirectorPages(route);
@@ -332,9 +323,8 @@ function render() {
 
     const route = currentRoute();
     const requiredRole = routeRequiredRole(route);
-    const studentSession = localStudentSession();
-    const sessionUser = activeUser || studentSession?.user || null;
-    const sessionRole = activeRole || studentSession?.role || "";
+    const sessionUser = activeUser;
+    const sessionRole = activeRole;
 
     if (route === "/" && sessionUser && sessionRole) {
       if (redirectTo(homeForRole(sessionRole))) return;
@@ -349,6 +339,16 @@ function render() {
       if (redirectTo(homeForRole(sessionRole))) return;
     }
 
+    if (requiredRole && configuracionActual().versionModelo !== VERSION_MODELO) {
+      if (sessionRole === "admin" && route !== "/admin") {
+        if (redirectTo("/admin")) return;
+      } else if (sessionRole !== "admin") {
+        setView(`<main class="mx-auto max-w-lg p-6"><h1 class="text-lg font-semibold">Gestion escolar pendiente</h1><p class="mt-3 text-sm">Administracion debe preparar la gestion y publicar las reglas actualizadas.</p><button data-exit class="mt-4 rounded bg-school-green px-4 py-2 text-sm text-white">Cerrar sesion</button></main>`);
+        document.querySelector("[data-exit]")?.addEventListener("click", doLogout);
+        return;
+      }
+    }
+
     const view = routes[route] || routes["/"];
     const finalRoute = routes[route] ? route : "/";
     setView(view());
@@ -359,24 +359,38 @@ function render() {
 }
 
 onAuthStateChanged(auth, async (user) => {
+  const revision = ++authRevision;
+  authReady = false;
+  activeUser = null;
+  activeRole = "";
   setView(loadingView());
 
   try {
     if (!user) {
-      if (!localStudentSession()) clearSession();
+      clearSession();
     } else {
       const role = await resolveUserRole(user);
+      try {
+        await cargarConfiguracion(firestore);
+      } catch (error) {
+        establecerConfiguracion({});
+        console.warn("No se pudo leer la configuracion del sistema. Publica las reglas actualizadas.", error);
+      }
+      if (revision !== authRevision || auth.currentUser?.uid !== user.uid) return;
       activeUser = user;
       activeRole = role;
       rememberSession(role, user);
     }
   } catch (error) {
+    if (revision !== authRevision) return;
     console.error("Sesion invalida", error);
     await signOut(auth).catch(() => {});
     clearSession();
   } finally {
-    authReady = true;
-    render();
+    if (revision === authRevision) {
+      authReady = true;
+      render();
+    }
   }
 });
 

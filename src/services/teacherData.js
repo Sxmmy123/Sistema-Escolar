@@ -1,11 +1,11 @@
 ﻿import {
-  collection,
-  deleteDoc,
   deleteField,
   doc,
+  FieldPath,
   getDoc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -16,9 +16,18 @@ import { COURSES, DAYS, SUBJECTS, findCourse, findSubject, periodsForCourse } fr
 import { auth, firestore } from "../firebase/client.js";
 import { getSchedule, listStudents } from "./adminData.js";
 import { safeAudit } from "./auditData.js";
+import { fechaEscolarIso } from "./fechaEscolar.js";
+import { idAutoevaluacion } from "./identificadoresActividad.js";
+import { claveCache, coleccionGestion, documentoGestion, gestionActual } from "./rutasFirestore.js";
+import { actualizarActividadProtegida, eliminarActividadProtegida } from "./proteccionActividad.js";
+import { normalizarEstadoAsistencia } from "./calculoAcademico.js";
 
 function currentUid() {
-  return auth.currentUser?.uid || sessionStorage.getItem("sesionUid") || "";
+  return auth.currentUser?.uid || "";
+}
+
+function announceAlertDataChange() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("teacher-alerts-updated"));
 }
 
 function currentUserLabel() {
@@ -38,7 +47,7 @@ function normalizeMaterialItems(items = []) {
 function scheduleCacheKey(context = {}) {
   const uid = context.uid || currentUid() || "docente";
   const courseIds = (context.courses || []).map((course) => course.id).sort().join("_") || "sin_cursos";
-  return `docente_horario_${uid}_${courseIds}`;
+  return claveCache("horario", uid, courseIds);
 }
 
 function readScheduleCache(context = {}) {
@@ -67,7 +76,7 @@ function writeScheduleCache(context = {}, schedules = {}) {
 
 function teacherDataCacheKey(context = {}, type = "datos", courseId = "", trimesterId = "") {
   const uid = context.uid || currentUid() || "docente";
-  return `docente_${type}_${uid}_${courseId || "sin_curso"}_${trimesterId || "sin_trimestre"}`;
+  return claveCache(type, uid, courseId || "sin_curso", trimesterId || "sin_trimestre");
 }
 
 function readTeacherDataCache(context = {}, type = "datos", courseId = "", trimesterId = "") {
@@ -93,7 +102,7 @@ function writeTeacherDataCache(context = {}, type = "datos", courseId = "", trim
 }
 
 function teacherContextCacheKey(uid = currentUid()) {
-  return `docente_contexto_sesion_${uid || "docente"}`;
+  return claveCache("contexto", uid || "docente");
 }
 
 function readTeacherContextCache(uid = currentUid()) {
@@ -168,16 +177,11 @@ function normalizeCourses(data = {}) {
 }
 
 function localIsoDate(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return fechaEscolarIso(date);
 }
 
 export function todayIso(offset = 0) {
-  const date = new Date();
-  date.setDate(date.getDate() + offset);
-  return localIsoDate(date);
+  return fechaEscolarIso(new Date(), offset);
 }
 
 export const TRIMESTERS = [
@@ -194,35 +198,14 @@ export const DELIVERY_STATES = {
   UNREVIEWED: "sin_revisar"
 };
 
-function timestampMillis(value) {
-  if (!value) return 0;
-  if (typeof value.toMillis === "function") return value.toMillis();
-  if (typeof value === "number") return value;
-  if (value instanceof Date) return value.getTime();
-  return Number(value) || 0;
-}
-
-function newestTrimesterPreference(userProfile = null, teacherProfile = null) {
-  const userTrimester = userProfile?.trimestreActivo;
-  const teacherTrimester = teacherProfile?.trimestreActivo;
-  if (!userTrimester) return teacherTrimester || "t1";
-  if (!teacherTrimester) return userTrimester;
-
-  const userTime = timestampMillis(userProfile?.trimestreActivoUpdatedAt || userProfile?.updatedAt);
-  const teacherTime = timestampMillis(teacherProfile?.trimestreActivoUpdatedAt || teacherProfile?.updatedAt);
-  return userTime >= teacherTime ? userTrimester : teacherTrimester;
-}
-
 export async function saveTeacherTrimesterPreference(uid = currentUid(), trimesterId = "t1") {
   const safeUid = auth.currentUser?.uid || uid || currentUid();
-  if (!safeUid) return;
+  if (!safeUid || !["t1", "t2", "t3"].includes(trimesterId)) throw new Error("Selecciona un trimestre valido.");
 
-  await setDoc(doc(firestore, "preferencias_docente", safeUid), {
-    uid: safeUid,
-    trimestreActivo: trimesterId,
-    trimestreActivoUpdatedAt: serverTimestamp(),
+  await updateDoc(doc(firestore, "usuarios", safeUid), {
+    [`preferencias.trimestresPorGestion.${gestionActual()}`]: trimesterId,
     updatedAt: serverTimestamp()
-  }, { merge: true });
+  });
   updateTeacherContextTrimesterCache(safeUid, trimesterId);
 }
 
@@ -232,26 +215,14 @@ export async function getTeacherContext(uid = currentUid(), options = {}) {
   const cachedContext = options.forceRemote ? null : readTeacherContextCache(uid);
   if (cachedContext) return cachedContext;
 
-  const [userSnap, profileSnap, assignmentSnap] = await Promise.all([
+  const [userSnap, assignmentSnap] = await Promise.all([
     getDoc(doc(firestore, "usuarios", uid)),
-    getDoc(doc(firestore, "docentes", uid)),
-    getDoc(doc(firestore, "asignaciones", uid))
+    getDoc(documentoGestion(firestore, "asignaciones", uid))
   ]);
-
-  const preferenceSnap = await getDoc(doc(firestore, "preferencias_docente", uid)).catch((error) => {
-    console.warn("No se pudo leer la preferencia del docente; se usara el trimestre local.", error);
-    return null;
-  });
-
   const userProfile = userSnap.exists() ? userSnap.data() : null;
-  const teacherProfile = profileSnap.exists() ? profileSnap.data() : null;
-  const preferenceProfile = preferenceSnap?.exists?.() ? preferenceSnap.data() : null;
-  const accountProfile = preferenceProfile ? { ...(userProfile || {}), ...preferenceProfile } : userProfile;
   const profile = {
     ...(userProfile || {}),
-    ...(teacherProfile || {}),
-    ...(preferenceProfile || {}),
-    trimestreActivo: newestTrimesterPreference(accountProfile, teacherProfile)
+    trimestreActivo: userProfile?.preferencias?.trimestresPorGestion?.[gestionActual()] || "t1"
   };
   const assignment = assignmentSnap.exists() ? assignmentSnap.data() : {};
   const assignedCourses = normalizeCourses(assignment)
@@ -265,6 +236,7 @@ export async function getTeacherContext(uid = currentUid(), options = {}) {
 
   const context = {
     uid,
+    gestionId: gestionActual(),
     profile,
     courses: assignedCourses,
     subjectIds: [...new Set(assignedCourses.flatMap((course) => course.materias))]
@@ -348,10 +320,10 @@ export async function getTeacherScheduleRows(context, dayId = null, options = {}
   return [];
 }
 
-export async function refreshTeacherNotesSnapshot(context, course, trimesterId = "t1") {
+export async function refreshTeacherNotesSnapshot(context, course, trimesterId = "t1", options = {}) {
   if (!course?.id) return null;
   const [students, activities, gradesList, attendanceRows] = await Promise.all([
-    getTeacherStudents(course.id),
+    Array.isArray(options.students) ? options.students : getTeacherStudents(course.id),
     listActivities(course.id, trimesterId),
     listGradesForCourse(course.id, trimesterId),
     listAttendanceForCourse(course.id, trimesterId)
@@ -359,6 +331,16 @@ export async function refreshTeacherNotesSnapshot(context, course, trimesterId =
   const data = { students, activities, gradesList, attendanceRows };
   writeTeacherDataCache(context, "notas", course.id, trimesterId, data);
   return data;
+}
+
+export async function refreshTeacherBulletinSnapshot(context, course, loaders = {}) {
+  if (!course?.id) return [];
+  const loadStudents = loaders.loadStudents || getTeacherStudents;
+  const refreshSnapshot = loaders.refreshSnapshot || refreshTeacherNotesSnapshot;
+  const students = await loadStudents(course.id);
+  return Promise.all(TRIMESTERS.map((trimester) =>
+    refreshSnapshot(context, course, trimester.id, { students })
+  ));
 }
 
 export async function getTeacherNotesSnapshot(context, course, trimesterId = "t1", options = {}) {
@@ -485,20 +467,27 @@ export async function listAttendanceForCourseDate(courseId, date, trimestreId = 
     where("fecha", "==", date)
   ];
   if (trimestreId) filters.push(where("trimestreId", "==", trimestreId));
-  const snap = await getDocs(query(collection(firestore, "asistencias"), ...filters));
+  const snap = await getDocs(query(coleccionGestion(firestore, "asistencias"), ...filters));
   const map = {};
-  snap.docs.forEach((item) => { map[item.data().alumnoId] = { id: item.id, ...item.data() }; });
+  snap.docs.forEach((item) => {
+    const record = item.data();
+    map[record.alumnoId] = { id: item.id, ...record, estado: normalizarEstadoAsistencia(record.estado) };
+  });
   return map;
 }
 
 export async function listAttendanceForCourse(courseId, trimestreId = "") {
   const filters = [where("cursoId", "==", courseId)];
   if (trimestreId) filters.push(where("trimestreId", "==", trimestreId));
-  const snap = await getDocs(query(collection(firestore, "asistencias"), ...filters));
-  return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const snap = await getDocs(query(coleccionGestion(firestore, "asistencias"), ...filters));
+  return snap.docs.map((item) => {
+    const record = item.data();
+    return { id: item.id, ...record, estado: normalizarEstadoAsistencia(record.estado) };
+  });
 }
 
 export async function saveAttendance({ course, student, fecha, estado, trimestreId = "t1", observacion = "" }) {
+  if (student.cursoId && student.cursoId !== course.id) throw new Error("El alumno no pertenece al curso seleccionado.");
   const id = attendanceDocId(course.id, fecha, student.id);
   const now = new Date();
   const payload = {
@@ -514,7 +503,8 @@ export async function saveAttendance({ course, student, fecha, estado, trimestre
     registradoPor: currentUserLabel(),
     updatedAt: serverTimestamp()
   };
-  await setDoc(doc(firestore, "asistencias", id), payload, { merge: true });
+  await setDoc(documentoGestion(firestore, "asistencias", id), payload, { merge: true });
+  announceAlertDataChange();
   safeAudit({
     tipo: "asistencia",
     accion: "registrar",
@@ -524,20 +514,10 @@ export async function saveAttendance({ course, student, fecha, estado, trimestre
   return { id, ...payload };
 }
 
-export function activityDocId(courseId, subjectId, date, title) {
-  const clean = String(title || "actividad").replace(/[^a-z0-9]+/gi, "_").slice(0, 32).toLowerCase();
-  return `${date}_${courseId}_${subjectId}_${clean}`.replace(/_+/g, "_").toLowerCase();
-}
-
-export function specialActivityDocId(courseId, subjectId, trimesterId, type, title = "") {
-  const cleanTitle = String(title || type || "nota").replace(/[^a-z0-9]+/gi, "_").slice(0, 32).toLowerCase();
-  return `${type}_${trimesterId}_${courseId}_${subjectId}_${cleanTitle}`.replace(/_+/g, "_").toLowerCase();
-}
-
 export async function listActivities(courseId, trimestreId = "") {
   const filters = [where("cursoId", "==", courseId)];
   if (trimestreId) filters.push(where("trimestreId", "==", trimestreId));
-  const snap = await getDocs(query(collection(firestore, "actividades"), ...filters));
+  const snap = await getDocs(query(coleccionGestion(firestore, "actividades"), ...filters));
   return snap.docs
     .map((item) => ({ id: item.id, ...item.data() }))
     .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) || String(a.titulo || "").localeCompare(String(b.titulo || "")));
@@ -552,7 +532,8 @@ export async function saveActivity({ course, materiaId, fecha, titulo, tipo, max
   const cleanTitle = isMaterial
     ? materialItems.map((item) => item.material).join(", ")
     : String(titulo || "").trim();
-  const id = activityDocId(course.id, materiaId, fecha, cleanTitle);
+  const ref = doc(coleccionGestion(firestore, "actividades"));
+  const id = ref.id;
   const payload = {
     cursoId: course.id,
     materiaId,
@@ -565,9 +546,10 @@ export async function saveActivity({ course, materiaId, fecha, titulo, tipo, max
     creadoPorUid: currentUid(),
     createdAt: serverTimestamp(),
     estadoRevision: "sin_iniciar",
+    activo: true,
     updatedAt: serverTimestamp()
   };
-  await setDoc(doc(firestore, "actividades", id), payload, { merge: true });
+  await setDoc(ref, payload);
   await safeAudit({
     tipo: "actividades",
     accion: "crear",
@@ -586,7 +568,11 @@ export async function saveActivity({ course, materiaId, fecha, titulo, tipo, max
 }
 
 export async function saveInternalActivity({ course, materiaId, titulo, tipo, maximo, trimestreId = "t1" }) {
-  const id = specialActivityDocId(course.id, materiaId, trimestreId, tipo, titulo);
+  const isAuto = tipo === "auto";
+  const ref = isAuto
+    ? documentoGestion(firestore, "actividades", idAutoevaluacion(course.id, materiaId, trimestreId))
+    : doc(coleccionGestion(firestore, "actividades"));
+  const id = ref.id;
   const subject = findSubject(materiaId);
   const payload = {
     cursoId: course.id,
@@ -597,12 +583,23 @@ export async function saveInternalActivity({ course, materiaId, titulo, tipo, ma
     tipo,
     maximo: Number(maximo || 100),
     interno: true,
+    activo: true,
     creadoPorUid: currentUid(),
     createdAt: serverTimestamp(),
     estadoRevision: "cerrada",
     updatedAt: serverTimestamp()
   };
-  await setDoc(doc(firestore, "actividades", id), payload, { merge: true });
+  if (isAuto) {
+    const existing = await runTransaction(firestore, async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (snapshot.exists()) return { id, ...snapshot.data() };
+      transaction.set(ref, payload);
+      return null;
+    });
+    if (existing) return existing;
+  } else {
+    await setDoc(ref, payload);
+  }
   await safeAudit({
     tipo: "actividades",
     accion: "crear",
@@ -634,7 +631,12 @@ export async function updateActivity({ activity, course, materiaId, fecha, titul
     materiales: isMaterial ? materialItems : deleteField(),
     updatedAt: serverTimestamp()
   };
-  await updateDoc(doc(firestore, "actividades", activity.id), payload);
+  const siguiente = {
+    cursoId: course.id, materiaId, trimestreId, fecha,
+    titulo: cleanTitle, tipo: tipo || "tarea", maximo: payload.maximo,
+    calificable: scoreEnabled, materiales: materialItems
+  };
+  const updatedActivity = await actualizarActividadProtegida({ db: firestore, id: activity.id, datos: payload, siguiente });
   await safeAudit({
     tipo: "actividades",
     accion: "editar",
@@ -649,18 +651,6 @@ export async function updateActivity({ activity, course, materiaId, fecha, titul
       ...(isMaterial ? { calificable: scoreEnabled, cantidadMateriales: materialItems.length } : {})
     }
   });
-  const updatedActivity = {
-    ...activity,
-    id: activity.id,
-    cursoId: course.id,
-    materiaId,
-    trimestreId,
-    fecha,
-    titulo: cleanTitle,
-    tipo: tipo || "tarea",
-    maximo: isMaterial && !scoreEnabled ? 0 : Number(maximo || 100),
-    ...(isMaterial ? { calificable: scoreEnabled, materiales: materialItems } : {})
-  };
   if (!isMaterial) {
     delete updatedActivity.calificable;
     delete updatedActivity.materiales;
@@ -669,7 +659,8 @@ export async function updateActivity({ activity, course, materiaId, fecha, titul
 }
 
 export async function deleteActivity(activity) {
-  await deleteDoc(doc(firestore, "actividades", activity.id));
+  if (!activity?.id) throw new Error("Actividad invalida.");
+  await eliminarActividadProtegida({ db: firestore, id: activity.id });
   await safeAudit({
     tipo: "actividades",
     accion: "eliminar",
@@ -718,7 +709,7 @@ function deliveryPayload({ activity, normalized, estadoEntrega = "", fechaEntreg
 }
 
 export async function listGradesForActivity(activityId) {
-  const snap = await getDocs(query(collection(firestore, "calificaciones"), where("actividadId", "==", activityId)));
+  const snap = await getDocs(query(coleccionGestion(firestore, "calificaciones"), where("actividadId", "==", activityId)));
   const map = {};
   snap.docs.forEach((item) => { map[item.data().alumnoId] = { id: item.id, ...item.data() }; });
   return map;
@@ -727,7 +718,7 @@ export async function listGradesForActivity(activityId) {
 export async function listGradesForCourse(courseId, trimestreId = "") {
   const filters = [where("cursoId", "==", courseId)];
   if (trimestreId) filters.push(where("trimestreId", "==", trimestreId));
-  const snap = await getDocs(query(collection(firestore, "calificaciones"), ...filters));
+  const snap = await getDocs(query(coleccionGestion(firestore, "calificaciones"), ...filters));
   return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
 }
 
@@ -737,7 +728,7 @@ export async function saveGrade({
   value,
   estadoEntrega = "",
   fechaEntrega = ""
-}) {
+}, { db = firestore, uid = currentUid(), audit = safeAudit } = {}) {
   if (!activity?.id) throw new Error("No se encontro la actividad para calificar.");
   if (!student?.id) throw new Error("No se encontro el alumno para calificar.");
 
@@ -748,6 +739,7 @@ export async function saveGrade({
 
   if (!cursoId) throw new Error("La actividad no tiene curso asignado.");
   if (!materiaId) throw new Error("La actividad no tiene materia asignada.");
+  if (student.cursoId && student.cursoId !== cursoId) throw new Error("El alumno no pertenece al curso de la actividad.");
 
   const normalized = normalizeGrade(value, maximo);
   if (!normalized) throw new Error("Nota invalida.");
@@ -761,23 +753,33 @@ export async function saveGrade({
     valor: normalized.valor,
     nota: normalized.nota,
     maximo,
-    calificadoPorUid: currentUid(),
+    calificadoPorUid: uid,
     ...deliveryPayload({ activity, normalized, estadoEntrega, fechaEntrega }),
     updatedAt: serverTimestamp()
   };
-  const batch = writeBatch(firestore);
-  batch.set(doc(firestore, "calificaciones", id), payload, { merge: true });
-  if (activity.estadoRevision === "sin_iniciar") {
-    batch.set(doc(firestore, "actividades", activity.id), {
-      estadoRevision: "en_proceso",
-      revisionIniciadaAt: serverTimestamp(),
-      revisionIniciadaPorUid: currentUid(),
+  const batch = writeBatch(db);
+  batch.set(documentoGestion(db, "calificaciones", id), payload, { merge: true });
+  if (activity.tieneCalificaciones !== true || activity.estadoRevision === "sin_iniciar") {
+    batch.update(documentoGestion(db, "actividades", activity.id), {
+      tieneCalificaciones: true,
+      ...(activity.estadoRevision === "sin_iniciar" ? {
+        estadoRevision: "en_proceso",
+        revisionIniciadaAt: serverTimestamp(),
+        revisionIniciadaPorUid: uid
+      } : {}),
       updatedAt: serverTimestamp()
-    }, { merge: true });
+    });
+  }
+  const hadPendingDelivery = Boolean(activity.entregasPendientes?.[student.id]);
+  if (hadPendingDelivery) {
+    batch.update(documentoGestion(db, "actividades", activity.id), new FieldPath("entregasPendientes", student.id), deleteField());
   }
   await batch.commit();
+  activity.tieneCalificaciones = true;
+  announceAlertDataChange();
+  if (hadPendingDelivery) delete activity.entregasPendientes[student.id];
   if (activity.estadoRevision === "sin_iniciar") activity.estadoRevision = "en_proceso";
-  await safeAudit({
+  await audit({
     tipo: "calificaciones",
     accion: "calificar",
     detalle: `Califico ${student.nombre} con ${payload.nota} en ${activity.titulo}`,
@@ -795,15 +797,15 @@ export async function saveGrade({
   return { id, ...payload };
 }
 
-export async function finalizeActivityReview({ activity, students = [], attendanceMap = {}, gradesMap = {} }) {
+export async function finalizeActivityReview({ activity, students = [], attendanceMap = {}, gradesMap = {} }, { db = firestore, uid = currentUid(), audit = safeAudit } = {}) {
   if (!activity?.id) throw new Error("No se encontro la actividad para finalizar.");
 
   const revisionFinalizadaFecha = todayIso();
-  const regularizacionDesde = todayIso(1);
-  const batch = writeBatch(firestore);
+  const regularizacionDesde = todayIso();
   const generatedGrades = [];
   students.forEach((student) => {
     if (!student?.id || gradesMap[student.id]) return;
+    if (student.cursoId && student.cursoId !== activity.cursoId) throw new Error("Hay un alumno de otro curso en la revision.");
     const attendanceState = String(attendanceMap[student.id]?.estado || "").toLowerCase();
     if (["permiso", "licencia"].includes(attendanceState)) return;
 
@@ -818,7 +820,7 @@ export async function finalizeActivityReview({ activity, students = [], attendan
       valor: normalized.valor,
       nota: normalized.nota,
       maximo: Number(activity.maximo || 100),
-      calificadoPorUid: currentUid(),
+      calificadoPorUid: uid,
       ...deliveryPayload({
         activity,
         normalized,
@@ -826,24 +828,39 @@ export async function finalizeActivityReview({ activity, students = [], attendan
       }),
       updatedAt: serverTimestamp()
     };
-    batch.set(doc(firestore, "calificaciones", id), payload, { merge: true });
     generatedGrades.push({ id, ...payload });
   });
 
-  batch.set(doc(firestore, "actividades", activity.id), {
+  // Two grades fit the rules budget even without cached checks across writes.
+  for (let index = 0; index < generatedGrades.length; index += 2) {
+    const gradesBatch = writeBatch(db);
+    generatedGrades.slice(index, index + 2).forEach(({ id, ...payload }) => {
+      gradesBatch.set(documentoGestion(db, "calificaciones", id), payload, { merge: true });
+    });
+    if (activity.tieneCalificaciones !== true) {
+      gradesBatch.update(documentoGestion(db, "actividades", activity.id), {
+        tieneCalificaciones: true, updatedAt: serverTimestamp()
+      });
+    }
+    await gradesBatch.commit();
+    activity.tieneCalificaciones = true;
+  }
+  const batch = writeBatch(db);
+  batch.update(documentoGestion(db, "actividades", activity.id), {
     estadoRevision: "cerrada",
     revisionFinalizadaFecha,
     regularizacionDesde,
     revisionFinalizadaAt: serverTimestamp(),
-    revisionFinalizadaPorUid: currentUid(),
+    revisionFinalizadaPorUid: uid,
     updatedAt: serverTimestamp()
-  }, { merge: true });
+  });
   await batch.commit();
+  announceAlertDataChange();
   activity.estadoRevision = "cerrada";
   activity.revisionFinalizadaFecha = revisionFinalizadaFecha;
   activity.regularizacionDesde = regularizacionDesde;
 
-  await safeAudit({
+  await audit({
     tipo: "calificaciones",
     accion: "finalizar_revision",
     detalle: `Finalizo la revision de ${activity.titulo || activity.id}`,

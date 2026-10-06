@@ -4,7 +4,7 @@ import {
   TRIMESTERS,
   getTeacherDataCacheMeta,
   getTeacherNotesSnapshot,
-  refreshTeacherNotesSnapshot
+  refreshTeacherBulletinSnapshot
 } from "../../services/teacherData.js";
 import {
   activityHasGrades,
@@ -205,8 +205,18 @@ export async function renderBulletin(context) {
     const button = event.currentTarget;
     button.disabled = true;
     button.innerHTML = `${icon("loader-2", "h-4 w-4 animate-spin")} Actualizando...`;
-    await Promise.all(TRIMESTERS.map((trimester) => refreshTeacherNotesSnapshot(context, course, trimester.id)));
-    await renderBulletin(context);
+    try {
+      await refreshTeacherBulletinSnapshot(context, course);
+      await renderBulletin(context);
+    } catch (error) {
+      alert(error.message || "No se pudo actualizar el boletin. La copia local sigue disponible.");
+    } finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.innerHTML = `${icon("refresh-cw", "h-4 w-4")} Actualizar boletin`;
+        refreshIcons();
+      }
+    }
   });
 
   refreshIcons();

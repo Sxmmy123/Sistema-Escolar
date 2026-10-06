@@ -1,4 +1,5 @@
 import { TRIMESTERS, saveTeacherTrimesterPreference, todayIso } from "../../services/teacherData.js";
+import { claveCache } from "../../services/rutasFirestore.js";
 
 export const teacherState = {
   context: null,
@@ -43,7 +44,8 @@ export const teacherState = {
   regularizationSearch: "",
   regularizationGradeActivityId: "",
   regularizationGradeStudentId: "",
-  regularizationReportStudentId: ""
+  regularizationReportStudentId: "",
+  notificationFocus: null
 };
 
 export function selectedTrimester() {
@@ -56,7 +58,7 @@ export function validTrimesterId(trimesterId) {
 
 function trimesterStorageKey(context = teacherState.context) {
   const uid = context?.uid || "docente";
-  return `docente_trimestre_activo_${uid}`;
+  return claveCache("trimestre", uid);
 }
 
 export function loadSavedTrimester(context = teacherState.context) {
@@ -85,6 +87,7 @@ export function setActiveTrimester(trimesterId, options = {}) {
   teacherState.regularizationGradeActivityId = "";
   teacherState.regularizationReportStudentId = "";
   saveActiveTrimester(options.context || teacherState.context);
+  window.dispatchEvent(new Event("teacher-trimester-changed"));
 }
 
 export async function persistActiveTrimester(context = teacherState.context) {

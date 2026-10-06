@@ -4,14 +4,8 @@ import {
   updateEmail,
   updatePassword
 } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, writeBatch } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
-
-const roleCollections = {
-  docente: "docentes",
-  director: "director",
-  admin: "admins"
-};
 
 function currentUser() {
   const user = auth.currentUser;
@@ -34,28 +28,20 @@ async function reauth(currentPassword) {
 }
 
 async function updateProfileEmail(uid, profile, email) {
-  const role = String(profile.rol || sessionStorage.getItem("sesionRol") || "").toLowerCase();
-  const username = String(profile.usuario || sessionStorage.getItem("sesionUsuario") || "").trim();
+  const username = String(profile.usuario || "").trim();
+  if (!profile.rol) throw new Error("Primero prepara la gestion desde el panel del administrador.");
   const payload = {
     authEmail: email,
     correoRecuperacion: email,
     updatedAt: serverTimestamp()
   };
 
-  await setDoc(doc(firestore, "usuarios", uid), payload, { merge: true });
-
-  const roleCollection = roleCollections[role];
-  if (roleCollection) {
-    await setDoc(doc(firestore, roleCollection, uid), payload, { merge: true });
-  }
-
+  const batch = writeBatch(firestore);
+  batch.update(doc(firestore, "usuarios", uid), payload);
   if (username && !username.includes("@")) {
-    await setDoc(doc(firestore, "usuarios_por_nombre", username.toLowerCase()), {
-      authEmail: email,
-      correoRecuperacion: email,
-      updatedAt: serverTimestamp()
-    }, { merge: true });
+    batch.update(doc(firestore, "indice_accesos", username.toLowerCase()), { authEmail: email });
   }
+  await batch.commit();
 }
 
 export async function setRecoveryEmail({ email, currentPassword }) {
@@ -64,8 +50,16 @@ export async function setRecoveryEmail({ email, currentPassword }) {
 
   const user = await reauth(currentPassword);
   const profile = await currentProfile(user.uid);
+  if (!profile.rol) throw new Error("Primero prepara la gestion desde el panel del administrador.");
+  const previousEmail = user.email;
   await updateEmail(user, cleanEmail);
-  await updateProfileEmail(user.uid, profile, cleanEmail);
+  try {
+    await updateProfileEmail(user.uid, profile, cleanEmail);
+  } catch (error) {
+    try { await updateEmail(user, previousEmail); }
+    catch { throw new Error("El correo cambio en Authentication pero no en el perfil. Administracion debe corregir el indice de acceso."); }
+    throw error;
+  }
   sessionStorage.setItem("sesionUsuario", cleanEmail);
   return cleanEmail;
 }

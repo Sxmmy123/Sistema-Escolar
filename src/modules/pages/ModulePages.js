@@ -2,6 +2,7 @@ import { icon } from "../../ui/dom.js";
 import { appShell, statCard } from "../../ui/shell.js";
 import { COURSES, DAYS, SUBJECTS, periodsForCourse } from "../../data/catalog.js";
 import { AdminShell } from "../admin/AdminShell.js";
+import { fechaEscolarIso } from "../../services/fechaEscolar.js";
 
 function hero(kicker, title, text) {
   return `
@@ -264,7 +265,7 @@ function studentsPanel() {
             <div class="min-w-0"><p class="text-[9px] font-semibold uppercase tracking-[.14em] text-slate-400">Curso seleccionado</p><h3 class="mt-0.5 truncate text-base font-semibold text-slate-900" data-students-title>Pre Inicial - Inicial</h3></div>
             <div class="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
               <button class="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-school-green hover:bg-green-50" data-action="refresh-students">Actualizar</button>
-              <button class="rounded-lg bg-school-green px-3 py-2 text-xs font-medium text-white hover:bg-green-800" data-action="generate-student-accesses">Generar accesos</button>
+              <button class="rounded-lg bg-school-green px-3 py-2 text-xs font-medium text-white hover:bg-green-800" data-action="generate-student-accesses">Crear accesos</button>
             </div>
           </div>
           <p class="mx-4 hidden rounded-lg border px-3 py-2.5 text-xs font-medium" data-students-access-status></p>
@@ -429,7 +430,7 @@ function historicalPanel() {
   `;
 }
 function auditPanel() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = fechaEscolarIso();
   return `
     <section class="space-y-3">
       <div class="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-[170px_170px_1fr_90px]">

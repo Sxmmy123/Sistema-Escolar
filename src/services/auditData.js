@@ -8,14 +8,16 @@
   serverTimestamp
 } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
+import { fechaEscolarIso } from "./fechaEscolar.js";
+import { gestionActual } from "./rutasFirestore.js";
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return fechaEscolarIso();
 }
 
 function currentSession() {
   return {
-    uid: auth.currentUser?.uid || sessionStorage.getItem("sesionUid") || "",
+    uid: auth.currentUser?.uid || "",
     usuario: sessionStorage.getItem("sesionUsuario") || auth.currentUser?.email || "-",
     rol: sessionStorage.getItem("sesionRol") || "-"
   };
@@ -26,6 +28,7 @@ export async function logAudit({ tipo, accion, detalle, datos = {} }) {
   const now = new Date();
 
   await addDoc(collection(firestore, "auditoria"), {
+    gestionId: gestionActual(),
     tipo: String(tipo || "sistema"),
     accion: String(accion || "movimiento"),
     detalle: String(detalle || "Movimiento registrado"),
