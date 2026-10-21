@@ -98,10 +98,13 @@ export function bindLogin() {
     setStatus("Verificando cuenta...");
 
     let email = "";
+    let stage = "usuario";
     try {
       email = await authEmailForLogin(login);
+      stage = "autenticacion";
       const credential = await signInWithEmailAndPassword(auth, email, password);
       const user = credential.user;
+      stage = "perfil";
       const role = await resolveUserRole(user);
 
       sessionStorage.setItem("sesionRol", role);
@@ -111,7 +114,8 @@ export function bindLogin() {
       sessionStorage.removeItem("sesionAlumnoCursoId");
       window.location.hash = `#/${role}`;
     } catch (error) {
-      await signOut(auth).catch(() => {});
+      console.warn(`No se pudo iniciar sesion (${stage}: ${error?.code || "perfil-no-disponible"}).`);
+      if (auth.currentUser) await signOut(auth).catch(() => {});
       setStatus(friendlyAuthError(error, login), "error");
     } finally {
       button.disabled = false;

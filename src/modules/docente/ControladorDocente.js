@@ -1,6 +1,6 @@
-import { loadSavedTrimester, persistActiveTrimester, setActiveTrimester, teacherState } from "./EstadoDocente.js";
+import { loadSavedTrimester, teacherState } from "./EstadoDocente.js";
 import { emptyState, escapeHtml, refreshIcons, setHtml, setText } from "./UtilidadesDocente.js";
-import { TRIMESTERS, getTeacherContext } from "../../services/teacherData.js";
+import { getTeacherContext } from "../../services/teacherData.js";
 import { renderAttendance } from "./AsistenciaDocente.js";
 import { renderTasks } from "./AgendaDocente.js";
 import { renderDateGrading } from "./CalificarDocente.js";
@@ -54,27 +54,9 @@ function renderCourseTabs(context, onSelect) {
   });
 }
 
-function renderTrimesterTabs(onSelect) {
-  const holder = document.querySelector("[data-teacher-trimester-tabs]");
-  if (!holder) return;
-
-  holder.innerHTML = TRIMESTERS.map((trimester) => `
-    <button type="button" data-teacher-trimester-id="${trimester.id}" class="shrink-0 rounded-2xl border px-4 py-2 text-sm font-black transition ${trimester.id === teacherState.trimesterId ? "border-school-navy bg-school-sky text-school-navy shadow-soft ring-2 ring-school-navy/10" : "border-slate-200 bg-white text-slate-600 hover:border-school-navy/40"}">${escapeHtml(trimester.label)}</button>
-  `).join("");
-
-  holder.querySelectorAll("[data-teacher-trimester-id]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      setActiveTrimester(button.dataset.teacherTrimesterId);
-      await persistActiveTrimester(teacherState.context);
-      onSelect?.();
-    });
-  });
-}
-
 async function renderRoute(route) {
   const context = teacherState.context;
   renderCourseTabs(context, () => renderRoute(route));
-  renderTrimesterTabs(() => renderRoute(route));
   setText("[data-teacher-page-status]", context.courses.length ? "Datos del docente cargados" : "Sin asignaciones");
 
   if (route === "/docente/asistencia") await renderAttendance(context);

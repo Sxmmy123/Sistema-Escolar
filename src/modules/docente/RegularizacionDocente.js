@@ -91,26 +91,39 @@ function regularizationPendingIcon(reason = "") {
   return "circle-help";
 }
 
-function regularizationSegmentTone(attendanceState = "") {
-  return regularizationAttendanceInfo(attendanceState).segmentTone;
+function regularizationSubjectSummary(items = []) {
+  const subjects = new Map();
+  items.forEach((item) => {
+    const subject = findSubject(item.materiaId);
+    const id = item.materiaId || "sin_materia";
+    const previous = subjects.get(id);
+    subjects.set(id, {
+      id,
+      label: subject?.nombre || item.materiaId || "Materia",
+      short: subject?.corto || subject?.nombre || item.materiaId || "Materia",
+      color: subject?.color || "#e2e8f0",
+      count: (previous?.count || 0) + 1
+    });
+  });
+  return [...subjects.values()].sort((a, b) => a.label.localeCompare(b.label, "es"));
 }
 
 function regularizationPendingBar(items = [], type = "hacer") {
-  const filtered = items.filter((item) => (isSaberActivity(item) ? "saber" : "hacer") === type);
-  const slots = 10;
+  const filtered = items.filter((item) => (isSaberActivity(item) ? "saber" : "hacer") === type)
+    .sort((a, b) => String(a.materiaId || "").localeCompare(String(b.materiaId || "")));
   return `
-    <div class="min-w-0">
-      <div class="mb-1 flex items-center justify-between gap-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+    <div class="min-w-0" data-regularization-type="${type}" data-regularization-count="${filtered.length}">
+      <div class="mb-1 flex items-baseline justify-between gap-2 text-[10px] font-medium text-slate-600 sm:text-xs">
         <span>${type === "saber" ? "Saber" : "Hacer"}</span>
-        <span>${filtered.length}</span>
+        <span class="text-sm font-semibold tabular-nums text-slate-900">${filtered.length}</span>
       </div>
-      <div class="grid h-4 grid-cols-10 gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5" role="img" aria-label="${filtered.length} actividad(es) pendientes de ${type}">
-        ${Array.from({ length: slots }, (_, index) => {
-          const item = filtered[index];
-          const attendanceInfo = item ? regularizationAttendanceInfo(item.pendienteAsistencia) : null;
-          return `<span class="min-w-0 rounded-[2px] ${attendanceInfo ? attendanceInfo.segmentTone : "bg-slate-200"}"${item ? ` title="${escapeHtml(item.titulo || "Actividad")} · No presentó · ${escapeHtml(attendanceInfo.label)}"` : ""}></span>`;
+      ${filtered.length ? `<div class="regularization-pending-bar" data-regularization-bar style="--pending-count:${filtered.length}" role="img" aria-label="${filtered.length} actividad(es) sin presentar de ${type}">
+        ${filtered.map((item) => {
+          const attendanceInfo = regularizationAttendanceInfo(item.pendienteAsistencia);
+          const subject = findSubject(item.materiaId);
+          return `<span data-regularization-segment="${escapeHtml(item.id)}" data-regularization-subject-color="${escapeHtml(item.materiaId || "")}" class="min-w-0 rounded-[2px]" style="background:${subject?.color || "#e2e8f0"}" title="${escapeHtml(subject?.nombre || item.materiaId || "Materia")} · ${escapeHtml(item.titulo || "Actividad")} · No presentó · ${escapeHtml(attendanceInfo.label)}"></span>`;
         }).join("")}
-      </div>
+      </div>` : `<p class="flex h-8 items-center text-[10px] text-slate-500">Sin pendientes</p>`}
     </div>
   `;
 }
@@ -121,7 +134,8 @@ function regularizationStudentReportModal({
   gradesMap = {},
   attendanceRows = [],
   displayNumber = "",
-  course = null
+  course = null,
+  subjectId = "all"
 }) {
   if (!student) return "";
 
@@ -143,88 +157,68 @@ function regularizationStudentReportModal({
         || regularizationAttendanceInfo(a.attendanceState).priority - regularizationAttendanceInfo(b.attendanceState).priority
         || String(a.activity.fecha || "").localeCompare(String(b.activity.fecha || ""));
     });
+  const subjects = regularizationSubjectSummary(reportItems.map((item) => item.activity));
+  const visibleItems = subjectId === "all" ? reportItems : reportItems.filter((item) => item.activity.materiaId === subjectId);
   const reportGroups = [
     {
       id: "saber",
       label: "Saber",
-      headerClass: "border-amber-200 bg-amber-50 text-amber-900",
-      badgeClass: "bg-amber-100 text-amber-800",
-      items: reportItems.filter((item) => isSaberActivity(item.activity))
+      items: visibleItems.filter((item) => isSaberActivity(item.activity))
     },
     {
       id: "hacer",
       label: "Hacer",
-      headerClass: "border-green-200 bg-green-50 text-school-green",
-      badgeClass: "bg-green-100 text-school-green",
-      items: reportItems.filter((item) => !isSaberActivity(item.activity))
+      items: visibleItems.filter((item) => !isSaberActivity(item.activity))
     }
   ].filter((group) => group.items.length);
-  const saberCount = reportItems.filter((item) => isSaberActivity(item.activity)).length;
-  const hacerCount = reportItems.length - saberCount;
+  const saberCount = visibleItems.filter((item) => isSaberActivity(item.activity)).length;
+  const hacerCount = visibleItems.length - saberCount;
 
   return `
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-2 sm:p-5">
-      <section class="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:rounded-3xl">
-        <header class="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-5 sm:py-4">
+    <div class="regularization-report-backdrop" data-regularization-report-backdrop>
+      <section class="regularization-report" data-regularization-report role="dialog" aria-modal="true" aria-labelledby="regularization-report-title">
+        <header class="regularization-report-header">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-[9px] font-semibold uppercase tracking-[.14em] text-school-green sm:text-[10px]">Pendientes del estudiante</p>
-              <h3 class="mt-0.5 truncate text-base font-semibold text-slate-900 sm:text-xl">${escapeHtml(displayNumber)}. ${escapeHtml(student.nombre)}</h3>
-              <p class="mt-1 text-[10px] text-slate-500 sm:text-xs">${course ? `${escapeHtml(course.nombre)} · ` : ""}Solo se muestran actividades que todavia debe regularizar.</p>
+              <h3 id="regularization-report-title" class="regularization-report-title">${escapeHtml(displayNumber)}. ${escapeHtml(student.nombre)}</h3>
+              <p class="mt-1 text-xs text-slate-500">${course ? `${escapeHtml(course.nombre)} · ` : ""}${escapeHtml(selectedTrimester().label)}</p>
             </div>
             <button type="button" data-close-regularization-report class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 transition hover:bg-slate-200 sm:h-9 sm:w-9 sm:rounded-xl" aria-label="Cerrar">
               ${icon("x", "h-4 w-4 sm:h-5 sm:w-5")}
             </button>
           </div>
-          <div class="mt-3 grid grid-cols-3 gap-1.5 sm:max-w-lg sm:gap-2">
-            <div class="rounded-lg bg-green-50 px-3 py-2">
-              <p class="text-[9px] font-medium uppercase text-slate-500">Hacer</p>
-              <p class="mt-0.5 text-lg font-semibold text-school-green">${hacerCount}</p>
-            </div>
-            <div class="rounded-lg bg-amber-50 px-3 py-2">
-              <p class="text-[9px] font-medium uppercase text-slate-500">Saber</p>
-              <p class="mt-0.5 text-lg font-semibold text-amber-800">${saberCount}</p>
-            </div>
-            <div class="rounded-lg bg-red-50 px-3 py-2">
-              <p class="text-[9px] font-medium uppercase text-slate-500">Total</p>
-              <p class="mt-0.5 text-lg font-semibold text-red-600">${reportItems.length}</p>
-            </div>
+          <div class="regularization-report-toolbar">
+            <div class="regularization-report-counts" aria-live="polite"><span>Saber <strong>${saberCount}</strong></span><span>Hacer <strong>${hacerCount}</strong></span><span>Sin presentar <strong>${visibleItems.length}</strong></span></div>
+            ${visibleItems.length ? `<button type="button" data-regularization-start-grading class="inline-flex items-center justify-center gap-1.5 rounded-md bg-school-green px-3 py-2 text-xs font-semibold text-white">${icon("pencil", "h-3.5 w-3.5")} Calificar</button>` : ""}
           </div>
+          ${subjects.length ? `<div class="regularization-subject-filters" role="group" aria-label="Filtrar pendientes por materia">
+            <button type="button" data-regularization-subject="all" aria-pressed="${subjectId === "all"}">Todas <span>${reportItems.length}</span></button>
+            ${subjects.map((subject) => `<button type="button" data-regularization-subject="${escapeHtml(subject.id)}" aria-pressed="${subjectId === subject.id}" style="--subject-color:${subject.color}"><span class="regularization-subject-swatch" aria-hidden="true"></span>${escapeHtml(subject.label)}<span>${subject.count}</span></button>`).join("")}
+          </div>` : ""}
         </header>
-        <div class="min-h-0 flex-1 space-y-3 overflow-auto bg-slate-50/70 p-2.5 sm:p-4">
+        <div class="regularization-report-body" data-regularization-report-body>
           ${reportItems.length ? `
+            <div class="regularization-report-groups">
             ${reportGroups.map((group) => `
-              <section class="overflow-hidden rounded-xl border ${group.headerClass}">
-                <div class="flex items-center justify-between gap-2 border-b border-current/10 px-3 py-2">
-                  <span class="rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${group.badgeClass}">${group.label}</span>
-                  <span class="text-[10px] font-semibold">${group.items.length} pendiente(s)</span>
-                </div>
-                <div class="divide-y divide-slate-100 bg-white">
-                  ${group.items.map(({ activity, attendanceState, pendingReason }) => {
+              <section class="regularization-report-group" data-regularization-report-dimension="${group.id}">
+                <h4 class="regularization-report-group-title">${group.label}<span>${group.items.length} pendiente(s)</span></h4>
+                <table class="regularization-report-table"><colgroup><col><col class="regularization-reason-column"><col class="regularization-action-column"></colgroup>
+                  <thead><tr><th scope="col">Actividad</th><th scope="col">Asistencia</th><th scope="col"><span class="sr-only">Calificar</span></th></tr></thead>
+                  <tbody>${group.items.map(({ activity, attendanceState }) => {
                     const subject = findSubject(activity.materiaId);
                     const attendanceInfo = regularizationAttendanceInfo(attendanceState);
                     return `
-                      <article class="grid grid-cols-[auto_minmax(0,1fr)] overflow-hidden bg-white">
-                        <span class="regularization-attendance-rail flex min-h-24 items-center justify-center border-r px-1.5 py-2 text-[9px] font-semibold uppercase ${attendanceInfo.railTone}" title="${escapeHtml(attendanceInfo.detail)}">${escapeHtml(attendanceInfo.label)}</span>
-                        <div class="grid min-w-0 gap-2 px-3 py-2.5 sm:grid-cols-[1fr_auto] sm:items-center">
-                          <div class="min-w-0">
-                            <div class="flex flex-wrap items-center gap-1.5">
-                              <span class="rounded-md bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">${escapeHtml(subject?.nombre || activity.materiaId || "Materia")}</span>
-                              <span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-semibold ring-1 ring-inset ${regularizationPendingTone(pendingReason)}">${icon(regularizationPendingIcon(pendingReason), "h-3 w-3")} No presentó</span>
-                            </div>
-                            <p class="mt-1 truncate text-xs font-semibold text-slate-900 sm:text-sm" title="${escapeHtml(activity.titulo || "Actividad")}">${escapeHtml(activity.titulo || "Actividad")}</p>
-                            <p class="mt-0.5 text-[9px] text-slate-500 sm:text-[10px]">${escapeHtml(activity.fecha ? activity.fecha.split("-").reverse().join("/") : "Sin fecha")} · ${escapeHtml(attendanceInfo.detail)}</p>
-                          </div>
-                          <button type="button" data-regularization-grade-activity="${activity.id}" data-regularization-grade-student="${student.id}" class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-school-green px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-school-navy">
-                            ${icon("pencil", "h-3.5 w-3.5")} Calificar
-                          </button>
-                        </div>
-                      </article>
+                      <tr data-regularization-report-activity="${escapeHtml(activity.id)}" data-regularization-report-subject="${escapeHtml(activity.materiaId || "")}" style="--subject-color:${subject?.color || "#e2e8f0"}">
+                        <th scope="row"><span class="regularization-activity-title">${escapeHtml(activity.titulo || "Actividad")}</span><span class="regularization-activity-meta">${subjectId === "all" ? `<span class="regularization-row-subject">${escapeHtml(subject?.nombre || activity.materiaId || "Materia")}</span> · ` : ""}${escapeHtml(activity.fecha ? activity.fecha.slice(5).split("-").reverse().join("/") : "Sin fecha")}</span></th>
+                        <td><span class="regularization-reason inline-flex items-center gap-1 ring-1 ring-inset ${attendanceInfo.badgeTone}" title="${escapeHtml(attendanceInfo.detail)}">${icon(attendanceInfo.icon, "h-3 w-3 shrink-0")} ${escapeHtml(attendanceInfo.label)}</span></td>
+                        <td><button type="button" data-regularization-grade-activity="${escapeHtml(activity.id)}" data-regularization-grade-student="${escapeHtml(student.id)}" class="regularization-grade-row" title="Calificar ${escapeHtml(activity.titulo || "actividad")}" aria-label="Calificar ${escapeHtml(activity.titulo || "actividad")}">${icon("pencil", "h-4 w-4")}</button></td>
+                      </tr>
                     `;
-                  }).join("")}
-                </div>
+                  }).join("")}</tbody>
+                </table>
               </section>
             `).join("")}
+            </div>
           ` : `<div class="rounded-xl border border-green-200 bg-green-50 px-4 py-8 text-center text-xs font-semibold text-school-green">Este alumno ya no tiene actividades pendientes.</div>`}
         </div>
       </section>
@@ -232,8 +226,10 @@ function regularizationStudentReportModal({
   `;
 }
 
-function regularizationGradeModal({ activity, student, currentGrade, attendanceState = "", pendingReason = "", displayNumber = "", hasNext = false }) {
+function regularizationGradeModal({ activity, student, currentGrade, attendanceState = "", pendingReason = "", displayNumber = "", nextActivity = null }) {
   if (!activity || !student) return "";
+  const hasNext = Boolean(nextActivity);
+  const dimension = isSaberActivity(activity) ? "Saber" : "Hacer";
   const subject = findSubject(activity.materiaId);
   const max = Math.max(1, Math.min(100, Number(activity.maximo || 100)));
   const quickValues = max <= 20 ? Array.from({ length: max }, (_, index) => index + 1) : [];
@@ -243,20 +239,20 @@ function regularizationGradeModal({ activity, student, currentGrade, attendanceS
   const responsibilityValue = attendanceInfo.id === "licencia" || currentDeliveryState === DELIVERY_STATES.ON_TIME ? 100 : 50;
   return `
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-3 py-5">
-      <section class="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl">
-        <div class="bg-school-green px-4 py-3 text-white">
+      <section class="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-2xl" data-regularization-grade-dialog role="dialog" aria-modal="true" aria-labelledby="regularization-grade-title">
+        <div class="border-b border-slate-200 px-4 py-3 text-slate-900" style="border-top:5px solid ${subject?.color || "#e2e8f0"}">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-[10px] font-black uppercase tracking-[.16em] text-white/75">Regularizacion</p>
-              <h3 class="mt-0.5 truncate text-lg font-black">${escapeHtml(displayNumber)}. ${escapeHtml(student.nombre)}</h3>
-              <p class="mt-1 truncate text-xs font-bold text-white/80">${activity.cursoNombre ? `${escapeHtml(activity.cursoNombre)} · ` : ""}${escapeHtml(subject?.nombre || activity.materiaId)} · ${escapeHtml(activity.titulo || "Actividad")}</p>
+              <p class="text-xs text-slate-500">${dimension} · ${escapeHtml(subject?.nombre || activity.materiaId)} · Regularizacion</p>
+              <h3 id="regularization-grade-title" class="mt-0.5 break-words text-base font-semibold">${escapeHtml(displayNumber)}. ${escapeHtml(student.nombre)}</h3>
+              <p class="mt-1 break-words text-sm text-slate-700">${escapeHtml(activity.titulo || "Actividad")}</p>
             </div>
-            <button type="button" data-close-regularization-grade class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/10 text-white hover:bg-white/20">${icon("x", "h-5 w-5")}</button>
+            <button type="button" data-close-regularization-grade class="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200" aria-label="Volver a los pendientes">${icon("x", "h-4 w-4")}</button>
           </div>
         </div>
         <div class="space-y-3 p-4">
           <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-stretch overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-            <span class="regularization-attendance-rail flex min-h-20 items-center justify-center border-r px-1.5 py-2 text-[9px] font-semibold uppercase ${attendanceInfo.railTone}">${escapeHtml(attendanceInfo.label)}</span>
+            <span class="regularization-attendance-rail flex min-h-14 items-center justify-center border-r px-1.5 py-2 text-[9px] font-semibold uppercase ${attendanceInfo.railTone}">${escapeHtml(attendanceInfo.label)}</span>
             <div class="self-center px-3 py-2">
               <p class="text-[10px] font-semibold uppercase text-slate-500">Estado de la actividad</p>
               <span class="mt-1 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold ring-1 ring-inset ${regularizationPendingTone(pendingReason)}">
@@ -285,7 +281,7 @@ function regularizationGradeModal({ activity, student, currentGrade, attendanceS
             </label>
             <div class="grid gap-2 ${hasNext ? "sm:grid-cols-2" : ""}">
               <button type="button" data-save-regularization-grade-input class="w-full rounded-xl border border-school-green px-3 py-2.5 text-xs font-semibold text-school-green transition hover:bg-green-50">Guardar</button>
-              ${hasNext ? `<button type="button" data-save-next-regularization-grade-input class="w-full rounded-xl bg-school-green px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-school-navy">Guardar y siguiente</button>` : ""}
+              ${hasNext ? `<button type="button" data-save-next-regularization-grade-input title="Siguiente de ${dimension}: ${escapeHtml(nextActivity.titulo || "Actividad")}" class="w-full rounded-xl bg-school-green px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-school-navy">Guardar y siguiente</button>` : ""}
             </div>
           `}
           <button type="button" data-regularization-grade-value="0" class="w-full rounded-2xl border border-red-100 bg-red-50 px-4 py-2.5 text-xs font-black text-red-700 transition hover:bg-red-100">No presento</button>
@@ -423,7 +419,13 @@ export async function renderRegularization(context) {
         || b.items.length - a.items.length
         || String(a.student.nombre || "").localeCompare(String(b.student.nombre || ""), "es", { sensitivity: "base" });
     });
-  const regularizationQueue = pendingRows.flatMap(({ student, items }) => [...items]
+  const reportStudentId = teacherState.regularizationReportStudentId;
+  const selectedRegularizationReportEntry = pendingByStudent.find(({ student }) => student.id === reportStudentId) || null;
+  const selectedRegularizationReportStudent = selectedRegularizationReportEntry?.student || studentsByName.find((student) => student.id === reportStudentId) || null;
+  const requestedSubject = teacherState.regularizationSubject?.studentId === reportStudentId ? teacherState.regularizationSubject.id : "all";
+  const reportSubjectId = selectedRegularizationReportEntry?.items.some((item) => item.materiaId === requestedSubject) ? requestedSubject : "all";
+  const regularizationQueue = pendingRows.filter(({ student }) => !reportStudentId || student.id === reportStudentId)
+    .flatMap(({ student, items }) => items.filter((item) => !reportStudentId || reportSubjectId === "all" || item.materiaId === reportSubjectId)
     .sort((a, b) => regularizationPendingPriority([a]) - regularizationPendingPriority([b])
       || String(a.fecha || "").localeCompare(String(b.fecha || "")))
     .map((activity) => ({ activity, student })));
@@ -433,8 +435,6 @@ export async function renderRegularization(context) {
   )) || null;
   const selectedRegularizationActivity = selectedRegularizationTarget?.activity || null;
   const selectedRegularizationStudent = selectedRegularizationTarget?.student || null;
-  const selectedRegularizationReportEntry = pendingByStudent.find(({ student }) => student.id === teacherState.regularizationReportStudentId) || null;
-  const selectedRegularizationReportStudent = selectedRegularizationReportEntry?.student || null;
   const selectedRegularizationGrade = selectedRegularizationActivity && selectedRegularizationStudent
     ? gradesMap[selectedRegularizationActivity.id]?.[selectedRegularizationStudent.id]
     : null;
@@ -442,8 +442,14 @@ export async function renderRegularization(context) {
     ? attendanceStateForDate(selectedRegularizationStudent.id, selectedRegularizationActivity.fecha, attendanceRows)
     : "";
   const selectedRegularizationPendingReason = regularizationPendingReason(selectedRegularizationGrade, selectedRegularizationAttendanceState);
-  const currentQueueIndex = regularizationQueue.findIndex(({ activity, student }) => activity.id === selectedRegularizationActivity?.id && student.id === selectedRegularizationStudent?.id);
-  const nextRegularizationTarget = currentQueueIndex >= 0 ? regularizationQueue[currentQueueIndex + 1] || null : null;
+  const gradingQueue = selectedRegularizationTarget ? regularizationQueue.filter(({ activity, student }) => (
+    student.id === selectedRegularizationStudent.id
+    && activity.cursoId === selectedRegularizationActivity.cursoId
+    && activity.materiaId === selectedRegularizationActivity.materiaId
+    && isSaberActivity(activity) === isSaberActivity(selectedRegularizationActivity)
+  )) : [];
+  const currentQueueIndex = gradingQueue.findIndex(({ activity }) => activity.id === selectedRegularizationActivity?.id);
+  const nextRegularizationTarget = currentQueueIndex >= 0 ? gradingQueue[currentQueueIndex + 1] || null : null;
 
   container.innerHTML = `
     <section class="space-y-3 sm:space-y-4">
@@ -463,7 +469,11 @@ export async function renderRegularization(context) {
               </button>
           </div>
         </div>
-        <div class="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
+        <div class="mt-3 grid grid-cols-2 gap-1.5 sm:gap-2 lg:grid-cols-5">
+          <div class="col-span-2 rounded-lg bg-red-50 px-2.5 py-2 lg:col-span-1">
+            <p class="text-[10px] font-medium text-red-700">No presentadas</p>
+            <p class="mt-0.5 text-lg font-semibold tabular-nums text-red-700" data-regularization-total="${pendingTotal}">${pendingTotal}</p>
+          </div>
           <div class="rounded-lg bg-slate-50 px-2.5 py-2">
             <p class="text-[8px] font-semibold uppercase text-slate-500 sm:text-[9px]">Alumnos</p>
             <p class="mt-0.5 text-lg font-semibold text-slate-900">${pendingByStudent.length}</p>
@@ -504,11 +514,8 @@ export async function renderRegularization(context) {
               ${teacherState.regularizationSearch ? `<button type="button" data-clear-regularization-search class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Limpiar busqueda">${icon("x", "h-3.5 w-3.5")}</button>` : ""}
           </label>` : ""}
         </div>
-        ${pendingByStudent.length ? `<div class="mt-2 flex flex-wrap gap-1.5 text-[8px] sm:mt-3 sm:text-[9px]">
-          <span class="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-1 text-red-700 ring-1 ring-inset ring-red-200">${icon("circle-x", "h-3 w-3")} Estado: No presentó</span>
-          <span class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-1 text-amber-800 ring-1 ring-inset ring-amber-200">${icon("user-check", "h-3 w-3")} Presente</span>
-          <span class="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-1 text-red-700 ring-1 ring-inset ring-red-200">${icon("user-x", "h-3 w-3")} Falta</span>
-          <span class="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-1 text-purple-700 ring-1 ring-inset ring-purple-200">${icon("shield-check", "h-3 w-3")} Licencia prioritaria</span>
+        ${pendingByStudent.length ? `<div class="regularization-subject-legend" aria-label="Colores de materias">
+          ${regularizationSubjectSummary(pendingRows.flatMap(({ items }) => items)).map((subject) => `<span title="${escapeHtml(subject.label)}" style="--subject-color:${subject.color}"><span class="regularization-subject-swatch" aria-hidden="true"></span>${escapeHtml(subject.label)}</span>`).join("")}
         </div>` : ""}
         <div class="mt-3 grid gap-2 lg:grid-cols-2">
           ${pendingRows.length ? pendingRows.map(({ student, items }) => {
@@ -529,8 +536,11 @@ export async function renderRegularization(context) {
                 <span class="min-w-0">
                   <span class="flex min-w-0 flex-wrap items-center gap-1.5">
                     <span class="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900 sm:text-sm" title="${escapeHtml(student.nombre)}">${escapeHtml(student.nombre)}</span>
-                    <span class="rounded-full bg-red-50 px-2 py-0.5 text-[9px] font-semibold text-red-600">${items.length} sin presentar</span>
                     ${showCourse ? `<span class="rounded-md px-1.5 py-0.5 text-[8px] font-semibold text-white" style="background:${courseColor}">${escapeHtml(studentCourse?.nombre || "Curso")}</span>` : ""}
+                  </span>
+                  <span class="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-[10px] text-slate-600 sm:text-xs">
+                    <span>Total sin presentar</span>
+                    <span class="text-base font-semibold tabular-nums text-red-700" data-regularization-student-total="${student.id}" data-pending-count="${items.length}">${items.length}</span>
                   </span>
                   <span class="mt-2 grid grid-cols-2 gap-2">
                     ${regularizationPendingBar(items, "hacer")}
@@ -555,13 +565,14 @@ export async function renderRegularization(context) {
           `}
         </div>
       </div>
-      ${regularizationStudentReportModal({
+      ${selectedRegularizationActivity ? "" : regularizationStudentReportModal({
         student: selectedRegularizationReportStudent,
         activities: selectedRegularizationReportEntry?.items || [],
         gradesMap,
         attendanceRows,
         displayNumber: selectedRegularizationReportStudent ? regularizationOrderMap.get(selectedRegularizationReportStudent.id) || "" : "",
-        course: selectedRegularizationReportStudent ? coursesById[selectedRegularizationReportStudent.cursoId] : null
+        course: selectedRegularizationReportStudent ? coursesById[selectedRegularizationReportStudent.cursoId] : null,
+        subjectId: reportSubjectId
       })}
       ${regularizationGradeModal({
         activity: selectedRegularizationActivity,
@@ -570,7 +581,7 @@ export async function renderRegularization(context) {
         attendanceState: selectedRegularizationAttendanceState,
         pendingReason: selectedRegularizationPendingReason,
         displayNumber: selectedRegularizationStudent ? regularizationOrderMap.get(selectedRegularizationStudent.id) || "" : "",
-        hasNext: Boolean(nextRegularizationTarget)
+        nextActivity: nextRegularizationTarget?.activity || null
       })}
     </section>
   `;
@@ -602,22 +613,55 @@ export async function renderRegularization(context) {
       teacherState.regularizationGradeActivityId = button.dataset.regularizationGradeActivity || "";
       teacherState.regularizationGradeStudentId = button.dataset.regularizationGradeStudent || "";
       await renderRegularization(context);
+      container.querySelector("[data-regularization-grade-input]")?.focus();
     });
   });
   container.querySelectorAll("[data-regularization-report-student]").forEach((button) => {
     button.addEventListener("click", async () => {
       teacherState.regularizationReportStudentId = button.dataset.regularizationReportStudent || "";
+      teacherState.regularizationSubject = { studentId: teacherState.regularizationReportStudentId, id: "all" };
       await renderRegularization(context);
+      container.querySelector("[data-close-regularization-report]")?.focus();
     });
   });
-  container.querySelector("[data-close-regularization-report]")?.addEventListener("click", async () => {
+  container.querySelectorAll("[data-regularization-subject]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      teacherState.regularizationSubject = { studentId: reportStudentId, id: button.dataset.regularizationSubject };
+      await renderRegularization(context);
+      container.querySelector('[data-regularization-subject][aria-pressed="true"]')?.focus();
+    });
+  });
+  container.querySelector("[data-regularization-start-grading]")?.addEventListener("click", async () => {
+    const first = regularizationQueue[0];
+    if (!first) return;
+    teacherState.regularizationGradeActivityId = first.activity.id;
+    teacherState.regularizationGradeStudentId = first.student.id;
+    await renderRegularization(context);
+    container.querySelector("[data-regularization-grade-input]")?.focus();
+  });
+  const closeReport = async () => {
     teacherState.regularizationReportStudentId = "";
     await renderRegularization(context);
+    [...container.querySelectorAll("[data-regularization-report-student]")].find((button) => button.dataset.regularizationReportStudent === reportStudentId)?.focus();
+  };
+  container.querySelector("[data-close-regularization-report]")?.addEventListener("click", closeReport);
+  container.querySelector("[data-regularization-report-backdrop]")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeReport();
+  });
+  container.querySelector("[data-regularization-report]")?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeReport(); }
+    if (event.key === "Tab") {
+      const controls = [...event.currentTarget.querySelectorAll("button:not(:disabled)")];
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
   });
   container.querySelector("[data-close-regularization-grade]")?.addEventListener("click", async () => {
     teacherState.regularizationGradeActivityId = "";
     teacherState.regularizationGradeStudentId = "";
     await renderRegularization(context);
+    container.querySelector("[data-close-regularization-report]")?.focus();
   });
   const saveRegularizationGrade = async (value, advance = false) => {
     if (!selectedRegularizationActivity || !selectedRegularizationStudent) return;
@@ -658,6 +702,11 @@ export async function renderRegularization(context) {
       teacherState.regularizationGradeActivityId = advance && nextRegularizationTarget ? nextRegularizationTarget.activity.id : "";
       teacherState.regularizationGradeStudentId = advance && nextRegularizationTarget ? nextRegularizationTarget.student.id : "";
       await renderRegularization(context);
+      if (advance && nextRegularizationTarget) {
+        const input = container.querySelector("[data-regularization-grade-input]");
+        input?.focus();
+        input?.select();
+      } else container.querySelector("[data-close-regularization-report]")?.focus();
     } catch (error) {
       if (status) {
         status.className = "rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700";
@@ -678,6 +727,18 @@ export async function renderRegularization(context) {
   container.querySelector("[data-save-next-regularization-grade-input]")?.addEventListener("click", async () => {
     const input = container.querySelector("[data-regularization-grade-input]");
     await saveRegularizationGrade(input?.value?.trim() === "" ? Number.NaN : Number(input.value), true);
+  });
+  container.querySelector("[data-regularization-grade-input]")?.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const input = event.currentTarget;
+    await saveRegularizationGrade(input.value.trim() === "" ? Number.NaN : Number(input.value), Boolean(nextRegularizationTarget));
+  });
+  container.querySelector("[data-regularization-grade-dialog]")?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      container.querySelector("[data-close-regularization-grade]")?.click();
+    }
   });
   refreshIcons();
 }

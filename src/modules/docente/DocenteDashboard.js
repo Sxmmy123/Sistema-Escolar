@@ -36,24 +36,8 @@ function summaryCard(label, valueAttr, toneClass, iconName = "") {
 }
 
 export function DocenteDashboard() {
-  const today = new Date().toLocaleDateString("es-BO", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric"
-  });
-
   return appShell("docente", "/docente", `
-    <div class="mx-auto grid w-full max-w-[1120px] gap-2.5 sm:gap-3 lg:h-full lg:grid-rows-[38px_64px_88px_74px_minmax(0,1fr)_92px] lg:overflow-hidden" data-teacher-page>
-      <section class="hidden justify-end sm:flex">
-        <div class="w-full max-w-[245px] rounded-xl border border-amber-900/10 bg-white px-4 py-2 text-[11px] font-black capitalize text-school-bark shadow-soft">
-          <div class="flex h-full items-center justify-between gap-3">
-            <span>${today}</span>
-            ${icon("calendar-days", "h-4 w-4 text-school-green")}
-          </div>
-        </div>
-      </section>
-
+    <div class="mx-auto grid w-full max-w-[1120px] gap-2.5 sm:gap-3 lg:h-full lg:grid-rows-[64px_88px_74px_minmax(0,1fr)_92px] lg:overflow-hidden" data-teacher-page>
       <section class="rounded-lg border border-school-green/20 bg-white px-2.5 py-2 shadow-soft sm:rounded-xl sm:px-3">
         <div class="flex h-full items-center justify-between gap-2">
           <p class="text-xs font-medium text-slate-600">Seleccionar trimestre</p>
@@ -150,8 +134,9 @@ export function DocenteDashboard() {
           </p>
           <div class="mt-5 flex gap-2">
             <button type="button" class="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-600" data-trimester-cancel>Cancelar</button>
-            <button type="button" class="flex-1 rounded-2xl bg-school-green px-4 py-3 text-sm font-black text-white shadow-soft" data-trimester-confirm>Aceptar</button>
+            <button type="button" class="flex-1 rounded-2xl bg-school-green px-4 py-3 text-sm font-black text-white shadow-soft disabled:opacity-50" data-trimester-confirm>Aceptar</button>
           </div>
+          <p class="mt-3 text-sm text-red-700" role="status" data-trimester-confirm-status></p>
         </div>
       </div>
     </div>

@@ -9,7 +9,7 @@ import {
   todayIso,
   TRIMESTERS
 } from "../../services/teacherData.js";
-import { persistActiveTrimester, selectedTrimester, setActiveTrimester, teacherState } from "./EstadoDocente.js";
+import { persistActiveTrimester, selectedTrimester, teacherState } from "./EstadoDocente.js";
 import { emptyState, escapeHtml, refreshIcons, scheduleList, setHtml, setText } from "./UtilidadesDocente.js";
 
 function teacherCoursesCards(context) {
@@ -41,12 +41,14 @@ function openTrimesterConfirm(trimesterId) {
   if (!trimester || trimester.id === teacherState.trimesterId) return;
   teacherState.pendingTrimesterId = trimester.id;
   setText("[data-trimester-confirm-label]", trimester.label);
+  setText("[data-trimester-confirm-status]", "");
   const modal = document.querySelector("[data-trimester-confirm-modal]");
   if (modal) modal.classList.remove("hidden");
   if (modal) modal.classList.add("flex");
 }
 
 function closeTrimesterConfirm() {
+  if (document.querySelector("[data-trimester-confirm]")?.disabled) return;
   teacherState.pendingTrimesterId = "";
   const modal = document.querySelector("[data-trimester-confirm-modal]");
   if (modal) {
@@ -77,12 +79,21 @@ function renderDashboardTrimester(context) {
   }
   if (confirmButton) confirmButton.onclick = async () => {
     const nextTrimesterId = teacherState.pendingTrimesterId;
-    closeTrimesterConfirm();
-    if (!nextTrimesterId) return;
-    setActiveTrimester(nextTrimesterId);
-    await persistActiveTrimester(context);
-    renderDashboardTrimester(context);
-    await renderDashboard(context);
+    if (!nextTrimesterId || confirmButton.disabled) return;
+    confirmButton.disabled = true;
+    if (cancelButton) cancelButton.disabled = true;
+    setText("[data-trimester-confirm-status]", "Guardando trimestre...");
+    try {
+      await persistActiveTrimester(context, nextTrimesterId);
+      confirmButton.disabled = false;
+      closeTrimesterConfirm();
+      await renderDashboard(context);
+    } catch (error) {
+      setText("[data-trimester-confirm-status]", `No se guardo el cambio. Se mantiene ${selectedTrimester().label}. ${error.message}`);
+    } finally {
+      confirmButton.disabled = false;
+      if (cancelButton) cancelButton.disabled = false;
+    }
   };
 }
 

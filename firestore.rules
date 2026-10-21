@@ -17,7 +17,20 @@ service cloud.firestore {
     function isDirector() { return hasRole("director"); }
     function activeYear() { return get(/databases/$(database)/documents/configuracion/sistema).data.gestionActivaId; }
     function validYear(year) { return year is string && year.matches("20[0-9]{2}"); }
-    function writableYear(year) { return validYear(year) && year == activeYear(); }
+    function writableYear(year) {
+      let system = get(/databases/$(database)/documents/configuracion/sistema).data;
+      let annual = get(/databases/$(database)/documents/gestiones/$(year)).data;
+      let calendarYear = (request.time - duration.value(4, "h")).year();
+      return validYear(year) && year == system.gestionActivaId && year == string(calendarYear) &&
+        system.versionModelo == 2 && annual != null && annual.ano == calendarYear;
+    }
+    function dateInYear(year, value) {
+      return value is string && value.matches(year + "-[0-9]{2}-[0-9]{2}");
+    }
+    function validActivityDate(year, data) {
+      return dateInYear(year, data.get("fecha", "")) ||
+        (data.get("interno", false) == true && data.get("fecha", "") == "");
+    }
     function validTerm(term) { return term in ["t1", "t2", "t3"]; }
     function isAlumno() {
       return hasRole("alumno") && profile().get("alumnoId", "") != "" &&
@@ -79,6 +92,7 @@ service cloud.firestore {
         data.cursoId == activity(year, data.actividadId).cursoId &&
         data.materiaId == activity(year, data.actividadId).materiaId &&
         data.trimestreId == activity(year, data.actividadId).trimestreId &&
+        (data.get("fechaEntrega", "") == "" || dateInYear(year, data.fechaEntrega)) &&
         activeMember(year, data.alumnoId, data.cursoId) && data.calificadoPorUid == request.auth.uid &&
         data.maximo is number && data.maximo - data.maximo == 0 &&
         data.maximo == activity(year, data.actividadId).get("maximo", 100) && data.maximo > 0 &&
@@ -96,7 +110,8 @@ service cloud.firestore {
       let terms = next.get("trimestresPorGestion", {});
       return next is map && next.keys().hasOnly(["trimestresPorGestion"]) && terms is map &&
         terms.diff(previous.get("trimestresPorGestion", {})).affectedKeys().hasOnly([activeYear()]) &&
-        (!(activeYear() in terms) || validTerm(terms[activeYear()]));
+        (!(activeYear() in terms) || validTerm(terms[activeYear()])) &&
+        (terms == previous.get("trimestresPorGestion", {}) || writableYear(activeYear()));
     }
     function validEmailChange() {
       return !("authEmail" in request.resource.data.diff(resource.data).affectedKeys()) ||
@@ -192,10 +207,10 @@ service cloud.firestore {
         allow get: if isAdmin() || (isDocente() && !exists(/databases/$(database)/documents/gestiones/$(gestion)/actividades/$(id)));
         allow read: if readCourse(gestion, resource.data.cursoId);
         allow create: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, request.resource.data.cursoId, request.resource.data.materiaId) &&
-          request.resource.data.creadoPorUid == request.auth.uid && validTerm(request.resource.data.trimestreId));
+          request.resource.data.creadoPorUid == request.auth.uid && validTerm(request.resource.data.trimestreId) && validActivityDate(gestion, request.resource.data));
         allow update: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, resource.data.cursoId, resource.data.materiaId) &&
           teacherSubject(gestion, request.resource.data.cursoId, request.resource.data.materiaId) &&
-          request.resource.data.get("creadoPorUid", "") == resource.data.get("creadoPorUid", "") && validTerm(request.resource.data.trimestreId) && preservesGradedActivity());
+          request.resource.data.get("creadoPorUid", "") == resource.data.get("creadoPorUid", "") && validTerm(request.resource.data.trimestreId) && validActivityDate(gestion, request.resource.data) && preservesGradedActivity());
         allow delete: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, resource.data.cursoId, resource.data.materiaId) &&
           resource.data.get("tieneCalificaciones", false) == false);
       }
@@ -204,7 +219,7 @@ service cloud.firestore {
           let data = request.resource.data;
           return writableYear(gestion) && teacherCourse(gestion, data.cursoId) && activeMember(gestion, data.alumnoId, data.cursoId) &&
             data.registradoPorUid == request.auth.uid && data.estado in ["presente", "falta", "atraso", "permiso", "licencia"] &&
-            validTerm(data.trimestreId) && data.fecha is string && data.fecha.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}");
+            validTerm(data.trimestreId) && dateInYear(gestion, data.fecha);
         }
         allow read: if isAdmin() || isDirector() || teacherCourse(gestion, resource.data.cursoId) || ownEnrolledStudent(gestion, resource.data.alumnoId);
         allow create: if isAdmin() || validAttendance();

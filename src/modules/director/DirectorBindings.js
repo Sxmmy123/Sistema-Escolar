@@ -1,4 +1,5 @@
 import { bindDirectorAlerts } from "./DirectorAlerts.js";
+import { bindDirectorConfig } from "./DirectorConfig.js";
 import { bindDirectorAttendance } from "./DirectorAttendance.js";
 import { bindDirectorCoursesSchedules } from "./DirectorCoursesSchedules.js";
 import { bindDirectorDashboard } from "./DirectorDashboard.js";
@@ -7,6 +8,7 @@ import { bindDirectorStudents } from "./DirectorStudents.js";
 import { bindDirectorTeachers } from "./DirectorTeachers.js";
 
 export function bindDirectorPages(route) {
+  bindDirectorConfig(route);
   bindDirectorAlerts(route);
   bindDirectorDashboard(route);
   bindDirectorStudents(route);

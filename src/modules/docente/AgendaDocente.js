@@ -5,6 +5,7 @@ import { activityEvaluationLabel, activityPointsLabel, deliveryEditorData, mater
 import { selectedTrimester, teacherState } from "./EstadoDocente.js";
 import { deleteActivity, getTeacherScheduleRows, getTeacherStudents, listActivities, listAttendanceForCourse, listGradesForCourse, normalizeGrade, saveActivity, saveGrade, todayIso, updateActivity, upsertTeacherNotesSnapshotGrade } from "../../services/teacherData.js";
 import { attendanceLabel, gradeByActivityAndStudent, isMaterialActivity, isSaberActivity, isScoredMaterialActivity } from "./AcademicoDocente.js";
+import { gestionActual } from "../../services/rutasFirestore.js";
 
 function materialEditorRow(item = {}) {
   return `
@@ -71,6 +72,7 @@ export async function renderTasks(context) {
   const container = document.querySelector("[data-teacher-tasks]");
   const course = selectedCourse(context);
   if (!container) return;
+  if (teacherState.taskMonth.slice(0, 4) !== gestionActual()) teacherState.taskMonth = `${gestionActual()}-01`;
   teacherState.gradeModalActivityId = "";
   teacherState.gradeIndex = 0;
   if (!context.courses.length) {
@@ -238,8 +240,8 @@ export async function renderTasks(context) {
             detail: `${monthLabel(teacherState.taskMonth)} · ${monthActivities.length} actividad(es)`
           })}
           <div class="flex flex-wrap gap-2">
-            <button type="button" class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-black text-school-navy" data-task-month-prev>${icon("chevron-left", "mr-1 inline h-4 w-4")}Anterior</button>
-            <button type="button" class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-black text-school-navy" data-task-month-next>Siguiente${icon("chevron-right", "ml-1 inline h-4 w-4")}</button>
+            <button type="button" class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-black text-school-navy disabled:opacity-40" data-task-month-prev ${teacherState.taskMonth.endsWith("-01") ? "disabled" : ""}>${icon("chevron-left", "mr-1 inline h-4 w-4")}Anterior</button>
+            <button type="button" class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-black text-school-navy disabled:opacity-40" data-task-month-next ${teacherState.taskMonth.endsWith("-12") ? "disabled" : ""}>Siguiente${icon("chevron-right", "ml-1 inline h-4 w-4")}</button>
           </div>
         </div>
         <div class="overflow-x-auto p-4 lg:p-5">

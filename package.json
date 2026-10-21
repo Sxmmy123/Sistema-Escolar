@@ -7,12 +7,13 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test tests/calculoAcademico.test.js tests/calcularAlertasDocente.test.js tests/revisionActividad.test.js tests/identidadAlumno.test.js tests/estructuraDatos.test.js tests/proteccionActividad.test.js tests/asistenciaCompartida.test.js tests/modulosDocente.test.js",
+    "test": "node --test tests/calculoAcademico.test.js tests/calcularAlertasDocente.test.js tests/revisionActividad.test.js tests/identidadAlumno.test.js tests/registroAlumnos.test.js tests/tablaAlumnos.test.js tests/accesosAlumnos.test.js tests/estructuraDatos.test.js tests/proteccionActividad.test.js tests/asistenciaCompartida.test.js tests/modulosDocente.test.js tests/gestionEscolar.test.js tests/registroEscolar.test.js tests/inicioRegistroAdmin.test.js tests/cargaPorRol.test.js tests/calificarDocente.test.js tests/directorData.test.js tests/avisosDirector.test.js",
     "test:seguridad": "firebase emulators:exec --only auth,firestore --project demo-sistema-seguridad --config firebase.seguridad.test.json \"node tests/seguridadFirestore.test.js\""
   },
   "dependencies": {
     "firebase": "^10.14.1",
-    "lucide": "^0.468.0"
+    "lucide": "^0.468.0",
+    "papaparse": "^5.5.3"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.20",

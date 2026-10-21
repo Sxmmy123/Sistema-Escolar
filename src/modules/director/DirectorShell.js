@@ -130,6 +130,9 @@ export function DirectorShell(activeRoute, content, options = {}) {
       </aside>
       <div class="fixed inset-0 z-40 hidden bg-slate-950/40 lg:hidden" data-sidebar-backdrop></div>
       <main class="px-4 py-5 lg:px-8">${content}</main>
+      <div data-director-alert-modal class="fixed inset-0 z-[70] hidden items-center justify-center bg-slate-950/60 p-3 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="director-alert-modal-title">
+        <div data-director-alert-modal-content class="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-lg bg-white shadow-2xl"></div>
+      </div>
     </div>
   `;
 }

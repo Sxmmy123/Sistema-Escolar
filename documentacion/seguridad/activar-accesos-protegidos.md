@@ -17,11 +17,13 @@ conservo en Authentication la cuenta `smichmev@gmail.com`, UID
 1. Entrar como administrador al cliente local. Esta cuenta conserva el acceso
    aunque Firestore no tenga todavia su perfil.
 2. Registrar los cursos, materias y docentes con sus asignaciones.
-3. En Alumnos, seleccionar el curso e importar los nombres y CI reales.
-4. Abrir **Crear accesos**, revisar la seleccion y confirmar. Importar alumnos no
-   crea automaticamente sus credenciales.
-5. Descargar **Credenciales privadas** y entregar cada acceso solo a su familia.
-   Las contrasenas temporales no se guardan en documentos de Firestore ni en cache.
+3. En Alumnos, seleccionar el curso y registrar nombre completo y CI, o importar
+   varias filas con esos datos. El registro prepara tambien las cuentas nuevas.
+4. Para esta demostracion, el usuario es el CI y la contrasena inicial es `123456`.
+   Esta clave compartida no es segura para datos reales. Las cuentas existentes
+   conservan su contrasena; no se reinician al volver a importar al alumno.
+5. Si algun acceso falla, el alumno permanece registrado y el mensaje indica
+   como reintentarlo desde **Crear accesos**, sin duplicar su registro.
 6. El alumno ingresa con su usuario y contrasena desde cualquier dispositivo.
    Firebase autentica su cuenta y el sistema toma su identidad del perfil privado,
    no de una identificacion guardada en el navegador.
@@ -54,8 +56,9 @@ Para el proyecto reiniciado, seguir Inicio desde cero.
    respaldo automaticamente.
 2. Entrar como administrador al cliente local. En Alumnos, elegir un curso y abrir
    **Crear accesos**. Abrir el modal no modifica datos.
-3. Elegir los alumnos pendientes. Las cuentas nuevas reciben una contrasena temporal
-   aleatoria; las cuentas ya vinculadas no cambian de contrasena.
+3. Elegir los alumnos pendientes. Las cuentas nuevas reciben la contrasena inicial
+   indicada, `123456` por defecto para la demostracion; las cuentas ya vinculadas
+   no cambian de contrasena.
 4. El administrador confirma **Crear accesos**. Descargar las credenciales
    privadas y entregarlas a cada familia de manera individual. No publicar esa
    descarga, enviarla al repositorio ni compartirla con todo el curso.
@@ -91,10 +94,11 @@ registro. Crea el perfil autenticado y reemplaza el documento de `accesos_alumno
 por metadatos sin contrasena. El mapa publico de acceso solo contiene `uid` y
 `authEmail`; no contiene notas, nombres del alumno ni contrasenas.
 
-Las nuevas claves solo permanecen en memoria mientras esta abierto el modal y en
-la descarga privada que decide realizar el administrador. No se guardan en
-Firestore, localStorage, auditoria ni en archivos del proyecto. Firebase
-Authentication se encarga del almacenamiento de credenciales.
+Las contrasenas de las cuentas no se guardan en Firestore, localStorage ni
+auditoria. Firebase Authentication se encarga del almacenamiento de credenciales.
+El valor inicial de demostracion esta definido en el cliente y no debe utilizarse
+en un despliegue con datos reales. En el modal se puede indicar otra clave inicial
+y descargar privadamente las credenciales creadas en ese intento.
 
 Si ya existe una cuenta con ese usuario pero pertenece a otra persona, la migracion
 se detiene sin sobrescribirla. Si falla la vinculacion, se intenta eliminar solo la
@@ -106,6 +110,18 @@ Las cuentas creadas con una clave temporal no fuerzan automaticamente un cambio 
 el siguiente acceso; la familia debe cambiarla desde Cuenta. Implementar un cambio
 obligatorio seria un paso adicional.
 
+## Cuenta existente sin vinculo
+
+Si Authentication ya contiene el correo interno del alumno pero su registro no
+tiene `authUid`, no borrar ni duplicar al alumno. En **Crear accesos**, seleccionar
+solo ese alumno y marcar **Vincular cuentas existentes sin perfil**. Se necesita
+su contrasena actual, no una nueva. La opcion no cambia contrasenas.
+
+La vinculacion comprueba las credenciales y rechaza cuentas con perfil de otro
+rol, pertenecientes a otro alumno, retiradas o con una asignacion docente. Si la
+clave no es valida, no guarda nada: hay que recuperar primero la contrasena. Si
+la operacion falla, nunca se elimina una cuenta Auth que ya existia.
+
 ## Pruebas sin tocar Firebase real
 
 ```powershell
@@ -116,7 +132,7 @@ npm run test:seguridad
 
 Las pruebas de seguridad requieren Firebase CLI y Java compatibles. Utilizan los
 emuladores locales de Auth y Firestore con el proyecto ficticio
-`demo-sistema-seguridad`, puertos 9194 y 8184. El propio archivo de pruebas rechaza
+`demo-sistema-seguridad`, puertos 9195 y 8185. El propio archivo de pruebas rechaza
 otro proyecto o servidores que no sean esos emuladores. La prueba de migracion crea
 cuentas ficticias, no cuentas reales.
 

@@ -1,0 +1,216 @@
+.admin-registro-dialog {
+  box-sizing: border-box;
+  width: calc(100% - 24px);
+  max-width: 720px;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid #dbe3dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #25322b;
+  box-shadow: 0 20px 70px rgb(0 0 0 / 18%);
+  letter-spacing: 0;
+}
+
+.admin-registro-dialog::backdrop {
+  background: rgb(16 35 25 / 48%);
+}
+
+body:has(.admin-registro-dialog[open]) {
+  overflow: hidden;
+}
+
+.admin-registro-dialog[open] {
+  animation: registro-aparecer 200ms ease-out both;
+}
+
+.admin-registro-header {
+  position: relative;
+  padding: 24px 24px 16px;
+}
+
+.admin-registro-ready {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 34px;
+  color: #087b2b;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.admin-registro-header h2 {
+  margin: 12px 0 6px;
+  font-size: 22px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.admin-registro-header p,
+.admin-registro-footer p {
+  margin: 0;
+  color: #58675f;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.admin-registro-close {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 6px;
+  color: #58675f;
+}
+
+.admin-registro-close:hover {
+  background: #f0f4f1;
+}
+
+.admin-registro-pasos {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 8px 24px 28px;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-registro-pasos::before {
+  content: "";
+  position: absolute;
+  top: 23px;
+  left: 24px;
+  right: 24px;
+  height: 2px;
+  background: #d8e6dc;
+  transform-origin: left;
+}
+
+.admin-registro-dialog[open] .admin-registro-pasos::before {
+  animation: registro-recorrido 900ms 150ms ease-out both;
+}
+
+.admin-registro-paso {
+  position: relative;
+  min-width: 0;
+}
+
+.admin-registro-dialog[open] .admin-registro-paso {
+  animation: registro-aparecer 240ms ease-out both;
+}
+
+.admin-registro-paso:nth-child(1) { animation-delay: 100ms !important; }
+.admin-registro-paso:nth-child(2) { animation-delay: 300ms !important; }
+.admin-registro-paso:nth-child(3) { animation-delay: 500ms !important; }
+.admin-registro-paso:nth-child(4) { animation-delay: 700ms !important; }
+
+.admin-registro-icono {
+  position: relative;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 14px;
+  place-items: center;
+  border: 1px solid;
+  border-radius: 8px;
+}
+
+.admin-registro-icono span {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
+  color: #25322b;
+  background: #edf2ef;
+}
+
+.admin-registro-alumnos { background: #effbf4; border-color: #c7ead4; color: #087b2b; }
+.admin-registro-docentes { background: #eff6ff; border-color: #d3e3fa; color: #2563aa; }
+.admin-registro-horarios { background: #fff9e9; border-color: #f1e1b8; color: #916200; }
+.admin-registro-director { background: #f6f2fc; border-color: #e1d7f1; color: #755294; }
+
+.admin-registro-paso h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+.admin-registro-paso p {
+  margin: 0;
+  color: #58675f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.admin-registro-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid #e6ece8;
+  background: #f8faf9;
+}
+
+.admin-registro-footer button {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  background: #087b2b;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.admin-registro-footer button:hover { background: #086322; }
+.admin-registro-dialog button:focus-visible { outline: 2px solid #2563aa; outline-offset: 3px; }
+
+@keyframes registro-aparecer {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes registro-recorrido {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@media (max-width: 540px) {
+  .admin-registro-header { padding: 20px 18px 16px; }
+  .admin-registro-header h2 { font-size: 20px; }
+  .admin-registro-pasos { grid-template-columns: 1fr; gap: 18px; margin: 4px 18px 24px; }
+  .admin-registro-pasos::before { top: 24px; bottom: 24px; left: 23px; right: auto; width: 2px; height: auto; transform: none; }
+  .admin-registro-dialog[open] .admin-registro-pasos::before { animation: none; }
+  .admin-registro-paso { display: flex; align-items: center; gap: 16px; }
+  .admin-registro-icono { flex-shrink: 0; margin-bottom: 0; }
+  .admin-registro-paso h3 { margin-bottom: 2px; }
+  .admin-registro-footer { padding: 16px 18px; }
+  .admin-registro-footer p { width: 100%; }
+  .admin-registro-footer button { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-registro-dialog[open],
+  .admin-registro-dialog[open] .admin-registro-paso,
+  .admin-registro-dialog[open] .admin-registro-pasos::before { animation: none; }
+}

@@ -5,6 +5,7 @@ import { attendanceLabel, attendanceShort, attendanceStates, attendanceTone } fr
 import { getTeacherScheduleCacheMeta, getTeacherScheduleRows, getTeacherStudents, listAttendanceForCourseDate, saveAttendance, todayIso } from "../../services/teacherData.js";
 import { findSubject } from "../../data/catalog.js";
 import { activityEvaluationLabel, activityPointsLabel, sortStudentsByName } from "./ComunDocente.js";
+import { gestionActual } from "../../services/rutasFirestore.js";
 
 function guidedAttendanceModal(course, students, attendanceMap) {
   const guidedStudent = students[teacherState.guidedIndex] || null;
@@ -56,6 +57,7 @@ function guidedAttendanceModal(course, students, attendanceMap) {
 export async function renderAttendance(context) {
   const container = document.querySelector("[data-teacher-attendance]");
   if (!container) return;
+  if (teacherState.attendanceDate.slice(0, 4) !== gestionActual()) teacherState.attendanceDate = `${gestionActual()}-01-01`;
   if (!context.courses.length) {
     container.innerHTML = emptyState("Sin cursos asignados", "Admin debe asignarte al menos un curso antes de tomar asistencia.");
     return;
@@ -135,7 +137,7 @@ export async function renderAttendance(context) {
             detail: "Sin clases en esta fecha"
           })}
           <label class="text-sm font-black text-slate-700">Fecha
-            <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 font-semibold" type="date" value="${teacherState.attendanceDate}" data-attendance-date>
+            <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 font-semibold" type="date" min="${gestionActual()}-01-01" max="${gestionActual()}-12-31" value="${teacherState.attendanceDate}" data-attendance-date>
           </label>
         </div>
       </div>
@@ -235,7 +237,7 @@ export async function renderAttendance(context) {
             </div>
           ` : ""}
           <label class="text-sm font-black text-slate-700">Fecha
-            <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 font-semibold" type="date" value="${teacherState.attendanceDate}" data-attendance-date>
+            <input class="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 font-semibold" type="date" min="${gestionActual()}-01-01" max="${gestionActual()}-12-31" value="${teacherState.attendanceDate}" data-attendance-date>
           </label>
           <div>
             <p class="text-sm font-black text-slate-700">Modo</p>

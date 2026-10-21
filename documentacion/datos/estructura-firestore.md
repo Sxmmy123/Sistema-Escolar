@@ -158,8 +158,9 @@ alumno retirado mediante una importacion accidental.
    firebase deploy --only "firestore:rules,firestore:indexes" --project sistema-colegio-6b1b7
    ```
 
-3. Abrir el cliente nuevo, ingresar con el administrador existente y en su panel
-   pulsar Preparar gestion, indicando 2026. Confirmar la activacion.
+3. Abrir el cliente nuevo e ingresar con el administrador existente. La bienvenida
+   muestra el ano escolar actual segun la fecha de Bolivia. Seleccionar ese ano y
+   pulsar Confirmar ano y continuar; no hay un campo para escribir un ano arbitrario.
 4. Esta accion crea configuracion, catalogos y el documento de la gestion solo si
    falta cada uno. Conserva el UID del administrador y completa su perfil privado
    si no existe. No borra datos ni crea alumnos o docentes automaticamente.
@@ -169,7 +170,7 @@ alumno retirado mediante una importacion accidental.
 6. Crear docentes con el asistente y sus asignaciones. El alta guarda perfil,
    indice y asignaciones en una transaccion; si falla, revierte la cuenta Auth
    recien creada. Las credenciales temporales solo se entregan en pantalla.
-7. Configurar horarios y operar normalmente. La gestion activa determina las rutas
+7. Configurar horarios y crear la cuenta del director. La gestion activa determina las rutas
    de guardado y las caches. Cambiarla no copia matriculas, asignaciones ni notas
    del ano anterior. Para una gestion nueva deben prepararse sus propios registros.
 
@@ -178,6 +179,34 @@ administracion solo puede entrar a su panel. Las reglas nuevas niegan las rutas
 antiguas: publicar cliente y reglas de forma coordinada y actualizar las PWA.
 Los datos anteriores, si todavia existen, no aparecen en el modelo 2. Su migracion
 o borrado debe tratarse expresamente; no se incluye en este cambio.
+
+## Gestion del ano escolar
+
+- Confirmar el ano es el primer paso administrativo obligatorio. Hasta que exista
+  el documento anual habilitado, los accesos de registro estan bloqueados y las
+  URL directas regresan al Panel. Tampoco se cargan los contadores de esos modulos.
+- Tras habilitar un ano nuevo, una guia animada muestra Alumnos, Docentes, Horarios
+  y Director. Empezar a registrar abre Alumnos. El aviso pendiente se guarda solo
+  durante la sesion, por administrador y ano, para sobrevivir la recarga inicial;
+  al comenzar o cerrar la guia se elimina. No crea otra coleccion en Firestore ni
+  se vuelve a abrir por navegar entre modulos o iniciar sesion nuevamente.
+- La bienvenida se muestra solamente mientras el sistema no esta preparado.
+  Despues, el panel indica la gestion activa sin un editor permanente ni un boton
+  Cambiar gestion. Entrar al panel no crea ni modifica documentos.
+- Cuando cambia el ano del calendario, aparece Iniciar seguido del nuevo ano.
+  El administrador confirma antes de crearlo; no se cambia la gestion
+  automaticamente. No se permite iniciar una gestion futura ni crear una
+  gestion anterior inexistente.
+- Si existen varias gestiones ya creadas, un selector compacto permite volver a
+  ellas. Esta seleccion tambien requiere confirmacion y afecta la gestion activa
+  de todo el sistema, no solo una vista de consulta del administrador.
+- Al volver a un ano anterior se conservan sus datos. Al iniciar un nuevo ano no
+  se copian matriculas, asignaciones, asistencias ni calificaciones anteriores.
+- La lista de gestiones se consulta una vez por sesion y ano de calendario y se
+  reutiliza al navegar. Una activacion invalida esa copia. Repetir la preparacion
+  de una gestion ya activa y completa no realiza escrituras innecesarias.
+- Estas opciones usan las rutas y permisos existentes del modelo 2. No necesitan
+  reglas adicionales de Firestore.
 
 ## Implementacion y pruebas
 
@@ -209,7 +238,38 @@ del UID propietario. indice_accesos permite get para ingreso, pero no list publi
 Los permisos de documentos padre no se heredan automaticamente. Las reglas deben
 declarar y validar las subcolecciones; nunca abrir permisos generales temporales.
 El docente solo puede escribir en la gestion activa; una asignacion antigua no
-habilita edicion historica. Administracion conserva permisos de mantenimiento.
+habilita edicion historica. Ademas debe ser el ano actual del calendario boliviano,
+con modelo 2 y documento anual habilitado por administracion. Administracion conserva permisos de mantenimiento.
+
+## Habilitacion del ano escolar
+
+- Solo administracion crea `gestiones/{ano}` y establece `configuracion/sistema`.
+  La existencia del documento anual, con `ano` coincidente, habilita esa gestion;
+  no se agrega un campo duplicado de habilitacion en cada registro.
+- Los docentes no pueden registrar ni modificar asistencia, agenda, calificaciones,
+  regularizacion, criterios SER, autoevaluacion o trimestre hasta que el administrador
+  habilite el ano actual. Pueden seguir consultando y usando Cargar/Actualizar e imprimir.
+- Al cambiar el ano del calendario no se crea ni activa una gestion automaticamente.
+  El Panel de administracion ofrece habilitar el ano nuevo. Las gestiones anteriores
+  solo se seleccionan si ya existen; para el docente son de consulta.
+- Las reglas usan la hora del servidor con desfase UTC-4 para validar el ano,
+  no el reloj del navegador. Tambien verifican el ano de las fechas academicas.
+- Cada sesion observa solo `configuracion/sistema` y el documento de su gestion.
+  Si administracion cambia la gestion, la pantalla solicita recargar y bloquea
+  el registro con la configuracion anterior. No observa todas las notas o asistencias.
+- `gestionHabilitada` es un estado temporal del cliente, calculado desde esos
+  documentos; nunca se almacena en Firestore.
+- El docente ve la gestion en la cabecera de todos sus modulos. Las fechas de
+  consulta omiten el ano repetido; la base conserva ISO completo y los reportes
+  impresos conservan su identificacion anual. Los campos de seleccion de fecha
+  siguen siendo fechas completas para evitar ambiguedad.
+- Un trimestre se aplica al estado local y al perfil solo despues de confirmar
+  su guardado remoto. Si falla, se informa en el modal y se conserva el anterior.
+- Publicar el archivo completo `firestore.rules` con el cliente actualizado.
+  El bloqueo visual por si solo no sustituye las reglas del servidor.
+- La expresion del ano usa las operaciones documentadas de
+  [Timestamp](https://firebase.google.com/docs/reference/rules/rules.Timestamp_)
+  y la conversion de [String](https://firebase.google.com/docs/reference/rules/rules.String).
 
 ## Referencias
 

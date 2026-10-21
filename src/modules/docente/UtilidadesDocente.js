@@ -3,6 +3,8 @@ import { DAYS, findSubject } from "../../data/catalog.js";
 import { icon } from "../../ui/dom.js";
 import { todayIso } from "../../services/teacherData.js";
 import { teacherState } from "./EstadoDocente.js";
+import { fechaVisibleEscolar } from "../../services/registroEscolar.js";
+import { gestionActual } from "../../services/rutasFirestore.js";
 
 export function refreshIcons() {
   createIcons({ icons });
@@ -90,13 +92,14 @@ export function scheduleList(rows, emptyMessage) {
 
 export function monthLabel(monthValue) {
   const date = new Date(`${monthValue}-01T12:00:00`);
-  return date.toLocaleDateString("es-BO", { month: "long", year: "numeric" });
+  return date.toLocaleDateString("es-BO", { month: "long" });
 }
 
 export function shiftMonth(monthValue, delta) {
   const date = new Date(`${monthValue}-01T12:00:00`);
   date.setMonth(date.getMonth() + delta);
-  return date.toISOString().slice(0, 7);
+  const next = date.toISOString().slice(0, 7);
+  return next.slice(0, 4) === gestionActual() ? next : monthValue;
 }
 
 export function workingDaysCalendar(monthValue) {
@@ -151,11 +154,7 @@ export function dayIdFromIso(isoDate) {
 }
 
 export function longDateLabel(isoDate) {
-  return new Date(`${isoDate}T12:00:00`).toLocaleDateString("es-BO", {
-    weekday: "long",
-    day: "numeric",
-    month: "long"
-  });
+  return fechaVisibleEscolar(isoDate);
 }
 
 export function shortDateLabel(isoDate) {

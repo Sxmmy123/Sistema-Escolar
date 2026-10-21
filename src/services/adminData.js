@@ -16,7 +16,9 @@ import { COURSES, SUBJECTS, periodsForCourse } from "../data/catalog.js";
 import { claveActividad } from "./identificadoresActividad.js";
 import { coleccionGestion, documentoGestion, gestionActual } from "./rutasFirestore.js";
 import { listarAlumnosMatriculados } from "./matriculas.js";
+import { validarFechaGestion } from "./registroEscolar.js";
 import { parseStudentsBulk } from "./parsearAlumnos.js";
+import { normalizeStudentSex } from "./identidadAlumno.js";
 export { parseStudentsBulk } from "./parsearAlumnos.js";
 
 function cleanText(value) {
@@ -44,9 +46,21 @@ function normalizeGrade(value, maximo = 100) {
 export async function importStudents(course, rawText, db = firestore, opciones = {}) {
   const gestionId = opciones.gestionId || gestionActual();
   if (!COURSES.some((item) => item.id === course?.id)) throw new Error("Selecciona un curso valido.");
-  const students = parseStudentsBulk(rawText, course.id);
+  const students = Array.isArray(rawText) ? rawText.map((student) => ({
+    nombre: cleanText(student.nombre).toUpperCase(), ci: cleanText(student.ci).replace(/\s+/g, "").toUpperCase(),
+    correo: String(student.correo || "").trim().toLowerCase(),
+    ...(student.sexo ? { sexo: normalizeStudentSex(student.sexo) } : {}), cursoId: course.id
+  })) : parseStudentsBulk(rawText, course.id);
   if (!students.length) throw new Error("No hay alumnos para importar.");
   if (students.length > 200) throw new Error("Importa hasta 200 alumnos por carga.");
+  const identities = new Set();
+  for (const student of students) {
+    if (!student.nombre || (student.ci && !/^[a-z0-9._-]+$/i.test(student.ci)) || (Array.isArray(rawText) && !student.ci)) throw new Error("Cada alumno necesita nombre completo y CI valido.");
+    if (student.sexo && !["M", "F"].includes(student.sexo)) throw new Error("Selecciona un sexo valido para el alumno.");
+    const key = student.ci.toLowerCase() || student.nombre;
+    if (identities.has(key)) throw new Error(`CI repetido en la carga: ${student.ci}.`);
+    identities.add(key);
+  }
   const controlRef = doc(db, "configuracion", "sistema");
   const control = await getDoc(controlRef);
   if (!control.exists() || control.data().versionModelo !== 2) throw new Error("Primero prepara la gestion desde el panel.");
@@ -73,7 +87,8 @@ export async function importStudents(course, rawText, db = firestore, opciones =
     if (matricula && matricula.cursoId !== course.id) throw new Error(`${student.nombre} ya esta matriculado en otro curso de esta gestion.`);
     if (matricula && matricula.estado !== "activo") throw new Error(`${student.nombre} tiene una matricula retirada. Reactivala primero.`);
     if (!anterior) escrituras.push({ ref: doc(db, "alumnos", id), data: {
-      nombre: student.nombre, ci: student.ci, activo: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      nombre: student.nombre, ci: student.ci, ...(student.correo ? { correo: student.correo } : {}), ...(student.sexo ? { sexo: student.sexo } : {}),
+      activo: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
     } });
     const numeroAgregacion = matricula?.numeroAgregacion || ++numero;
     escrituras.push({ ref: documentoGestion(db, "matriculas", id, gestionId), data: {
@@ -184,6 +199,7 @@ export async function importHistoricalAttendance({ course, rows, trimestreId }) 
   if (!course?.id) throw new Error("Selecciona un curso valido.");
   if (!Array.isArray(rows) || !rows.length) throw new Error("No hay asistencias para guardar.");
   if (!["t1", "t2", "t3"].includes(trimestreId)) throw new Error("Selecciona un trimestre valido.");
+  rows.forEach((row) => validarFechaGestion(row.fecha, gestionActual()));
 
   const chunks = [];
   for (let index = 0; index < rows.length; index += 450) {
@@ -219,6 +235,7 @@ export async function importHistoricalGrades({ course, materiaId, rows, activiti
   if (!["t1", "t2", "t3"].includes(trimestreId)) throw new Error("Selecciona un trimestre valido.");
   if (!Array.isArray(activities) || !activities.length) throw new Error("No hay actividades para guardar.");
   if (!Array.isArray(rows) || !rows.length) throw new Error("No hay notas para guardar.");
+  activities.forEach((activity) => validarFechaGestion(activity.fecha, gestionActual(), { opcional: true }));
 
   const subject = SUBJECTS.find((item) => item.id === materiaId);
   const existingSnapshot = await getDocs(query(coleccionGestion(firestore, "actividades"), where("cursoId", "==", course.id), where("trimestreId", "==", trimestreId)));

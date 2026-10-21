@@ -1,7 +1,6 @@
 import { coleccionGestion, gestionActual } from "./rutasFirestore.js";
 import {
   collection,
-  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -26,14 +25,27 @@ function rows(snapshot) {
 }
 
 export async function listDirectorStudents(courseId = "") {
-  const [students, avisos] = await Promise.all([
-    listarAlumnosMatriculados(courseId, { soloActivos: true }),
-    getDocs(query(collectionGroup(firestore, "avisos"), where("gestionId", "==", gestionActual()), where("activa", "==", true)))
-  ]);
-  const porAlumno = new Map();
-  rows(avisos).sort((a, b) => (a.updatedAt?.toMillis?.() || 0) - (b.updatedAt?.toMillis?.() || 0))
-    .forEach((aviso) => porAlumno.set(aviso.alumnoId, aviso));
-  return students.map((student) => ({ ...student, advertenciaAsistencia: porAlumno.get(student.id) || null }));
+  return listarAlumnosMatriculados(courseId, { soloActivos: true });
+}
+
+function warningTime(value) {
+  return value?.toMillis?.() || Number(value?.seconds || 0) * 1000;
+}
+
+async function activeStudentWarnings(studentId, trimestreId, { db = firestore, read = getDocs } = {}) {
+  if (!studentId) throw new Error("No se encontro el alumno para consultar la advertencia.");
+  // La consulta local al alumno usa un indice simple, no un indice de grupo de colecciones.
+  const source = collection(db, "alumnos", studentId, "avisos");
+  const snapshot = await read(query(source, where("gestionId", "==", gestionActual())));
+  return snapshot.docs.filter((item) => {
+    const warning = item.data();
+    return warning.activa === true && warning.trimestreId === trimestreId;
+  }).sort((a, b) => warningTime(b.data().updatedAt || b.data().createdAt) - warningTime(a.data().updatedAt || a.data().createdAt));
+}
+
+export async function getDirectorStudentAttendanceWarning(studentId, trimestreId = "t1", clients) {
+  const warnings = await activeStudentWarnings(studentId, trimestreId, clients);
+  return warnings.length ? { id: warnings[0].id, ...warnings[0].data() } : null;
 }
 
 export async function listDirectorTeachers() {
@@ -143,9 +155,9 @@ export async function sendStudentAttendanceWarning({
     updatedAt: serverTimestamp()
   };
   const source = collection(firestore, "alumnos", student.id, "avisos");
-  const anteriores = await getDocs(query(source, where("gestionId", "==", gestionActual()), where("trimestreId", "==", trimestreId), where("activa", "==", true)));
+  const anteriores = await activeStudentWarnings(student.id, trimestreId);
   const batch = writeBatch(firestore);
-  anteriores.docs.forEach((aviso) => batch.update(aviso.ref, {
+  anteriores.forEach((aviso) => batch.update(aviso.ref, {
     activa: false, cerradoPorUid: auth.currentUser?.uid || "", cerradoAt: serverTimestamp(), updatedAt: serverTimestamp()
   }));
   const ref = isActive ? doc(source) : null;

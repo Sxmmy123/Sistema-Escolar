@@ -1,7 +1,9 @@
 import { icon } from "../../ui/dom.js";
+import { configuracionActual } from "../../services/rutasFirestore.js";
+import { gestionAdministrativaDisponible } from "../../services/registroEscolar.js";
 
 function publicAsset(path) {
-  return `${import.meta.env.BASE_URL || "./"}${path}`;
+  return `${import.meta.env?.BASE_URL || "./"}${path}`;
 }
 
 const SCHOOL_LOGO = publicAsset("images/logo-nueva-bolivia.png");
@@ -32,6 +34,11 @@ function currentDate() {
 }
 
 function navLink([label, href, iconName], activeRoute) {
+  if (href !== "#/admin" && !gestionAdministrativaDisponible(configuracionActual())) {
+    return `<span aria-disabled="true" title="Primero confirma el ano escolar en el panel" class="flex min-h-10 items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-[13px] text-white/45">
+      ${icon(iconName, "h-4 w-4 shrink-0")}<span class="truncate">${label}</span>${icon("lock-keyhole", "ml-auto h-3.5 w-3.5 shrink-0")}
+    </span>`;
+  }
   const active = href === `#${activeRoute}`;
   return `
     <a href="${href}" ${active ? 'aria-current="page"' : ""} class="group flex min-h-10 items-center gap-3 rounded-lg border px-3 py-2 text-[13px] font-medium transition ${active ? "border-white/15 bg-white text-[#075c22] shadow-sm" : "border-transparent text-white/75 hover:bg-white/10 hover:text-white"}">

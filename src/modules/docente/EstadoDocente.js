@@ -45,6 +45,7 @@ export const teacherState = {
   regularizationGradeActivityId: "",
   regularizationGradeStudentId: "",
   regularizationReportStudentId: "",
+  regularizationSubject: { studentId: "", id: "all" },
   notificationFocus: null
 };
 
@@ -69,8 +70,12 @@ export function loadSavedTrimester(context = teacherState.context) {
 }
 
 export function saveActiveTrimester(context = teacherState.context) {
-  sessionStorage.setItem("docenteTrimestreId", teacherState.trimesterId);
-  localStorage.setItem(trimesterStorageKey(context), teacherState.trimesterId);
+  try {
+    sessionStorage.setItem("docenteTrimestreId", teacherState.trimesterId);
+    localStorage.setItem(trimesterStorageKey(context), teacherState.trimesterId);
+  } catch {
+    // Firebase conserva la preferencia aunque el navegador bloquee la copia local.
+  }
 }
 
 export function setActiveTrimester(trimesterId, options = {}) {
@@ -86,15 +91,14 @@ export function setActiveTrimester(trimesterId, options = {}) {
   teacherState.notesEditMessage = "";
   teacherState.regularizationGradeActivityId = "";
   teacherState.regularizationReportStudentId = "";
+  teacherState.regularizationSubject = { studentId: "", id: "all" };
   saveActiveTrimester(options.context || teacherState.context);
-  window.dispatchEvent(new Event("teacher-trimester-changed"));
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("teacher-trimester-changed"));
 }
 
-export async function persistActiveTrimester(context = teacherState.context) {
-  try {
-    await saveTeacherTrimesterPreference(context?.uid, teacherState.trimesterId);
-    if (context?.profile) context.profile.trimestreActivo = teacherState.trimesterId;
-  } catch (error) {
-    console.warn("No se pudo guardar el trimestre activo en Firebase", error);
-  }
+export async function persistActiveTrimester(context = teacherState.context, trimesterId = teacherState.trimesterId, guardar = saveTeacherTrimesterPreference) {
+  if (!TRIMESTERS.some((item) => item.id === trimesterId)) throw new Error("Trimestre no valido.");
+  await guardar(context?.uid, trimesterId);
+  if (context?.profile) context.profile.trimestreActivo = trimesterId;
+  setActiveTrimester(trimesterId, { context });
 }

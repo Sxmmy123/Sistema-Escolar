@@ -1,70 +1,33 @@
-﻿import { createIcons, icons } from "lucide";
+import { createIcons, LogIn } from "lucide";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import "./styles.css";
 import "./firebase/client.js";
 import { auth, firestore } from "./firebase/client.js";
-import { cargarConfiguracion, configuracionActual, establecerConfiguracion, VERSION_MODELO } from "./services/rutasFirestore.js";
+import { cargarConfiguracion, configuracionActual, establecerConfiguracion, observarConfiguracion, VERSION_MODELO } from "./services/rutasFirestore.js";
+import { gestionDelCalendario } from "./services/fechaEscolar.js";
+import { gestionAdministrativaDisponible } from "./services/registroEscolar.js";
+import { estadoMenuLateral } from "./ui/menuLateral.js";
+import { bindRegistroDocente } from "./ui/gestionDocente.js";
 import { setView } from "./ui/dom.js";
 import { LoginView, bindLogin } from "./modules/login/LoginView.js";
-import { AdminDashboard } from "./modules/admin/AdminDashboard.js";
-import { bindAdminPages } from "./modules/admin/AdminBindings.js";
-import { DocenteDashboard } from "./modules/docente/DocenteDashboard.js";
-import { bindDocentePages } from "./modules/docente/ControladorDocente.js";
-import { bindTeacherNotifications } from "./modules/docente/NotificacionesDocente.js";
-import { DirectorDashboard } from "./modules/director/DirectorDashboard.js";
-import { bindDirectorPages } from "./modules/director/DirectorBindings.js";
-import { DirectorAttendance } from "./modules/director/DirectorAttendance.js";
-import { DirectorConfig } from "./modules/director/DirectorConfig.js";
-import { DirectorCoursesSchedules } from "./modules/director/DirectorCoursesSchedules.js";
-import { DirectorNotes } from "./modules/director/DirectorNotes.js";
-import { DirectorReports } from "./modules/director/DirectorReports.js";
-import { DirectorStudents } from "./modules/director/DirectorStudents.js";
-import { DirectorTeachers } from "./modules/director/DirectorTeachers.js";
-import { AlumnoDashboard, bindAlumnoPage } from "./modules/alumno/AlumnoDashboard.js";
-import { AdminModule, DocenteModule } from "./modules/pages/ModulePages.js";
+import { crearCargaPorRol } from "./modules/cargaPorRol.js";
 import { homeForRole, resolveUserRole, routeRequiredRole } from "./services/authSession.js";
 import { changeOwnPassword, setRecoveryEmail } from "./services/accountSettings.js";
 import { registerServiceWorker } from "./pwa/registerServiceWorker.js";
 
 registerServiceWorker();
 
-const routes = {
-  "/": () => LoginView(),
-  "/admin": () => AdminDashboard(),
-  "/admin/alumnos": () => AdminModule("/admin/alumnos"),
-  "/admin/docentes": () => AdminModule("/admin/docentes"),
-  "/admin/director": () => AdminModule("/admin/director"),
-  "/admin/horarios": () => AdminModule("/admin/horarios"),
-  "/admin/carga-historica": () => AdminModule("/admin/carga-historica"),
-  "/admin/auditoria": () => AdminModule("/admin/auditoria"),
-  "/docente": () => DocenteDashboard(),
-  "/docente/asistencia": () => DocenteModule("/docente/asistencia"),
-  "/docente/tareas": () => DocenteModule("/docente/tareas"),
-  "/docente/calificar": () => DocenteModule("/docente/calificar"),
-  "/docente/regularizacion": () => DocenteModule("/docente/regularizacion"),
-  "/docente/notas": () => DocenteModule("/docente/notas"),
-  "/docente/boletin": () => DocenteModule("/docente/boletin"),
-  "/docente/resumen": () => DocenteModule("/docente/resumen"),
-  "/docente/horario": () => DocenteModule("/docente/horario"),
-  "/director": () => DirectorDashboard(),
-  "/director/estudiantes": () => DirectorStudents(),
-  "/director/docentes": () => DirectorTeachers(),
-  "/director/cursos-horarios": () => DirectorCoursesSchedules(),
-  "/director/asistencia": () => DirectorAttendance(),
-  "/director/asistencias": () => DirectorAttendance(),
-  "/director/notas": () => DirectorNotes(),
-  "/director/reportes": () => DirectorReports(),
-  "/director/configuracion": () => DirectorConfig(),
-  "/alumno": () => AlumnoDashboard("/alumno"),
-  "/alumno/boleta": () => AlumnoDashboard("/alumno/boleta")
-};
+const modulosPorRol = crearCargaPorRol();
 
 let authReady = false;
 let authRevision = 0;
 let activeUser = null;
 let activeRole = "";
-let renderLock = false;
+let renderRevision = 0;
+let moduloMontado = null;
 let shellBindingsController = null;
+let stopConfigurationWatch = null;
+let configurationNeedsReload = false;
 
 const TEACHER_SIDEBAR_COLLAPSE_KEY = "colegio-sidebar-docente-colapsado";
 
@@ -96,6 +59,9 @@ function clearSession() {
 }
 
 async function doLogout() {
+  ++renderRevision;
+  desmontarRol();
+  shellBindingsController?.abort();
   await signOut(auth).catch(() => {});
   clearSession();
   if (currentRoute() !== "/") window.location.hash = "#/";
@@ -106,6 +72,7 @@ function bindShell() {
   shellBindingsController?.abort();
   shellBindingsController = new AbortController();
   const { signal } = shellBindingsController;
+  bindRegistroDocente(signal);
   const sidebar = document.querySelector("[data-sidebar]");
   const backdrop = document.querySelector("[data-sidebar-backdrop]");
   const workspace = document.querySelector("main");
@@ -116,14 +83,15 @@ function bindShell() {
 
   const syncMobileMenu = (open) => {
     if (!sidebar) return;
-    sidebar.classList.toggle("-translate-x-full", !open);
-    backdrop?.classList.toggle("hidden", !open);
-    document.body.classList.toggle("mobile-sidebar-open", open);
-    sidebar.inert = !open;
-    sidebar.setAttribute("aria-hidden", String(!open));
-    backdrop?.setAttribute("aria-hidden", String(!open));
-    menuButtons.forEach((button) => button.setAttribute("aria-expanded", String(open)));
-    if (workspace) workspace.inert = open;
+    const estado = estadoMenuLateral(mobileMenu.matches, open, sidebar.classList.contains("lg:hidden"));
+    sidebar.classList.toggle("-translate-x-full", estado.oculto);
+    backdrop?.classList.toggle("hidden", !estado.abierto);
+    document.body.classList.toggle("mobile-sidebar-open", estado.abierto);
+    sidebar.inert = estado.oculto;
+    sidebar.setAttribute("aria-hidden", String(estado.oculto));
+    backdrop?.setAttribute("aria-hidden", String(!estado.abierto));
+    menuButtons.forEach((button) => button.setAttribute("aria-expanded", String(estado.abierto)));
+    if (workspace) workspace.inert = estado.contenidoBloqueado;
   };
 
   const open = () => {
@@ -292,15 +260,22 @@ function bindAccountSettings() {
   });
 }
 
-function afterRender(route) {
-  createIcons({ icons });
-  if (route === "/") bindLogin();
+function desmontarRol() {
+  moduloMontado?.desmontar?.();
+  moduloMontado = null;
+  document.body.classList.remove("mobile-sidebar-open");
+}
+
+function afterRender(route, modulo) {
+  if (modulo) modulo.actualizarIconos();
+  else {
+    createIcons({ icons: { LogIn } });
+    bindLogin();
+  }
   bindShell();
-  bindTeacherNotifications(route);
-  bindAdminPages(route);
-  bindDocentePages(route);
-  bindDirectorPages(route);
-  bindAlumnoPage(route);
+  if (modulo) {
+    Promise.resolve(modulo.vincular(route)).catch((error) => console.error("No se pudo cargar la pantalla", error));
+  }
 }
 
 function redirectTo(route) {
@@ -311,9 +286,11 @@ function redirectTo(route) {
   return false;
 }
 
-function render() {
-  if (renderLock) return;
-  renderLock = true;
+async function render() {
+  const revision = ++renderRevision;
+  const sessionRevision = authRevision;
+  const route = currentRoute();
+  const vistaVigente = () => revision === renderRevision && sessionRevision === authRevision && route === currentRoute();
 
   try {
     if (!authReady) {
@@ -321,7 +298,15 @@ function render() {
       return;
     }
 
-    const route = currentRoute();
+    if (configurationNeedsReload) {
+      desmontarRol();
+      shellBindingsController?.abort();
+      setView(`<main class="mx-auto max-w-lg p-6"><h1 class="text-lg font-semibold">La gestion escolar cambio</h1><p class="mt-3 text-sm text-slate-700">Administracion actualizo el ano escolar. Recarga para consultar la gestion vigente. No se puede registrar con la configuracion anterior.</p><button data-reload-configuration class="mt-4 rounded-lg bg-school-green px-4 py-2 text-sm text-white">Recargar sistema</button><button data-exit class="ml-3 text-sm text-slate-600">Cerrar sesion</button></main>`);
+      document.querySelector("[data-reload-configuration]")?.addEventListener("click", () => window.location.reload());
+      document.querySelector("[data-exit]")?.addEventListener("click", doLogout);
+      return;
+    }
+
     const requiredRole = routeRequiredRole(route);
     const sessionUser = activeUser;
     const sessionRole = activeRole;
@@ -339,27 +324,66 @@ function render() {
       if (redirectTo(homeForRole(sessionRole))) return;
     }
 
+    if (requiredRole === "admin" && !gestionAdministrativaDisponible(configuracionActual()) && route !== "/admin") {
+      if (redirectTo("/admin")) return;
+    }
     if (requiredRole && configuracionActual().versionModelo !== VERSION_MODELO) {
-      if (sessionRole === "admin" && route !== "/admin") {
-        if (redirectTo("/admin")) return;
-      } else if (sessionRole !== "admin") {
+      if (sessionRole !== "admin") {
+        desmontarRol();
+        shellBindingsController?.abort();
         setView(`<main class="mx-auto max-w-lg p-6"><h1 class="text-lg font-semibold">Gestion escolar pendiente</h1><p class="mt-3 text-sm">Administracion debe preparar la gestion y publicar las reglas actualizadas.</p><button data-exit class="mt-4 rounded bg-school-green px-4 py-2 text-sm text-white">Cerrar sesion</button></main>`);
         document.querySelector("[data-exit]")?.addEventListener("click", doLogout);
         return;
       }
     }
 
-    const view = routes[route] || routes["/"];
-    const finalRoute = routes[route] ? route : "/";
+    if (!requiredRole) {
+      if (route !== "/" && redirectTo(sessionRole ? homeForRole(sessionRole) : "/")) return;
+      desmontarRol();
+      setView(LoginView());
+      afterRender("/");
+      return;
+    }
+
+    let modulo = modulosPorRol.obtener(sessionRole);
+    if (!modulo) {
+      desmontarRol();
+      shellBindingsController?.abort();
+      setView(loadingView("Cargando tu espacio..."));
+      modulo = await modulosPorRol.cargar(sessionRole);
+    }
+
+    // Una descarga anterior no debe sustituir la pantalla de otra ruta o sesion.
+    if (!vistaVigente() || auth.currentUser?.uid !== sessionUser.uid || activeUser?.uid !== sessionUser.uid || activeRole !== sessionRole) return;
+    const view = modulo.rutas[route];
+    if (!view) {
+      redirectTo(homeForRole(sessionRole));
+      return;
+    }
+    if (moduloMontado !== modulo) desmontarRol();
+    moduloMontado = modulo;
     setView(view());
-    afterRender(finalRoute);
-  } finally {
-    renderLock = false;
+    afterRender(route, modulo);
+  } catch (error) {
+    if (!vistaVigente()) return;
+    console.error("No se pudo descargar el modulo", error);
+    desmontarRol();
+    shellBindingsController?.abort();
+    setView(`<main class="mx-auto max-w-lg p-6"><h1 class="text-lg font-semibold">No se pudo cargar esta pantalla</h1><p class="mt-3 text-sm text-slate-700">Comprueba tu conexion y vuelve a intentar. Si el sistema acaba de actualizarse, recarga la pagina.</p><button data-retry-module class="mt-4 rounded-lg bg-school-green px-4 py-2 text-sm text-white">Reintentar</button><button data-reload-module class="ml-3 text-sm text-slate-600">Recargar</button><button data-exit class="ml-3 text-sm text-slate-600">Cerrar sesion</button></main>`);
+    document.querySelector("[data-retry-module]")?.addEventListener("click", render);
+    document.querySelector("[data-reload-module]")?.addEventListener("click", () => window.location.reload());
+    document.querySelector("[data-exit]")?.addEventListener("click", doLogout);
   }
 }
 
 onAuthStateChanged(auth, async (user) => {
   const revision = ++authRevision;
+  ++renderRevision;
+  desmontarRol();
+  shellBindingsController?.abort();
+  stopConfigurationWatch?.();
+  stopConfigurationWatch = null;
+  configurationNeedsReload = false;
   authReady = false;
   activeUser = null;
   activeRole = "";
@@ -380,6 +404,26 @@ onAuthStateChanged(auth, async (user) => {
       activeUser = user;
       activeRole = role;
       rememberSession(role, user);
+      stopConfigurationWatch = observarConfiguracion(firestore, (next) => {
+        if (revision !== authRevision || auth.currentUser?.uid !== user.uid) return;
+        next = { ...next, gestionActivaId: next.gestionActivaId || gestionDelCalendario(), versionModelo: Number(next.versionModelo || 0) };
+        const previous = configuracionActual();
+        if (next.gestionActivaId !== previous.gestionActivaId || next.versionModelo !== previous.versionModelo) {
+          configurationNeedsReload = true;
+          establecerConfiguracion({ ...previous, gestionHabilitada: false });
+          render();
+        } else if (next.gestionHabilitada !== previous.gestionHabilitada) {
+          establecerConfiguracion(next);
+          render();
+        } else {
+          establecerConfiguracion(next);
+        }
+      }, (error) => {
+        if (revision !== authRevision) return;
+        console.warn("No se pudo verificar la habilitacion de la gestion", error);
+        establecerConfiguracion({ ...configuracionActual(), gestionHabilitada: false });
+        render();
+      });
     }
   } catch (error) {
     if (revision !== authRevision) return;
@@ -396,6 +440,14 @@ onAuthStateChanged(auth, async (user) => {
 
 window.addEventListener("hashchange", render);
 window.addEventListener("DOMContentLoaded", render);
+
+let calendarYear = gestionDelCalendario();
+setInterval(() => {
+  const next = gestionDelCalendario();
+  if (next === calendarYear) return;
+  calendarYear = next;
+  render();
+}, 60000);
 
 
 

@@ -1,6 +1,9 @@
 import { icon } from "../../ui/dom.js";
 import { AdminShell } from "./AdminShell.js";
-import { configuracionActual, gestionActual, VERSION_MODELO } from "../../services/rutasFirestore.js";
+import { configuracionActual } from "../../services/rutasFirestore.js";
+import { gestionAdministrativaDisponible } from "../../services/registroEscolar.js";
+import { renderGestionEscolar } from "./GestionEscolarAdmin.js";
+import { renderGuiaRegistroAdmin } from "./InicioRegistroAdmin.js";
 
 function metricCard(label, value, detail, iconName, tone) {
   return `
@@ -33,17 +36,10 @@ function actionCard(title, description, href, iconName, accent = "bg-green-50 te
 }
 
 export function AdminDashboard() {
-  const preparada = configuracionActual().versionModelo === VERSION_MODELO;
+  const preparada = gestionAdministrativaDisponible(configuracionActual());
   return AdminShell("/admin", `
-    <section class="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4">
-      <div><h2 class="text-base font-semibold text-slate-900">Gestion escolar ${gestionActual()}</h2>
-        <p class="mt-1 text-sm text-slate-600">${preparada ? "Gestion activa" : "Pendiente de preparar"}</p></div>
-      <form data-gestion-form class="flex flex-wrap items-end gap-2">
-        <label class="text-sm text-slate-700">Gestion<input name="gestion" type="number" min="2000" max="2099" value="${gestionActual()}" required class="ml-2 w-24 rounded border border-slate-300 px-3 py-2"></label>
-        <button type="submit" class="flex items-center gap-2 rounded bg-school-green px-3 py-2 text-sm text-white">${icon("calendar-check", "h-4 w-4")}${preparada ? "Cambiar gestion" : "Preparar gestion"}</button>
-      </form>
-      <p data-gestion-status role="status" class="w-full text-sm text-slate-600"></p>
-    </section>
+    <section data-admin-gestion>${renderGestionEscolar()}</section>
+    ${preparada ? `
     <section class="grid grid-cols-1 gap-3 sm:grid-cols-3">
       ${metricCard("Alumnos", `<span data-admin-count="students">...</span>`, "Registros activos del colegio", "users", "bg-green-50 text-school-green")}
       ${metricCard("Docentes", `<span data-admin-count="teachers">...</span>`, "Usuarios y asignaciones", "presentation", "bg-amber-50 text-amber-700")}
@@ -61,12 +57,14 @@ export function AdminDashboard() {
       <div class="grid grid-cols-1 gap-3 min-[520px]:grid-cols-2 xl:grid-cols-3">
         ${actionCard("Alumnos", "Importa estudiantes, genera accesos y controla su estado.", "#/admin/alumnos", "users")}
         ${actionCard("Docentes", "Crea cuentas y asigna cursos y materias.", "#/admin/docentes", "presentation")}
-        ${actionCard("Director", "Administra la cuenta de consulta y seguimiento.", "#/admin/director", "user-cog")}
         ${actionCard("Horarios", "Organiza el horario oficial de cada curso.", "#/admin/horarios", "calendar-days")}
+        ${actionCard("Director", "Administra la cuenta de consulta y seguimiento.", "#/admin/director", "user-cog")}
         ${actionCard("Carga de datos", "Registra asistencias y notas historicas en bloque.", "#/admin/carga-historica", "database-zap", "bg-amber-50 text-amber-700")}
         ${actionCard("Auditoria", "Consulta movimientos y cambios realizados en el sistema.", "#/admin/auditoria", "activity", "bg-slate-100 text-slate-700")}
       </div>
     </section>
+    ${renderGuiaRegistroAdmin(configuracionActual().gestionActivaId)}
+    ` : ""}
   `, {
     title: "Panel administrativo",
     subtitle: "Usuarios, cursos, horarios y control general del sistema"

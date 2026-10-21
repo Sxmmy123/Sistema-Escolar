@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateStudentPassword, normalizeStudentAccessKey, studentIdFromProfile } from "../src/services/identidadAlumno.js";
+import { generateStudentPassword, normalizeStudentAccessKey, studentIdFromProfile, studentPasswordForNewAccess } from "../src/services/identidadAlumno.js";
 
 test("la identidad del alumno viene de un perfil autenticado, activo y vinculado", () => {
   assert.equal(studentIdFromProfile({ rol: "alumno", activo: true, alumnoId: "alumno-a" }), "alumno-a");
@@ -26,4 +26,14 @@ test("la contrasena temporal tiene suficiente longitud sin depender de datos del
   const password = generateStudentPassword();
   assert.equal(password.length, 16);
   assert.notEqual(password, "12345678");
+});
+
+test("las cuentas nuevas usan 123456 por defecto y permiten una clave inicial distinta", () => {
+  assert.equal(studentPasswordForNewAccess("abc123"), "abc123");
+  assert.equal(studentPasswordForNewAccess(" Clave temporal "), " Clave temporal ");
+  assert.equal(studentPasswordForNewAccess(), "123456");
+  assert.equal(studentPasswordForNewAccess(""), "123456");
+  for (const value of ["12345", 123456, null]) {
+    assert.throws(() => studentPasswordForNewAccess(value), /al menos 6 caracteres/);
+  }
 });

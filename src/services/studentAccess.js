@@ -1,15 +1,15 @@
-import { createUserWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
-import { deleteField, doc, getDoc, increment, serverTimestamp, writeBatch } from "firebase/firestore";
+import { createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { collection, deleteField, doc, getDoc, getDocs, increment, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
 import { auth, creatorAuth, firestore } from "../firebase/client.js";
 import { usernameToAuthEmail } from "./users.js";
-import { generateStudentPassword, normalizeStudentAccessKey } from "./identidadAlumno.js";
+import { studentPasswordForNewAccess, normalizeStudentAccessKey } from "./identidadAlumno.js";
 import { documentoGestion } from "./rutasFirestore.js";
 
 export { normalizeStudentAccessKey } from "./identidadAlumno.js";
 
 const defaultClients = { auth, creatorAuth, firestore };
 
-export async function createStudentAuthAccess(student, course = null, clients = defaultClients) {
+export async function createStudentAuthAccess(student, course = null, clients = defaultClients, options = {}) {
   const adminUid = clients.auth.currentUser?.uid;
   if (!adminUid) throw new Error("Ingresa como administrador para preparar los accesos.");
   const usuario = normalizeStudentAccessKey(student?.ci || student?.usuario || student?.id);
@@ -33,8 +33,12 @@ export async function createStudentAuthAccess(student, course = null, clients = 
   }
   const active = registeredStudent.activo !== false && matriculaSnap.data().estado === "activo";
   let credential = null;
+  let created = false;
+  let recoveredProfileMissing = false;
   let uid = existingUid;
-  let authEmail = registeredStudent.authEmail || usernameToAuthEmail(usuario);
+  const requestedEmail = String(options.email || "").trim().toLowerCase();
+  if (requestedEmail && (requestedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedEmail))) throw new Error("El correo no tiene formato valido.");
+  let authEmail = registeredStudent.authEmail || requestedEmail || registeredStudent.correo || usernameToAuthEmail(usuario);
   let temporary = null;
 
   try {
@@ -45,8 +49,34 @@ export async function createStudentAuthAccess(student, course = null, clients = 
       }
       authEmail = profile.data().authEmail || authEmail;
     } else {
-      temporary = generateStudentPassword();
-      credential = await createUserWithEmailAndPassword(clients.creatorAuth, authEmail, temporary);
+      temporary = studentPasswordForNewAccess(options.temporaryPassword ?? "");
+      try {
+        credential = await createUserWithEmailAndPassword(clients.creatorAuth, authEmail, temporary);
+        created = true;
+      } catch (error) {
+        if (error.code !== "auth/email-already-in-use" || options.linkExisting !== true) throw error;
+        if (authEmail !== usernameToAuthEmail(usuario)) throw new Error("El correo registrado no coincide con el usuario del alumno. Revisa la cuenta antes de vincularla.");
+        try {
+          credential = await signInWithEmailAndPassword(clients.creatorAuth, authEmail, temporary);
+        } catch (loginError) {
+          if (["auth/invalid-credential", "auth/wrong-password", "auth/invalid-login-credentials"].includes(loginError.code)) {
+            throw new Error("La cuenta ya existe, pero no acepta la contrasena indicada. No se cambio su clave ni ningun registro. Es necesario recuperar la contrasena de esa cuenta.");
+          }
+          throw loginError;
+        }
+        const existingProfile = await getDoc(doc(clients.firestore, "usuarios", credential.user.uid));
+        recoveredProfileMissing = !existingProfile.exists();
+        if (existingProfile.exists() && (existingProfile.data().rol !== "alumno" || existingProfile.data().alumnoId !== student.id || existingProfile.data().activo === false)) {
+          throw new Error("La cuenta existente pertenece a otro perfil o esta retirada. No se modifico esa cuenta.");
+        }
+        const [linkedStudents, teacherAssignment] = await Promise.all([
+          getDocs(query(collection(clients.firestore, "alumnos"), where("authUid", "==", credential.user.uid))),
+          getDoc(documentoGestion(clients.firestore, "asignaciones", credential.user.uid))
+        ]);
+        if (linkedStudents.docs.some((item) => item.id !== student.id) || teacherAssignment.exists()) {
+          throw new Error("La cuenta existente ya esta asignada a otra persona o a un docente. No se modifico esa cuenta.");
+        }
+      }
       uid = credential.user.uid;
     }
 
@@ -54,16 +84,16 @@ export async function createStudentAuthAccess(student, course = null, clients = 
     batch.set(doc(clients.firestore, "usuarios", uid), {
       nombre: registeredStudent.nombre || usuario, usuario, authEmail, rol: "alumno",
       alumnoId: student.id, activo: active,
-      ...(credential ? { createdAt: serverTimestamp(), createdBy: adminUid } : {}),
+      ...(created || recoveredProfileMissing ? { createdAt: serverTimestamp(), createdBy: adminUid, correoRecuperacion: requestedEmail || registeredStudent.correo || null } : {}),
       updatedAt: serverTimestamp()
     }, { merge: true });
     batch.set(studentRef, { authUid: uid, authEmail, password: deleteField(), updatedAt: serverTimestamp() }, { merge: true });
     batch.set(usernameRef, { uid, authEmail });
     if (clients.auth.currentUser?.uid !== adminUid) throw new Error("La sesion cambio antes de guardar el acceso. Vuelve a ingresar como administrador.");
     await batch.commit();
-    return { created: Boolean(credential), usuario, uid, alumnoId: student.id, nombre: registeredStudent.nombre || usuario, password: temporary || "" };
+    return { created, usuario, uid, authEmail, alumnoId: student.id, nombre: registeredStudent.nombre || usuario, password: created ? temporary : "" };
   } catch (error) {
-    if (credential) {
+    if (created) {
       try {
         await deleteUser(credential.user);
       } catch {

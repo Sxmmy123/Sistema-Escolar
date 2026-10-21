@@ -5,6 +5,7 @@ import {
   attendancePercent,
   attendanceTotals,
   getDirectorAttendanceSettings,
+  getDirectorStudentAttendanceWarning,
   listDirectorAttendance,
   listDirectorAttendanceByTrimester,
   listDirectorRecentAttendance,
@@ -33,6 +34,7 @@ const attendanceState = {
   limiteFaltas: 4,
   notice: ""
 };
+let studentModalRequest = 0;
 
 function consumeRequestedStudent() {
   const studentId = sessionStorage.getItem("directorAsistenciaEstudiante") || "";
@@ -287,7 +289,13 @@ function calendarCells(monthKey, records = []) {
   return cells.join("");
 }
 
-function attendanceWarningEditor(student, inAlert) {
+function attendanceWarningEditor(student, inAlert, { warningLoading = false, warningError = false } = {}) {
+  if (warningLoading) {
+    return `<aside class="h-fit rounded-lg border border-slate-200 bg-slate-50 p-4" role="status"><p class="text-xs text-slate-600">Consultando advertencia del alumno...</p></aside>`;
+  }
+  if (warningError) {
+    return `<aside class="h-fit rounded-lg border border-amber-200 bg-amber-50 p-4"><p class="text-xs text-amber-800">No se pudo consultar la advertencia. El calendario sigue disponible.</p><button type="button" data-retry-attendance-warning class="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900">Reintentar</button></aside>`;
+  }
   const storedWarning = student.advertenciaAsistencia;
   const belongsToCurrentTrimester = storedWarning?.trimestreId === attendanceState.trimesterId;
   const isActive = belongsToCurrentTrimester && storedWarning?.activa === true;
@@ -326,7 +334,7 @@ function attendanceWarningEditor(student, inAlert) {
   `;
 }
 
-function attendanceStudentModal(summary) {
+function attendanceStudentModal(summary, warningState) {
   const { student, records, totals, percent } = summary;
   const course = courseById(student.cursoId);
   const monthKeys = [...new Set(records.map((item) => String(item.fecha || "").slice(0, 7)).filter((item) => /^\d{4}-\d{2}$/.test(item)))].sort();
@@ -344,7 +352,7 @@ function attendanceStudentModal(summary) {
           <div class="grid grid-cols-2 gap-2 sm:grid-cols-5"><div class="rounded-lg bg-slate-50 px-3 py-2"><p class="text-[9px] uppercase text-slate-500">Asistencia</p><p class="text-lg font-semibold text-slate-900">${percent}%</p></div><div class="rounded-lg bg-green-50 px-3 py-2"><p class="text-[9px] uppercase text-green-700">Presentes</p><p class="text-lg font-semibold text-green-800">${totals.presente || 0}</p></div><div class="rounded-lg bg-amber-50 px-3 py-2"><p class="text-[9px] uppercase text-amber-700">Atrasos</p><p class="text-lg font-semibold text-amber-800">${totals.atraso || 0}</p></div><div class="rounded-lg bg-blue-50 px-3 py-2"><p class="text-[9px] uppercase text-blue-700">Licencias</p><p class="text-lg font-semibold text-blue-800">${totals.permiso || 0}</p></div><div class="rounded-lg bg-red-50 px-3 py-2"><p class="text-[9px] uppercase text-red-700">Faltas</p><p class="text-lg font-semibold text-red-700">${totals.falta || 0}</p></div></div>
           <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
             <div class="space-y-4">${monthSections}</div>
-            ${attendanceWarningEditor(student, inAlert)}
+            ${attendanceWarningEditor(student, inAlert, warningState)}
           </div>
         </div>
       </section>
@@ -373,16 +381,36 @@ function renderAttendance() {
   refreshDirectorIcons();
 }
 
-function showStudentModal(studentId) {
+async function showStudentModal(studentId) {
+  const student = attendanceState.students.find((item) => item.id === studentId);
+  const holder = document.querySelector("[data-director-attendance-modal]");
+  if (!student || !holder) return;
+  const request = ++studentModalRequest;
+  const trimesterId = attendanceState.trimesterId;
+  renderStudentModal(studentId, { warningLoading: true });
+  try {
+    const warning = await getDirectorStudentAttendanceWarning(studentId, trimesterId);
+    if (request !== studentModalRequest || !holder.innerHTML || attendanceState.trimesterId !== trimesterId) return;
+    student.advertenciaAsistencia = warning;
+    renderStudentModal(studentId);
+  } catch (error) {
+    console.warn("No se pudo consultar la advertencia del alumno", error);
+    if (request !== studentModalRequest || !holder.innerHTML || attendanceState.trimesterId !== trimesterId) return;
+    renderStudentModal(studentId, { warningError: true });
+  }
+}
+
+function renderStudentModal(studentId, warningState = {}) {
   const student = attendanceState.students.find((item) => item.id === studentId);
   const holder = document.querySelector("[data-director-attendance-modal]");
   if (!student || !holder) return;
   const summary = studentSummary(student);
-  holder.innerHTML = attendanceStudentModal(summary);
+  holder.innerHTML = attendanceStudentModal(summary, warningState);
   refreshDirectorIcons();
-  const close = () => { holder.innerHTML = ""; };
+  const close = () => { studentModalRequest += 1; holder.innerHTML = ""; };
   holder.querySelector("[data-close-director-attendance-modal]")?.addEventListener("click", close);
   holder.querySelector("[data-director-attendance-modal-backdrop]")?.addEventListener("click", (event) => { if (event.target?.hasAttribute("data-director-attendance-modal-backdrop")) close(); });
+  holder.querySelector("[data-retry-attendance-warning]")?.addEventListener("click", () => showStudentModal(studentId));
   const warningToggle = holder.querySelector("[data-attendance-warning-toggle]");
   const warningKnob = holder.querySelector("[data-attendance-warning-knob]");
   const warningMessage = holder.querySelector("[data-attendance-warning-message]");

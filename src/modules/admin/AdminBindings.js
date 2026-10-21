@@ -1,13 +1,15 @@
 ﻿import { COURSES, DAYS, SUBJECTS, findCourse, findSubject, periodsForCourse } from "../../data/catalog.js";
-import { getAdminCounts, getAllSchedules, getSchedule, importHistoricalAttendance, importHistoricalGrades, importSchedulesPayload, importStudents, listStudents, saveScheduleCell } from "../../services/adminData.js";
-import { prepararGestion } from "../../services/configuracionSistema.js";
+import { getAdminCounts, getAllSchedules, getSchedule, importHistoricalAttendance, importHistoricalGrades, importSchedulesPayload, listStudents, saveScheduleCell } from "../../services/adminData.js";
+import { configuracionActual, gestionActual } from "../../services/rutasFirestore.js";
+import { gestionAdministrativaDisponible, validarFechaGestion } from "../../services/registroEscolar.js";
+import { bindGestionEscolar } from "./GestionEscolarAdmin.js";
+import { bindGuiaRegistroAdmin } from "./InicioRegistroAdmin.js";
+import { auth } from "../../firebase/client.js";
 import { createSystemUser, listUsersByRole } from "../../services/users.js";
-import { setStudentAccessActive } from "../../services/studentAccess.js";
-import { openStudentAccessMigration } from "./AccesosAlumnos.js";
+import { bindAlumnosAdmin } from "./AlumnosAdmin.js";
 import { listAudit, safeAudit } from "../../services/auditData.js";
 
 const state = {
-  studentsCourseId: COURSES[0].id,
   scheduleCourseId: COURSES[0].id,
   selectedSubjectId: "",
   schedule: null,
@@ -413,112 +415,6 @@ function bindRefreshButtons() {
     button.addEventListener("click", () => refreshUsers(button.dataset.refreshUsers));
   });
 }
-
-function renderStudentRows(students) {
-  const tbody = document.querySelector("[data-students-list]");
-  if (!tbody) return;
-  if (!students.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-4 font-bold text-slate-500">No hay alumnos registrados en este curso.</td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = students.map((student) => `
-    <tr>
-      <td class="px-3 py-2.5 font-medium text-slate-700">${escapeHtml(student.numeroLista || "-")}</td>
-      <td class="px-3 py-2.5 font-medium text-slate-900">${escapeHtml(student.nombre || "-")}</td>
-      <td class="px-3 py-2.5 text-slate-600">${escapeHtml(student.ci || "-")}</td>
-      <td class="px-3 py-2.5"><span class="rounded-full ${student.activo === false ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"} px-2.5 py-1 text-[10px] font-medium">${student.activo === false ? "Retirado" : "Activo"}</span></td>
-      <td class="px-3 py-2.5"><button class="rounded-md border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-school-green hover:bg-green-50" data-toggle-student="${escapeHtml(student.id)}" data-active="${student.activo !== false}">${student.activo === false ? "Habilitar" : "Retirar"}</button></td>
-    </tr>
-  `).join("");
-
-  tbody.querySelectorAll("[data-toggle-student]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      const nextActive = button.dataset.active !== "true";
-      const student = students.find((item) => item.id === button.dataset.toggleStudent);
-      try {
-        if (!student) throw new Error("No se encontro el alumno.");
-        await setStudentAccessActive(student, nextActive);
-        await safeAudit({
-          tipo: "alumnos",
-          accion: nextActive ? "habilitar" : "retirar",
-          detalle: `${nextActive ? "Habilito" : "Retiro"} alumno ${button.dataset.toggleStudent}`,
-          datos: { alumnoId: button.dataset.toggleStudent, activo: nextActive, cursoId: state.studentsCourseId }
-        });
-        await refreshStudents();
-      } catch (error) {
-        statusFor(document.querySelector("[data-students-panel]"), "[data-students-access-status]", error.message || "No se pudo actualizar el acceso del alumno.", "error");
-      } finally {
-        button.disabled = false;
-      }
-    });
-  });
-}
-
-async function refreshStudents() {
-  const course = findCourse(state.studentsCourseId);
-  const title = document.querySelector("[data-students-title]");
-  const tbody = document.querySelector("[data-students-list]");
-  if (title) title.textContent = course.nombre;
-  if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-4 font-bold text-slate-500">Cargando...</td></tr>`;
-
-  try {
-    renderStudentRows(await listStudents(course.id));
-  } catch (error) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-4 font-bold text-red-600">No se pudo cargar alumnos: ${error.message}</td></tr>`;
-  }
-}
-
-async function generateStudentAccessesForCourse() {
-  const course = findCourse(state.studentsCourseId);
-  if (course) await openStudentAccessMigration(course, refreshStudents);
-}
-
-function bindStudentsPage() {
-  document.querySelectorAll('[data-action="students-course"]').forEach((button) => {
-    button.addEventListener("click", () => {
-      state.studentsCourseId = button.dataset.courseId;
-      updateTabs(document.querySelector("[data-course-tabs]"), state.studentsCourseId);
-      refreshStudents();
-    });
-  });
-
-  document.querySelector("[data-action='refresh-students']")?.addEventListener("click", refreshStudents);
-  document.querySelector("[data-action='generate-student-accesses']")?.addEventListener("click", generateStudentAccessesForCourse);
-
-  document.querySelector("[data-students-import-form]")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const course = findCourse(data.get("courseId"));
-    const button = form.querySelector("button[type='submit']");
-
-    button.disabled = true;
-    statusFor(form, "[data-students-status]", "Subiendo alumnos a Firebase...");
-    try {
-      const students = await importStudents(course, data.get("students"));
-      await safeAudit({
-        tipo: "alumnos",
-        accion: "importar",
-        detalle: `Importo ${students.length} alumnos en ${course.nombre}`,
-        datos: { cursoId: course.id, cantidad: students.length }
-      });
-      state.studentsCourseId = course.id;
-      statusFor(form, "[data-students-status]", `${students.length} alumnos importados. Usa Crear accesos para preparar sus cuentas y descargar las contrasenas temporales.`);
-      form.querySelector("textarea").value = "";
-      updateTabs(document.querySelector("[data-course-tabs]"), state.studentsCourseId);
-      await refreshStudents();
-    } catch (error) {
-      statusFor(form, "[data-students-status]", error.message || "No se pudo importar alumnos.", "error");
-    } finally {
-      button.disabled = false;
-    }
-  });
-
-  refreshStudents();
-}
-
 
 function downloadJson(filename, data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
@@ -1014,9 +910,9 @@ function collectHistoricalRowsFromGrid() {
   const data = new FormData(form);
   const course = findCourse(data.get("courseId"));
   const trimestreId = data.get("trimestreId") || "t1";
-  const year = data.get("year") || new Date().getFullYear();
+  const year = gestionActual();
   const dates = [...grid.querySelectorAll("[data-h-date]")]
-    .map((input, index) => ({ index, fecha: normalizeHistoricalDate(input.value, year), label: input.value }))
+    .map((input, index) => ({ index, fecha: input.value.trim() ? validarFechaGestion(normalizeHistoricalDate(input.value, year), year) : "", label: input.value }))
     .filter((item) => item.fecha);
   if (!course?.id) throw new Error("Selecciona un curso valido.");
   if (!dates.length) throw new Error("Escribe al menos una fecha valida.");
@@ -1169,7 +1065,7 @@ function collectHistoricalGradesFromGrid() {
     return {
       key: String(index),
       titulo: title,
-      fecha: normalizeHistoricalDate(dateInput?.value, new Date().getFullYear()) || "",
+      fecha: String(dateInput?.value || "").trim() ? validarFechaGestion(normalizeHistoricalDate(dateInput.value, gestionActual()), gestionActual()) : "",
       maximo: Number(maxInput?.value || 100),
       tipo
     };
@@ -1271,14 +1167,14 @@ async function buildHistoricalAttendancePreview() {
   const data = new FormData(form);
   const course = findCourse(data.get("courseId"));
   const trimestreId = data.get("trimestreId") || "t1";
-  const year = data.get("year") || new Date().getFullYear();
+  const year = gestionActual();
   const rawText = data.get("records");
   const lines = String(rawText || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.length < 2) throw new Error("Pega una tabla con encabezados y alumnos.");
 
   const header = splitHistoricalLine(lines[0]);
   const dateColumns = header
-    .map((label, index) => ({ index, fecha: normalizeHistoricalDate(label, year), label }))
+    .map((label, index) => ({ index, fecha: index >= 2 && label.trim() ? validarFechaGestion(normalizeHistoricalDate(label, year), year) : "", label }))
     .filter((item) => item.index >= 2 && item.fecha);
   if (!dateColumns.length) throw new Error("No encontre fechas validas desde la tercera columna.");
 
@@ -1645,6 +1541,8 @@ function bindAuditPage() {
   loadAuditPage();
 }
 export function bindAdminPages(route) {
+  const disponible = gestionAdministrativaDisponible(configuracionActual());
+  if (route.startsWith("/admin/") && !disponible) return;
   if (["/admin/docentes", "/admin/director"].includes(route)) {
     const role = route === "/admin/docentes" ? "docente" : "director";
     bindCreateForms();
@@ -1652,30 +1550,15 @@ export function bindAdminPages(route) {
     refreshUsers(role);
   }
 
-  if (route === "/admin/alumnos") bindStudentsPage();
+  if (route === "/admin/alumnos") bindAlumnosAdmin();
   if (route === "/admin/horarios") bindSchedulePage();
   if (route === "/admin/carga-historica") bindHistoricalPage();
   if (route === "/admin") {
-    hydrateAdminDashboard();
-    document.querySelector("[data-gestion-form]")?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const gestion = new FormData(form).get("gestion");
-      if (!confirm(`Activar la gestion ${gestion}? Los registros anteriores se conservan. Las nuevas operaciones se guardaran en esta gestion.`)) return;
-      const button = form.querySelector("button");
-      const status = document.querySelector("[data-gestion-status]");
-      button.disabled = true;
-      status.textContent = "Preparando gestion...";
-      try {
-        await prepararGestion(gestion);
-        window.location.reload();
-      } catch (error) {
-        status.textContent = error?.code === "permission-denied"
-          ? "Publica primero las nuevas reglas de Firestore y vuelve a intentar."
-          : error.message || "No se pudo preparar la gestion.";
-        button.disabled = false;
-      }
-    });
+    bindGestionEscolar();
+    if (disponible) {
+      hydrateAdminDashboard();
+      bindGuiaRegistroAdmin({ uid: auth.currentUser?.uid, configuracion: configuracionActual() });
+    }
   }
   if (route === "/admin/auditoria") bindAuditPage();
 }

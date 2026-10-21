@@ -13,3 +13,7 @@ export function fechaEscolarIso(date = new Date(), offset = 0) {
   shifted.setUTCDate(shifted.getUTCDate() + offset);
   return shifted.toISOString().slice(0, 10);
 }
+
+export function gestionDelCalendario(date = new Date()) {
+  return fechaEscolarIso(date).slice(0, 4);
+}

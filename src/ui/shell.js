@@ -1,5 +1,6 @@
 import { APP_NAME, APP_VERSION } from "../firebase/config.js";
 import { icon } from "./dom.js";
+import { avisoGestionDocente, etiquetaGestionDocente, fechaCabeceraDocente } from "./gestionDocente.js";
 
 function publicAsset(path) {
   return `${import.meta.env.BASE_URL || "./"}${path}`;
@@ -205,7 +206,8 @@ export function appShell(role, activeRoute, content) {
   const items = navItems[role] || [];
   const title = role ? role.charAt(0).toUpperCase() + role.slice(1) : "Sistema";
   const isDocenteDashboard = role === "docente" && activeRoute === "/docente";
-  const docenteMainFixedClass = isDocenteDashboard ? "lg:h-[calc(100dvh-3.5rem)] lg:max-w-none lg:overflow-hidden" : "";
+  const avisoGestion = role === "docente" ? avisoGestionDocente() : "";
+  const docenteMainFixedClass = isDocenteDashboard && !avisoGestion ? "lg:h-[calc(100dvh-3.5rem)] lg:max-w-none lg:overflow-hidden" : "";
   const docentePageTitle = items.find((item) => item[1] === `#${activeRoute}`)?.[0] || "Panel";
 
   if (role === "docente") {
@@ -220,6 +222,8 @@ export function appShell(role, activeRoute, content) {
             <p class="text-[11px] text-slate-500">Area docente</p>
             <p class="truncate text-sm font-semibold text-slate-900">${docentePageTitle}</p>
           </div>
+          <span class="text-sm text-slate-600">${fechaCabeceraDocente()}</span>
+          ${etiquetaGestionDocente()}
           <button type="button" data-teacher-alert-toggle aria-label="Abrir notificaciones" aria-expanded="false" aria-controls="teacher-alert-panel" title="Notificaciones" class="relative grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-800 transition hover:border-green-300 hover:bg-green-50">
             ${icon("bell", "h-5 w-5")}
             <span data-teacher-alert-badge class="absolute -right-1 -top-1 hidden min-w-5 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-5 text-white"></span>
@@ -230,7 +234,7 @@ export function appShell(role, activeRoute, content) {
           <div class="flex h-14 items-center justify-between gap-3 px-3">
             <a href="#/docente" class="flex min-w-0 items-center gap-3 font-black text-school-bark">
               <span class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white shadow-soft ring-1 ring-amber-900/10"><img src="${SCHOOL_LOGO}" alt="Escudo Nueva Bolivia" class="h-full w-full object-contain p-1" /></span>
-              <span class="truncate text-sm">Panel docente</span>
+              <span class="min-w-0"><span class="block truncate text-sm font-semibold">${docentePageTitle}</span><span class="mt-0.5 block">${etiquetaGestionDocente()}</span></span>
             </a>
             <div class="flex shrink-0 items-center gap-2">
               <button type="button" data-teacher-alert-toggle aria-label="Abrir notificaciones" aria-expanded="false" aria-controls="teacher-alert-panel" class="relative grid h-9 w-9 place-items-center rounded-lg border border-amber-900/10 bg-white text-school-green">
@@ -265,6 +269,7 @@ export function appShell(role, activeRoute, content) {
         </div>
         ${accountSettingsModal()}
 
+        ${avisoGestion}
         <main class="mx-auto max-w-7xl px-2.5 py-2.5 sm:px-4 sm:py-4 ${docenteMainFixedClass}" data-teacher-ui>${content}</main>
         <footer class="mx-auto max-w-7xl px-2.5 pb-3 text-[10px] font-semibold text-slate-400 sm:px-4 ${isDocenteDashboard ? "lg:hidden" : ""}">${APP_VERSION}</footer>
       </div>

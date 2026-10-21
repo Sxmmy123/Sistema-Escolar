@@ -5,10 +5,20 @@ import { gradeTone, isMaterialActivity, isScoredMaterialActivity } from "./Acade
 import { activityEvaluationLabel, activityPointsLabel, readGradeDelivery, resolvedActivityReviewState } from "./ComunDocente.js";
 import { findSubject } from "../../data/catalog.js";
 import { icon } from "../../ui/dom.js";
+import { ambitoCalificar, cacheCalificar, cargarActividadCalificar, cargarIndiceCalificar } from "../../services/datosCalificarDocente.js";
+import { gestionActual } from "../../services/rutasFirestore.js";
 
-export async function renderDateGrading(context) {
+let gradingRenderId = 0;
+
+export async function renderDateGrading(context, { actualizar = false } = {}) {
   const container = document.querySelector("[data-teacher-grading]");
   if (!container) return;
+  const renderId = ++gradingRenderId;
+  const vigente = () => renderId === gradingRenderId && document.querySelector("[data-teacher-grading]") === container;
+  const cacheContext = { ...context, gestionId: context.gestionId || gestionActual() };
+  const trimesterId = teacherState.trimesterId;
+  const loaders = { listActivities, listGradesForCourse, getTeacherStudents, listGradesForActivity, listAttendanceForCourseDate };
+  if (actualizar) cacheCalificar.limpiar(ambitoCalificar(cacheContext, trimesterId));
   const previousActivityId = container.querySelector("[data-student-grade-modal]")?.dataset.activityId;
   const previousListScrollTop = container.querySelector(".grade-list-rows")?.scrollTop || 0;
   if (!context.courses.length) {
@@ -25,13 +35,23 @@ export async function renderDateGrading(context) {
     start: nextSchoolDays[0],
     end: nextSchoolDays[nextSchoolDays.length - 1]
   };
-  const allActivities = (await Promise.all(context.courses.map((item) => listActivities(item.id, teacherState.trimesterId)))).flat();
-  const gradedActivityIds = gradeScope === "pendientes"
-    ? new Set((await Promise.all(context.courses.map((item) => listGradesForCourse(item.id, teacherState.trimesterId))))
-      .flat()
-      .map((grade) => grade.actividadId)
-      .filter(Boolean))
-    : new Set();
+  const mostrarError = (error) => {
+    if (!vigente()) return;
+    container.innerHTML = `${emptyState("No se pudo cargar Calificar", error?.code === "permission-denied" ? "Sin permiso para consultar los datos." : (error.message || "Revisa la conexion."))}
+      <button type="button" data-retry-grading class="mt-3 rounded-lg bg-school-green px-4 py-2 text-sm text-white">Reintentar</button>`;
+    container.querySelector("[data-retry-grading]")?.addEventListener("click", () => renderDateGrading(context, { actualizar: true }));
+  };
+  if (!container.innerHTML?.trim()) container.innerHTML = `<p role="status" class="p-4 text-sm text-slate-600">Cargando actividades...</p>`;
+  let allActivities, gradedActivityIds;
+  try {
+    const indice = await cargarIndiceCalificar(cacheContext, trimesterId, loaders, { pendientes: gradeScope === "pendientes" });
+    allActivities = indice.actividades;
+    gradedActivityIds = indice.calificadas;
+  } catch (error) {
+    mostrarError(error);
+    return;
+  }
+  if (!vigente()) return;
   const activities = allActivities
     .filter((item) => {
       const inAssignedCourse = coursesById[item.cursoId]?.materias?.includes(item.materiaId);
@@ -63,16 +83,19 @@ export async function renderDateGrading(context) {
   }
 
   const activity = activities.find((item) => item.id === teacherState.gradeModalActivityId) || null;
-  const noSubmissionLabel = isMaterialActivity(activity) ? "No trajo material" : "No hizo su tarea";
-  const noSubmissionShortLabel = isMaterialActivity(activity) ? "No trajo" : "No hizo";
+  const noSubmissionLabel = isMaterialActivity(activity || {}) ? "No trajo material" : "No hizo su tarea";
+  const noSubmissionShortLabel = isMaterialActivity(activity || {}) ? "No trajo" : "No hizo";
   const activityCourse = activity ? coursesById[activity.cursoId] : null;
-  const [students, gradesMap, attendanceMap] = activity
-    ? await Promise.all([
-      getTeacherStudents(activity.cursoId),
-      listGradesForActivity(activity.id),
-      listAttendanceForCourseDate(activity.cursoId, activity.fecha, teacherState.trimesterId)
-    ])
-    : [[], {}, {}];
+  let students = [], gradesMap = {}, attendanceMap = {};
+  if (activity && !teacherState.gradeModalClosed) {
+    try {
+      ({ students, gradesMap, attendanceMap } = await cargarActividadCalificar(cacheContext, { ...activity, trimestreId: trimesterId }, loaders));
+    } catch (error) {
+      mostrarError(error);
+      return;
+    }
+    if (!vigente()) return;
+  }
   const studentOrderMap = new Map(students.map((student, index) => [student.id, index + 1]));
 
   const ignoreAttendanceForGrading = Boolean(teacherState.gradeIgnoreAttendance);
@@ -230,6 +253,7 @@ export async function renderDateGrading(context) {
               Ignorar asistencia
             </button>
             <a href="#/docente/tareas" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-school-green sm:rounded-2xl">${icon("calendar-plus", "mr-1 inline h-3.5 w-3.5 sm:h-4 sm:w-4")}Agenda</a>
+            <button type="button" data-refresh-grading class="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-school-green sm:rounded-2xl">${icon("refresh-cw", "h-3.5 w-3.5")}Actualizar</button>
           </div>
         </div>
         <div class="mt-3 overflow-x-auto rounded-2xl border border-slate-200 bg-white sm:mt-5">
@@ -461,12 +485,32 @@ export async function renderDateGrading(context) {
           ` : ""}
         </section>
       </div>
+      ${activity ? `
+        <div data-finalize-review-modal class="fixed inset-0 z-[60] hidden items-center justify-center bg-slate-950/60 p-3 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="finalize-review-title" tabindex="-1">
+          <section class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-2xl">
+            <h3 id="finalize-review-title" class="text-base font-semibold text-slate-900">Terminar revision</h3>
+            <p class="mt-2 text-sm text-slate-700">${escapeHtml(activity.titulo || "Actividad")}</p>
+            <p class="mt-3 text-sm leading-6 text-slate-700">${pendingDefinitiveCount ? `${pendingDefinitiveCount} alumno(s) sin nota se marcaran como no presentaron.` : "No quedan alumnos sin revisar."} Los alumnos sin nota quedaran disponibles en Regularizacion.</p>
+            ${pendingLicenseCount ? `<p class="mt-3 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm leading-5 text-purple-900">${pendingLicenseCount} alumno(s) con licencia seguiran pendientes y no perderan Responsabilidad.</p>` : ""}
+            <p data-finalize-review-status role="status" class="mt-3 hidden text-sm text-red-700"></p>
+            <div class="mt-5 flex justify-end gap-2">
+              <button type="button" data-cancel-finalize-review class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">Seguir calificando</button>
+              <button type="button" data-confirm-finalize-review class="inline-flex items-center gap-2 rounded-md bg-school-green px-3 py-2 text-sm font-medium text-white disabled:opacity-50">${icon("check-check", "h-4 w-4")}Confirmar cierre</button>
+            </div>
+          </section>
+        </div>
+      ` : ""}
     </section>
   `;
 
   if (activity?.id && previousActivityId === activity.id) {
     container.querySelector(".grade-list-rows")?.scrollTo({ top: previousListScrollTop });
   }
+  container.querySelector("[data-refresh-grading]")?.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    event.currentTarget.textContent = "Actualizando...";
+    await renderDateGrading(context, { actualizar: true });
+  });
   container.querySelectorAll("[data-grade-scope]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.gradeScope = ["pendientes", "semana"].includes(button.dataset.gradeScope) ? button.dataset.gradeScope : "dia";
@@ -492,18 +536,44 @@ export async function renderDateGrading(context) {
     teacherState.gradeIndex = 0;
     renderDateGrading(context);
   });
-  container.querySelector("[data-finalize-activity-review]")?.addEventListener("click", async (event) => {
-    if (!activity) return;
-    const detail = pendingDefinitiveCount
-      ? `${pendingDefinitiveCount} alumno(s) sin nota se marcaran como no presentaron.`
-      : "No quedan alumnos sin revisar.";
-    const licenseDetail = pendingLicenseCount
-      ? `\n${pendingLicenseCount} alumno(s) con licencia seguiran pendientes y no perderan Responsabilidad.`
-      : "";
-    if (!confirm(`Terminar la revision de esta actividad?\n\n${detail}${licenseDetail}\n\nLos alumnos sin nota quedaran disponibles en Regularizacion al finalizar.`)) return;
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.textContent = "Finalizando...";
+  const finalizeModal = container.querySelector("[data-finalize-review-modal]");
+  const finalizeButton = container.querySelector("[data-finalize-activity-review]");
+  const confirmFinalize = container.querySelector("[data-confirm-finalize-review]");
+  const cancelFinalize = container.querySelector("[data-cancel-finalize-review]");
+  let finalizing = false;
+  const closeFinalizeModal = () => {
+    if (finalizing) return;
+    finalizeModal?.classList.add("hidden");
+    finalizeModal?.classList.remove("flex");
+    finalizeButton?.focus();
+  };
+  finalizeButton?.addEventListener("click", () => {
+    if (!activity || finalizing) return;
+    finalizeModal?.classList.remove("hidden");
+    finalizeModal?.classList.add("flex");
+    cancelFinalize?.focus();
+  });
+  cancelFinalize?.addEventListener("click", closeFinalizeModal);
+  finalizeModal?.addEventListener("click", (event) => {
+    if (event.target === finalizeModal) closeFinalizeModal();
+  });
+  finalizeModal?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeFinalizeModal();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+      if (!finalizing) (document.activeElement === cancelFinalize ? confirmFinalize : cancelFinalize)?.focus();
+    }
+  });
+  confirmFinalize?.addEventListener("click", async () => {
+    if (!activity || finalizing) return;
+    finalizing = true;
+    confirmFinalize.disabled = true;
+    cancelFinalize.disabled = true;
+    confirmFinalize.textContent = "Finalizando...";
+    const status = container.querySelector("[data-finalize-review-status]");
+    status?.classList.add("hidden");
     try {
       const result = await finalizeActivityReview({ activity, students, attendanceMap, gradesMap });
       upsertTeacherNotesSnapshotActivity(context, result.activity);
@@ -511,9 +581,14 @@ export async function renderDateGrading(context) {
       teacherState.gradeStudentId = "";
       await renderDateGrading(context);
     } catch (error) {
-      alert(error?.code === "permission-denied" ? "Sin permiso para finalizar la revision." : (error.message || "No se pudo finalizar la revision."));
-      button.disabled = false;
-      button.textContent = "Terminar revision";
+      if (status) {
+        status.textContent = error?.code === "permission-denied" ? "Sin permiso para finalizar la revision." : (error.message || "No se pudo finalizar la revision.");
+        status.classList.remove("hidden");
+      }
+      finalizing = false;
+      confirmFinalize.disabled = false;
+      cancelFinalize.disabled = false;
+      confirmFinalize.textContent = "Confirmar cierre";
     }
   });
   container.querySelectorAll("[data-grade-activity]").forEach((button) => {
