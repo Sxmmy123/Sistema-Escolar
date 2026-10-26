@@ -3,7 +3,7 @@ import { icon } from "./dom.js";
 import { avisoGestionDocente, etiquetaGestionDocente, fechaCabeceraDocente } from "./gestionDocente.js";
 
 function publicAsset(path) {
-  return `${import.meta.env.BASE_URL || "./"}${path}`;
+  return `${import.meta.env?.BASE_URL || "./"}${path}`;
 }
 
 const SCHOOL_LOGO = publicAsset("images/logo-nueva-bolivia.png");
@@ -42,7 +42,7 @@ const navItems = {
   ]
 };
 
-function navLink([label, href, iconName], activeRoute, compact = false, teacherSidebar = false) {
+function navLink([label, href, iconName, available = true], activeRoute, compact = false, teacherSidebar = false) {
   const active = href === `#${activeRoute}`;
   const size = compact
     ? teacherSidebar ? "gap-2.5 rounded-lg px-2.5 py-2 text-[12px]" : "gap-2 rounded-xl px-2.5 py-2 text-[12px]"
@@ -54,10 +54,10 @@ function navLink([label, href, iconName], activeRoute, compact = false, teacherS
     ? "border-transparent text-slate-600 hover:border-school-green/20 hover:bg-school-sky hover:text-school-navy"
     : "border-transparent text-slate-600 hover:border-school-green/20 hover:bg-school-sky hover:text-school-navy";
   return `
-    <a href="${href}" title="${label}" ${active ? 'aria-current="page"' : ""} class="${teacherSidebar ? "teacher-sidebar-link min-h-9 font-semibold" : "font-black"} flex items-center border transition ${size} ${active ? activeClass : idleClass}">
+    <${available ? "a" : "span"} ${available ? `href="${href}"` : 'aria-disabled="true"'} title="${label}${available ? "" : ": proximamente"}" ${active ? 'aria-current="page"' : ""} class="${teacherSidebar ? "teacher-sidebar-link min-h-9 font-semibold" : "font-black"} flex items-center border transition ${size} ${active ? activeClass : idleClass} ${available ? "" : "opacity-50 cursor-not-allowed"}">
       <span class="teacher-sidebar-icon grid shrink-0 place-items-center">${icon(iconName, compact ? "h-4 w-4" : "h-4 w-4")}</span>
       <span class="teacher-sidebar-copy min-w-0 truncate leading-tight">${label}</span>
-    </a>
+    </${available ? "a" : "span"}>
   `;
 }
 
@@ -85,8 +85,8 @@ function sidebarNav(items, activeRoute, title, mode = "desktop") {
           ${items.slice(0, 5).map((item) => navLink(item, activeRoute, true, true)).join("")}
         </nav>
 
-        <p class="teacher-sidebar-section-label mt-3 px-2.5 text-[9px] font-bold uppercase tracking-[.14em] text-slate-400">Otros</p>
-        <nav class="mt-1 grid gap-0.5">
+        ${items.length > 5 ? `<p class="teacher-sidebar-section-label mt-3 px-2.5 text-[9px] font-bold uppercase tracking-[.14em] text-slate-400">Otros</p>` : ""}
+        <nav class="mt-1 grid gap-0.5" ${items.length > 5 ? "" : "hidden"}>
           ${items.slice(5).map((item) => navLink(item, activeRoute, true, true)).join("")}
         </nav>
       </div>
@@ -202,10 +202,10 @@ function accountSettingsModal() {
   `;
 }
 
-export function appShell(role, activeRoute, content) {
-  const items = navItems[role] || [];
+export function appShell(role, activeRoute, content, options = {}) {
+  const items = options.navigation || navItems[role] || [];
   const title = role ? role.charAt(0).toUpperCase() + role.slice(1) : "Sistema";
-  const isDocenteDashboard = role === "docente" && activeRoute === "/docente";
+  const isDocenteDashboard = role === "docente" && activeRoute === "/docente" && options.fitDashboard !== false;
   const avisoGestion = role === "docente" ? avisoGestionDocente() : "";
   const docenteMainFixedClass = isDocenteDashboard && !avisoGestion ? "lg:h-[calc(100dvh-3.5rem)] lg:max-w-none lg:overflow-hidden" : "";
   const docentePageTitle = items.find((item) => item[1] === `#${activeRoute}`)?.[0] || "Panel";
@@ -219,7 +219,7 @@ export function appShell(role, activeRoute, content) {
 
         <header class="sticky top-0 z-30 hidden h-14 items-center gap-4 border-b border-slate-200 bg-white/90 px-4 shadow-sm backdrop-blur lg:flex lg:px-8">
           <div class="min-w-0 flex-1">
-            <p class="text-[11px] text-slate-500">Area docente</p>
+            <p class="text-[11px] text-slate-500">${options.areaLabel || "Area docente"}</p>
             <p class="truncate text-sm font-semibold text-slate-900">${docentePageTitle}</p>
           </div>
           <span class="text-sm text-slate-600">${fechaCabeceraDocente()}</span>

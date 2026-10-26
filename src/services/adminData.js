@@ -231,6 +231,7 @@ export async function importHistoricalAttendance({ course, rows, trimestreId }) 
 
 export async function importHistoricalGrades({ course, materiaId, rows, activities, trimestreId }) {
   if (!course?.id) throw new Error("Selecciona un curso valido.");
+  if (!COURSES.some((item) => item.id === course.id && item.nivel === "primaria")) throw new Error("La carga de notas numericas solo corresponde a Primaria.");
   if (!materiaId) throw new Error("Selecciona una materia.");
   if (!["t1", "t2", "t3"].includes(trimestreId)) throw new Error("Selecciona un trimestre valido.");
   if (!Array.isArray(activities) || !activities.length) throw new Error("No hay actividades para guardar.");

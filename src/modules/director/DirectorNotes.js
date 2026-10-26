@@ -1,6 +1,5 @@
 import { icon } from "../../ui/dom.js";
 import {
-  COURSES,
   SUBJECTS,
   listDirectorAllActivities,
   listDirectorAttendanceByTrimester,
@@ -8,6 +7,7 @@ import {
   listDirectorStudents,
   subjectName
 } from "../../services/directorData.js";
+import { PRIMARY_COURSES as COURSES } from "../../data/catalog.js";
 import { calculateCourseTerm, calculateSubjectTerm, gradeByActivityAndStudent } from "../../services/calculoAcademico.js";
 import { DirectorShell } from "./DirectorShell.js";
 import { escapeDirectorHtml, refreshDirectorIcons } from "./DirectorUtils.js";

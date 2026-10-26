@@ -1,3 +1,5 @@
+import { isQualitativeCourse } from "../data/catalog.js";
+
 export function gradeNumber(value) {
   const number = Math.round(Number(value || 0));
   return Math.max(35, Math.min(100, number || 35));
@@ -189,6 +191,7 @@ export function calculateSubjectTerm(student, subjectId, activities, gradesMap, 
 }
 
 export function calculateCourseTerm({ students = [], activities = [], grades = [], attendanceRows = [], courseId, trimestreId = "t1" }) {
+  if (isQualitativeCourse(courseId)) return { courseId, modalidadEvaluacion: "cualitativa", studentResults: [], average: 0, approved: 0, risk: 0, pending: 0, totalCells: 0 };
   const courseActivities = activities.filter((activity) => activity.cursoId === courseId && (activity.trimestreId || "t1") === trimestreId && activity.activo !== false);
   const activityIds = new Set(courseActivities.map((activity) => activity.id));
   const gradesMap = gradeByActivityAndStudent(grades.filter((grade) => activityIds.has(grade.actividadId)));

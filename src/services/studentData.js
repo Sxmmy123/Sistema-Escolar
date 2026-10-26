@@ -1,5 +1,5 @@
 import { coleccionGestion, documentoGestion, gestionActual } from "./rutasFirestore.js";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { findCourse, findSubject, SUBJECTS } from "../data/catalog.js";
 import { auth, firestore } from "../firebase/client.js";
 import { actividadPendienteRegularizacion } from "./revisionActividad.js";
@@ -7,6 +7,10 @@ import { calculateSubjectTerm, gradeByActivityAndStudent, isAttendanceValue, isM
 import { fechaEscolarIso } from "./fechaEscolar.js";
 import { studentIdFromProfile } from "./identidadAlumno.js";
 import { alumnoConMatricula } from "./matriculas.js";
+import { periodosCurso } from "./periodosCurso.js";
+import { STUDENT_TRIMESTERS, etiquetaTrimestreAlumno, normalizarTrimestreAlumno, resolverVistaTrimestreAlumno, trimestreAutomaticoAlumno } from "./trimestreAlumno.js";
+import { identificarAutoresAsistencia } from "./autoriaAsistencia.js";
+export { STUDENT_TRIMESTERS } from "./trimestreAlumno.js";
 
 const defaultClients = { auth, firestore };
 
@@ -14,45 +18,8 @@ function verifyStudentSession(clients, uid) {
   if (clients.auth.currentUser?.uid !== uid) throw new Error("La sesion del alumno cambio. Vuelve a ingresar.");
 }
 
-export const STUDENT_TRIMESTERS = [
-  { id: "t1", label: "1er trimestre" },
-  { id: "t2", label: "2do trimestre" },
-  { id: "t3", label: "3er trimestre" }
-];
-
 function todayIso() {
   return fechaEscolarIso();
-}
-
-function trimesterLabel(trimestreId) {
-  return STUDENT_TRIMESTERS.find((item) => item.id === trimestreId)?.label || STUDENT_TRIMESTERS[0].label;
-}
-
-function normalizeTrimester(value) {
-  return STUDENT_TRIMESTERS.some((item) => item.id === value) ? value : "";
-}
-
-function inferActiveTrimester({ activities = [], grades = [], attendance = [] }) {
-  const scores = { t1: 0, t2: 0, t3: 0 };
-  const today = todayIso();
-  activities.forEach((item) => {
-    const trimester = normalizeTrimester(item.trimestreId);
-    if (!trimester) return;
-    scores[trimester] += String(item.fecha || "") >= today ? 4 : 1;
-  });
-  attendance.forEach((item) => {
-    const trimester = normalizeTrimester(item.trimestreId);
-    if (trimester) scores[trimester] += 2;
-  });
-  grades.forEach((item) => {
-    const trimester = normalizeTrimester(item.trimestreId);
-    if (trimester) scores[trimester] += 2;
-  });
-  return STUDENT_TRIMESTERS.reduce((best, item) => {
-    if (scores[item.id] > scores[best]) return item.id;
-    if (scores[item.id] === scores[best] && scores[item.id] > 0) return item.id;
-    return best;
-  }, "t1");
 }
 
 export async function getStudentContext(clients = defaultClients) {
@@ -84,34 +51,55 @@ export function buildBulletin({ student, activities, grades, attendance, trimest
   }));
 }
 
-export async function getStudentDashboardData(clients = defaultClients) {
-  const { firestore } = clients;
-  const context = await getStudentContext(clients);
+function bulletinAverage(values) {
+  const present = values.filter((value) => value !== null && Number.isFinite(value));
+  return present.length ? Math.round(present.reduce((total, value) => total + value, 0) / present.length) : null;
+}
+
+export function buildStudentAnnualBulletin({ student, activities = [], grades = [], attendance = [] }) {
+  const ownGrades = grades.filter((item) => item.alumnoId === student.id);
+  const ownAttendance = attendance.filter((item) => item.alumnoId === student.id);
+  const byTerm = Object.fromEntries(STUDENT_TRIMESTERS.map((term) => {
+    const termActivities = activities.filter((item) => (item.trimestreId || "t1") === term.id);
+    const termGrades = ownGrades.filter((item) => (item.trimestreId || "t1") === term.id);
+    const gradedIds = new Set(termGrades.map((item) => item.actividadId));
+    const recordedSubjects = new Set(termActivities.filter((item) => gradedIds.has(item.id)).map((item) => item.materiaId));
+    const bulletin = buildBulletin({ student, trimesterId: term.id, activities: termActivities, grades: termGrades, attendance: ownAttendance.filter((item) => (item.trimestreId || "t1") === term.id) });
+    return [term.id, bulletin.map((item) => ({ ...item, hasData: item.hasData && recordedSubjects.has(item.subjectId) }))];
+  }));
+  const rows = SUBJECTS.map((subject, index) => {
+    const terms = Object.fromEntries(STUDENT_TRIMESTERS.map((term) => [term.id, byTerm[term.id][index].hasData ? byTerm[term.id][index] : null]));
+    const values = Object.values(terms).filter(Boolean).map((item) => item.final);
+    return { subjectId: subject.id, subjectName: subject.nombre, color: subject.color, terms, average: bulletinAverage(values), termCount: values.length };
+  });
+  const terms = STUDENT_TRIMESTERS.map((term) => ({ ...term, average: bulletinAverage(byTerm[term.id].filter((item) => item.hasData).map((item) => item.final)) }));
+  const termCount = terms.filter((item) => item.average !== null).length;
+  return { rows, byTerm, terms, average: bulletinAverage(terms.map((item) => item.average)), termCount, partial: rows.some((item) => item.termCount < 3) };
+}
+
+function dashboardQueries(context, firestore) {
   const courseId = context.student.cursoId;
   const studentId = context.student.id;
-  const now = todayIso();
+  const year = context.gestionId;
+  return [
+    ["activities", query(coleccionGestion(firestore, "actividades", year), where("cursoId", "==", courseId))],
+    ["grades", query(coleccionGestion(firestore, "calificaciones", year), where("alumnoId", "==", studentId))],
+    ["attendance", query(coleccionGestion(firestore, "asistencias", year), where("alumnoId", "==", studentId))],
+    ["warnings", query(collection(firestore, "alumnos", studentId, "avisos"), where("gestionId", "==", year), where("activa", "==", true))],
+    ["periods", periodosCurso(firestore, courseId, year)]
+  ];
+}
 
-  const [activitiesSnap, gradesSnap, attendanceSnap, avisosSnap] = await Promise.all([
-    courseId ? getDocs(query(coleccionGestion(firestore, "actividades"), where("cursoId", "==", courseId))) : { docs: [] },
-    studentId ? getDocs(query(coleccionGestion(firestore, "calificaciones"), where("alumnoId", "==", studentId))) : { docs: [] },
-    studentId ? getDocs(query(coleccionGestion(firestore, "asistencias"), where("alumnoId", "==", studentId))) : { docs: [] },
-    getDocs(query(collection(firestore, "alumnos", studentId, "avisos"), where("gestionId", "==", gestionActual()), where("activa", "==", true)))
-  ]);
-  verifyStudentSession(clients, context.uid);
+const snapshotRows = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 
-  const allActivities = activitiesSnap.docs
-    .map((item) => ({ id: item.id, ...item.data() }))
-    .sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
-  const allGrades = gradesSnap.docs.map((item) => ({ id: item.id, ...item.data() }));
-  const allAttendance = attendanceSnap.docs.map((item) => ({ id: item.id, ...item.data() }));
-
-  const preferredTrimester = normalizeTrimester(context.profile.preferencias?.trimestresPorGestion?.[gestionActual()]);
-  const trimesterId = preferredTrimester || inferActiveTrimester({ activities: allActivities, grades: allGrades, attendance: allAttendance });
+export function buildStudentDashboardData(context, { activities: allActivities = [], grades: allGrades = [], attendance: allAttendance = [], warnings = [], periods = [] }, now = todayIso()) {
+  const automaticTrimesterId = trimestreAutomaticoAlumno({ activities: allActivities, attendance: allAttendance, periods, today: now });
+  const trimesterId = resolverVistaTrimestreAlumno({ profile: context.profile, year: context.gestionId, courseId: context.student.cursoId, automatic: automaticTrimesterId });
   const activities = allActivities.filter((activity) => (activity.trimestreId || "t1") === trimesterId);
   const grades = allGrades.filter((grade) => (grade.trimestreId || "t1") === trimesterId);
-  const attendance = allAttendance.filter((item) => (item.trimestreId || "t1") === trimesterId);
+  const attendance = identificarAutoresAsistencia(allAttendance).filter((item) => (item.trimestreId || "t1") === trimesterId);
   const gradeByActivity = new Map(grades.map((grade) => [grade.actividadId, grade]));
-  const attendanceWarning = avisosSnap.docs.map((item) => ({ id: item.id, ...item.data() }))
+  const attendanceWarning = warnings
     .filter((item) => item.trimestreId === trimesterId)
     .sort((a, b) => (b.updatedAt?.toMillis?.() || 0) - (a.updatedAt?.toMillis?.() || 0))[0] || null;
 
@@ -123,12 +111,14 @@ export async function getStudentDashboardData(clients = defaultClients) {
   });
   const attendanceCount = attendance.length;
   const presentCount = attendance.filter((item) => isAttendanceValue(item.estado)).length;
-  const bulletin = buildBulletin({ student: context.student, activities, grades, attendance, trimesterId });
+  const annualBulletin = buildStudentAnnualBulletin({ student: context.student, activities: allActivities, grades: allGrades, attendance: allAttendance });
+  const bulletin = annualBulletin.byTerm[trimesterId];
 
   return {
     ...context,
     trimesterId,
-    trimesterLabel: trimesterLabel(trimesterId),
+    automaticTrimesterId,
+    trimesterLabel: etiquetaTrimestreAlumno(trimesterId),
     activities,
     grades,
     gradeByActivity,
@@ -138,7 +128,56 @@ export async function getStudentDashboardData(clients = defaultClients) {
     attendance,
     attendanceWarning,
     attendancePercent: attendanceCount ? Math.round((presentCount / attendanceCount) * 100) : 0,
-    bulletin
+    bulletin,
+    annualBulletin
+  };
+}
+
+export async function getStudentDashboardData(clients = defaultClients) {
+  const context = await getStudentContext(clients);
+  const entries = await Promise.all(dashboardQueries(context, clients.firestore).map(async ([name, ref]) => {
+    try { return [name, snapshotRows(await getDocs(ref))]; }
+    catch (error) { if (name === "periods" && error.code === "permission-denied") return [name, []]; throw error; }
+  }));
+  verifyStudentSession(clients, context.uid);
+  return buildStudentDashboardData(context, Object.fromEntries(entries));
+}
+
+export async function observarPanelAlumno(onData, onError, clients = defaultClients) {
+  const context = await getStudentContext(clients);
+  const rows = {}, stops = [];
+  let disposed = false, current = null;
+  const emit = () => {
+    if (disposed || Object.keys(rows).length !== 5) return;
+    verifyStudentSession(clients, context.uid);
+    current = buildStudentDashboardData(context, rows);
+    onData(current);
+  };
+  const fail = (error) => { if (!disposed) onError(error); };
+  for (const [name, ref] of dashboardQueries(context, clients.firestore)) {
+    stops.push(onSnapshot(ref, (snapshot) => {
+      if (disposed) return;
+      rows[name] = snapshotRows(snapshot);
+      try { emit(); } catch (error) { fail(error); }
+    }, (error) => {
+      if (name === "periods" && error.code === "permission-denied") {
+        rows.periods = [];
+        try { emit(); } catch (failure) { fail(failure); }
+      } else fail(error);
+    }));
+  }
+  return {
+    stop() { disposed = true; stops.forEach((stop) => stop()); },
+    async seleccionarTrimestre(termId) {
+      if (disposed || !current || !normalizarTrimestreAlumno(termId)) throw new Error("No se puede cambiar el trimestre.");
+      verifyStudentSession(clients, context.uid);
+      const preference = { cursoId: context.student.cursoId, trimestreId: termId, automatico: current.automaticTrimesterId };
+      await updateDoc(doc(clients.firestore, "usuarios", context.uid), { [`preferencias.vistasAlumnoPorGestion.${context.gestionId}`]: preference, updatedAt: serverTimestamp() });
+      if (disposed) return;
+      verifyStudentSession(clients, context.uid);
+      context.profile = { ...context.profile, preferencias: { ...context.profile.preferencias, vistasAlumnoPorGestion: { ...context.profile.preferencias?.vistasAlumnoPorGestion, [context.gestionId]: preference } } };
+      emit();
+    }
   };
 }
 

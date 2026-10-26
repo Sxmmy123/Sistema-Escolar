@@ -1,5 +1,6 @@
 import { TRIMESTERS, saveTeacherTrimesterPreference, todayIso } from "../../services/teacherData.js";
 import { claveCache } from "../../services/rutasFirestore.js";
+import { exigirTrimestreDocente, puedeRegistrarTrimestre, trimestresDeAsignacion } from "../../services/relevoDocente.js";
 
 export const teacherState = {
   context: null,
@@ -12,7 +13,6 @@ export const teacherState = {
   attendanceModalStudentId: "",
   attendanceCoursePickerOpen: false,
   attendanceModalTop: 96,
-  guidedModalTop: 120,
   guidedIndex: 0,
   taskMonth: todayIso().slice(0, 7),
   taskModalDate: "",
@@ -64,7 +64,7 @@ function trimesterStorageKey(context = teacherState.context) {
 
 export function loadSavedTrimester(context = teacherState.context) {
   const saved = context?.profile?.trimestreActivo || localStorage.getItem(trimesterStorageKey(context)) || sessionStorage.getItem("docenteTrimestreId");
-  teacherState.trimesterId = validTrimesterId(saved);
+  teacherState.trimesterId = puedeRegistrarTrimestre(context, saved) ? validTrimesterId(saved) : trimestresDeAsignacion(context)[0] || "t1";
   sessionStorage.setItem("docenteTrimestreId", teacherState.trimesterId);
   localStorage.setItem(trimesterStorageKey(context), teacherState.trimesterId);
 }
@@ -98,6 +98,7 @@ export function setActiveTrimester(trimesterId, options = {}) {
 
 export async function persistActiveTrimester(context = teacherState.context, trimesterId = teacherState.trimesterId, guardar = saveTeacherTrimesterPreference) {
   if (!TRIMESTERS.some((item) => item.id === trimesterId)) throw new Error("Trimestre no valido.");
+  exigirTrimestreDocente(context, trimesterId);
   await guardar(context?.uid, trimesterId);
   if (context?.profile) context.profile.trimestreActivo = trimesterId;
   setActiveTrimester(trimesterId, { context });

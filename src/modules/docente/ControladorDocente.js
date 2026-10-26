@@ -1,6 +1,7 @@
 import { loadSavedTrimester, teacherState } from "./EstadoDocente.js";
 import { emptyState, escapeHtml, refreshIcons, setHtml, setText } from "./UtilidadesDocente.js";
 import { getTeacherContext } from "../../services/teacherData.js";
+import { puedeRegistrarTrimestre, trimestresDeAsignacion } from "../../services/relevoDocente.js";
 import { renderAttendance } from "./AsistenciaDocente.js";
 import { renderTasks } from "./AgendaDocente.js";
 import { renderDateGrading } from "./CalificarDocente.js";
@@ -57,6 +58,10 @@ function renderCourseTabs(context, onSelect) {
 async function renderRoute(route) {
   const context = teacherState.context;
   renderCourseTabs(context, () => renderRoute(route));
+  if (!puedeRegistrarTrimestre(context, teacherState.trimesterId) && !["/docente/boletin", "/docente/horario", "/docente/resumen"].includes(route)) {
+    setHtml("[data-teacher-page]", `<div class="p-5 text-sm text-slate-700">Este trimestre es de consulta. <a class="text-school-green underline" href="#/docente/boletin">Ver boletin</a></div>`);
+    return;
+  }
   setText("[data-teacher-page-status]", context.courses.length ? "Datos del docente cargados" : "Sin asignaciones");
 
   if (route === "/docente/asistencia") await renderAttendance(context);
@@ -78,6 +83,15 @@ export async function bindDocentePages(route) {
     const context = await getTeacherContext();
     teacherState.context = context;
     loadSavedTrimester(context);
+    const root = document.querySelector("[data-teacher-ui]");
+    if (root && (context.reemplazoDeUid || context.reemplazadoPorUid)) {
+      const notice = document.createElement("p");
+      notice.className = "border-b border-green-200 bg-green-50 px-4 py-2 text-sm text-green-900";
+      notice.textContent = `Registro habilitado: ${trimestresDeAsignacion(context).map((id) => `${id.slice(1)} trimestre`).join(" y ")}. Otros trimestres: consulta en Boletin.`;
+      notice.dataset.teacherReplacementNotice = "";
+      root.querySelector("[data-teacher-replacement-notice]")?.remove();
+      root.prepend(notice);
+    }
     setText("[data-current-user-name]", context.profile?.nombre || "Docente");
 
     if (route === "/docente") {

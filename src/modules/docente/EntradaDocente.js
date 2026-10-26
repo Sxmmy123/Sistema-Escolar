@@ -1,22 +1,12 @@
-import { DocenteDashboard } from "./DocenteDashboard.js";
-import { DocenteModule } from "./PaginasDocente.js";
-import { bindDocentePages } from "./ControladorDocente.js";
-import { bindTeacherNotifications } from "./NotificacionesDocente.js";
-import { refreshIcons } from "./UtilidadesDocente.js";
+import { getTeacherContext } from "../../services/teacherData.js";
+import { crearEntradaDocente } from "./cargaDocente.js";
 
-export const rutas = {
-  "/docente": DocenteDashboard,
-  ...Object.fromEntries([
-    "/docente/asistencia", "/docente/tareas", "/docente/calificar",
-    "/docente/regularizacion", "/docente/notas", "/docente/boletin",
-    "/docente/resumen", "/docente/horario"
-  ].map((ruta) => [ruta, () => DocenteModule(ruta)]))
-};
-
-export function vincular(ruta) {
-  bindTeacherNotifications(ruta);
-  return bindDocentePages(ruta);
-}
-
-export const actualizarIconos = refreshIcons;
-export const desmontar = () => bindTeacherNotifications("/");
+const entrada = crearEntradaDocente(getTeacherContext, {
+  primaria: () => import("./EntradaPrimariaDocente.js"),
+  inicial: () => import("../docente-inicial/EntradaInicialDocente.js")
+});
+export let rutas = {};
+export async function preparar() { if (await entrada.preparar()) rutas = entrada.rutas; }
+export const vincular = (route) => entrada.vincular(route);
+export const actualizarIconos = () => entrada.actualizarIconos();
+export function desmontar() { entrada.desmontar(); rutas = {}; }

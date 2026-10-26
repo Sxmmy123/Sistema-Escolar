@@ -1,7 +1,9 @@
 ﻿import { createIcons, icons } from "lucide";
 import { appShell } from "../../ui/shell.js";
 import { icon } from "../../ui/dom.js";
-import { getStudentDashboardData, subjectName, STUDENT_TRIMESTERS } from "../../services/studentData.js";
+import { observarPanelAlumno, subjectName, STUDENT_TRIMESTERS } from "../../services/studentData.js";
+import { vincularCalendarioAlumno } from "./AsistenciaAlumno.js";
+import { BoletaAlumno } from "./BoletaAlumno.js";
 import { materialItemsForActivity, printStudentMaterials } from "./MaterialesAlumno.js";
 
 function escapeHtml(value) {
@@ -97,107 +99,6 @@ function materialRow(activity) {
   `;
 }
 
-function statusMeta(status) {
-  const key = String(status || "").toLowerCase();
-  const map = {
-    presente: { label: "Presente", short: "P", className: "bg-green-100 text-green-800 ring-green-200" },
-    atraso: { label: "Atraso", short: "A", className: "bg-amber-100 text-amber-800 ring-amber-200" },
-    permiso: { label: "Permiso", short: "L", className: "bg-purple-100 text-purple-800 ring-purple-200" },
-    licencia: { label: "Permiso", short: "L", className: "bg-purple-100 text-purple-800 ring-purple-200" },
-    falta: { label: "Falta", short: "F", className: "bg-red-100 text-red-800 ring-red-200" }
-  };
-  return map[key] || { label: "Sin registro", short: "-", className: "bg-slate-50 text-slate-400 ring-slate-100" };
-}
-
-function monthLabel(key) {
-  const [year, month] = String(key || "").split("-").map(Number);
-  if (!year || !month) return "Mes";
-  return new Date(year, month - 1, 1).toLocaleDateString("es-BO", { month: "long", year: "numeric" });
-}
-
-
-function calendarDaysInMonth(key) {
-  const [year, month] = String(key || "").split("-").map(Number);
-  if (!year || !month) return [];
-  const first = new Date(year, month - 1, 1);
-  const total = new Date(year, month, 0).getDate();
-  const mondayIndex = (first.getDay() + 6) % 7;
-  const cells = Array.from({ length: mondayIndex }, () => null);
-  for (let day = 1; day <= total; day += 1) {
-    cells.push({ day, date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` });
-  }
-  return cells;
-}
-function attendanceModal(data) {
-  const records = [...(data.attendance || [])]
-    .filter((item) => item.fecha)
-    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || Number(a.updatedAt || 0) - Number(b.updatedAt || 0));
-  const monthKeys = [...new Set(records.map((item) => String(item.fecha).slice(0, 7)))].sort();
-  const monthsHtml = monthKeys.length
-    ? monthKeys.map((monthKey) => {
-        const byDate = new Map(records.filter((item) => String(item.fecha).startsWith(monthKey)).map((item) => [item.fecha, item]));
-        return `
-          <section class="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-            <h3 class="text-sm font-black capitalize text-slate-900">${escapeHtml(monthLabel(monthKey))}</h3>
-            <div class="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-slate-400">
-              <span>Lun</span><span>Mar</span><span>Mie</span><span>Jue</span><span>Vie</span><span>Sab</span><span>Dom</span>
-            </div>
-            <div class="mt-2 grid grid-cols-7 gap-1">
-              ${calendarDaysInMonth(monthKey).map((cell) => {
-                if (!cell) return `<div class="min-h-10 rounded-xl bg-transparent"></div>`;
-                const record = byDate.get(cell.date);
-                const meta = record ? statusMeta(record.estado) : null;
-                return `<div class="min-h-10 rounded-xl p-1 text-center ring-1 ${meta ? meta.className : "bg-white text-slate-400 ring-slate-100"}" title="${escapeHtml(meta?.label || "Sin lista tomada")}">
-                  <div class="text-[11px] font-black">${cell.day}</div>
-                  <div class="mt-0.5 text-xs font-black">${meta?.short || ""}</div>
-                </div>`;
-              }).join("")}
-            </div>
-          </section>
-        `;
-      }).join("")
-    : `<div class="rounded-2xl bg-slate-50 p-5 text-center font-bold text-slate-500">Todavia no hay asistencias registradas en este trimestre.</div>`;
-
-  return `
-    <div class="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4" data-attendance-backdrop>
-      <section class="max-h-[88vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-        <header class="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
-          <div>
-            <p class="text-xs font-black uppercase tracking-[.18em] text-school-green">Asistencia - ${escapeHtml(data.trimesterLabel)}</p>
-            <h2 class="mt-1 text-xl font-black text-slate-950 sm:text-2xl">${escapeHtml(data.student.nombre || data.profile.nombre || "Alumno")}</h2>
-            <p class="mt-1 text-sm font-bold text-slate-500">Se muestra el mes completo; solo se colorean los dias con lista tomada.</p>
-          </div>
-          <button type="button" class="grid h-10 w-10 place-items-center rounded-2xl bg-slate-100 text-slate-600 hover:bg-slate-200" data-close-attendance>${icon("x", "h-5 w-5")}</button>
-        </header>
-        <div class="max-h-[70vh] overflow-y-auto p-5">
-          <div class="mb-4 flex flex-wrap gap-2 text-xs font-black">
-            <span class="rounded-full bg-green-100 px-3 py-1 text-green-800">P Presente</span>
-            <span class="rounded-full bg-amber-100 px-3 py-1 text-amber-800">A Atraso</span>
-            <span class="rounded-full bg-purple-100 px-3 py-1 text-purple-800">L Permiso</span>
-            <span class="rounded-full bg-red-100 px-3 py-1 text-red-800">F Falta</span>
-          </div>
-          <div class="grid gap-4 md:grid-cols-2">${monthsHtml}</div>
-        </div>
-      </section>
-    </div>
-  `;
-}
-
-function bindAttendanceModal(data) {
-  const target = document.querySelector("[data-student-attendance-modal]");
-  const close = () => { if (target) target.innerHTML = ""; };
-  document.querySelectorAll("[data-open-attendance-calendar]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!target) return;
-      target.innerHTML = attendanceModal(data);
-      refreshIcons();
-      target.querySelectorAll("[data-close-attendance]").forEach((closeButton) => closeButton.addEventListener("click", close));
-      target.querySelector("[data-attendance-backdrop]")?.addEventListener("click", (event) => {
-        if (event.target?.hasAttribute("data-attendance-backdrop")) close();
-      });
-    });
-  });
-}
 
 function shellHeader() {
   return `
@@ -205,7 +106,7 @@ function shellHeader() {
       <div class="flex min-w-0 items-center gap-3">
         <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-green-50 text-school-green">${icon("user-round", "h-5 w-5")}</span>
         <div class="min-w-0 flex-1">
-          <p class="text-[9px] font-semibold uppercase text-school-green" data-student-trimester>Alumno</p>
+          <p class="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-semibold text-school-green" data-student-trimester>Trimestre</p>
           <h1 class="mt-0.5 break-words text-base font-semibold leading-5 text-slate-950 sm:text-lg sm:leading-6" data-student-name>Seguimiento escolar</h1>
           <p class="mt-0.5 truncate text-[11px] font-medium text-slate-500 sm:text-xs" data-student-course>Cargando datos del alumno...</p>
         </div>
@@ -217,6 +118,13 @@ function shellHeader() {
 function panelView() {
   return `
     ${shellHeader()}
+    <section class="mt-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3" aria-label="Trimestre del alumno">
+      <h2 class="text-sm font-semibold text-slate-800">Trimestre</h2>
+      <div class="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1" role="group" aria-label="Seleccionar trimestre">
+        ${STUDENT_TRIMESTERS.map((item) => `<button type="button" data-student-select-term="${item.id}" aria-pressed="false" disabled class="rounded-md px-3 py-2 text-xs text-slate-600">${item.label}</button>`).join("")}
+      </div>
+      <p class="w-full text-sm text-red-700" data-student-term-error role="status" hidden></p>
+    </section>
     <section class="student-attendance-alert relative mt-4 hidden overflow-hidden rounded-2xl px-4 py-4 sm:px-5 sm:py-5" data-student-attendance-warning role="alert" aria-live="assertive"></section>
     <section class="mt-4 overflow-hidden rounded-2xl border border-school-gold/60 bg-amber-50/60 shadow-soft">
       <div class="flex items-center justify-between gap-3 border-b border-amber-200/80 px-3.5 py-3 sm:px-4">
@@ -266,44 +174,8 @@ function panelView() {
   `;
 }
 
-function gradeTone(value) {
-  const number = Number(value || 0);
-  return number <= 50 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-800";
-}
-
 function bulletinView() {
-  return `
-    ${shellHeader()}
-    <section class="mt-4 rounded-3xl border border-slate-200 bg-white shadow-soft">
-      <div class="flex flex-col gap-3 border-b border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p class="text-[10px] font-black uppercase tracking-[.18em] text-school-green">Boleta</p>
-          <h2 class="text-xl font-black text-slate-950">Resumen trimestral</h2>
-        </div>
-        <div class="flex flex-wrap gap-2 text-xs font-black" data-bulletin-trimesters>
-          ${STUDENT_TRIMESTERS.map((item) => `<span data-bulletin-trimester="${item.id}" class="rounded-full border px-3 py-1.5">${item.label}</span>`).join("")}
-        </div>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="min-w-[680px] w-full text-left text-xs sm:text-sm">
-          <thead class="bg-school-green text-white">
-            <tr>
-              <th class="px-3 py-2 font-black">Materia</th>
-              <th class="px-3 py-2 text-center font-black">SER /10</th>
-              <th class="px-3 py-2 text-center font-black">SABER /45</th>
-              <th class="px-3 py-2 text-center font-black">HACER /40</th>
-              <th class="px-3 py-2 text-center font-black">Auto /5</th>
-              <th class="px-3 py-2 text-center font-black">Nota final</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100" data-student-bulletin>
-            <tr><td colspan="6" class="px-4 py-4 font-bold text-slate-500">Cargando boleta...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-    <div data-student-attendance-modal></div>
-  `;
+  return `${shellHeader()}<div class="mt-4" data-student-bulletin><p class="py-4 text-sm text-slate-500" role="status">Cargando boleta...</p></div>`;
 }
 
 export function AlumnoDashboard(route = "/alumno") {
@@ -311,13 +183,13 @@ export function AlumnoDashboard(route = "/alumno") {
   return appShell("alumno", route, content);
 }
 
-function fillCommon(data) {
+function fillCommon(data, route = "/alumno") {
   const name = document.querySelector("[data-student-name]");
   const course = document.querySelector("[data-student-course]");
   const trimester = document.querySelector("[data-student-trimester]");
   if (name) name.textContent = data.student.nombre || data.profile.nombre || "Alumno";
   if (course) course.textContent = `${data.course?.nombre || "Curso sin asignar"} - Usuario: ${data.profile.usuario || data.student.ci || "-"}`;
-  if (trimester) trimester.textContent = data.trimesterLabel || "Alumno";
+  if (trimester) trimester.textContent = route === "/alumno/boleta" ? `Gestion ${data.gestionId}` : data.trimesterLabel || "Alumno";
 }
 
 function fillPanel(data) {
@@ -383,46 +255,74 @@ function fillPanel(data) {
   }
 }
 
-function fillBulletin(data) {
-  const body = document.querySelector("[data-student-bulletin]");
-  const tabs = document.querySelectorAll("[data-bulletin-trimester]");
-  tabs.forEach((tab) => {
-    const active = tab.dataset.bulletinTrimester === data.trimesterId;
-    tab.className = `rounded-full border px-3 py-1.5 ${active ? "border-school-green bg-green-50 text-school-green" : "border-slate-200 bg-white text-slate-500"}`;
-  });
-  if (!body) return;
-  const rows = data.bulletin.filter((item) => item.hasData);
-  body.innerHTML = rows.length
-    ? rows.map((item) => `
-      <tr class="hover:bg-slate-50">
-        <td class="px-3 py-2 font-semibold text-slate-900">
-          <span class="inline-block h-2.5 w-2.5 rounded-full align-middle" style="background:${item.color}"></span>
-          <span class="ml-2">${escapeHtml(item.subjectName)}</span>
-        </td>
-        <td class="px-3 py-2 text-center"><span class="rounded-lg px-2 py-1 ${gradeTone(item.ser10)}">${item.ser10}</span></td>
-        <td class="px-3 py-2 text-center"><span class="rounded-lg px-2 py-1 ${gradeTone(item.saber45)}">${item.saber45}</span></td>
-        <td class="px-3 py-2 text-center"><span class="rounded-lg px-2 py-1 ${gradeTone(item.hacer40)}">${item.hacer40}</span></td>
-        <td class="px-3 py-2 text-center"><span class="rounded-lg px-2 py-1 ${gradeTone(item.auto5)}">${item.auto5}</span></td>
-        <td class="px-3 py-2 text-center"><span class="rounded-xl px-3 py-1 text-sm font-black ${gradeTone(item.final)}">${item.final}</span></td>
-      </tr>
-    `).join("")
-    : `<tr><td colspan="6" class="px-4 py-5 text-center font-bold text-slate-500">Todavia no hay notas calificadas en este trimestre.</td></tr>`;
+function fillBulletin(data, view, selection = "") {
+  const target = document.querySelector("[data-student-bulletin]");
+  if (target) target.innerHTML = BoletaAlumno(data, view, selection);
 }
 
-export async function bindAlumnoPage(route) {
-  if (!route.startsWith("/alumno")) return;
+let disposePage = null;
 
-  try {
-    const data = await getStudentDashboardData();
-    fillCommon(data);
-    if (route === "/alumno/boleta") fillBulletin(data);
-    else fillPanel(data);
-    bindAttendanceModal(data);
-    refreshIcons();
-  } catch (error) {
+export function desmontarAlumno() { disposePage?.(); disposePage = null; }
+
+export async function bindAlumnoPage(route, { observe = observarPanelAlumno } = {}) {
+  desmontarAlumno();
+  if (!route.startsWith("/alumno")) return;
+  const controller = new AbortController(), { signal } = controller;
+  let watcher = null, latestData = null, saving = false, bulletinSelection = "", bulletinViewId = null;
+  disposePage = () => { controller.abort(); watcher?.stop(); };
+  const calendar = vincularCalendarioAlumno(() => latestData, { signal, refreshIcons });
+  if (route === "/alumno/boleta") document.querySelector("[data-student-bulletin]")?.addEventListener("click", (event) => {
+    if (!latestData) return;
+    const view = event.target.closest("[data-student-bulletin-view]")?.dataset.studentBulletinView;
+    if (view) {
+      if (!["t1", "t2", "t3", "total"].includes(view) || bulletinViewId === view) return;
+      bulletinViewId = view; bulletinSelection = "";
+      fillBulletin(latestData, bulletinViewId); refreshIcons();
+      document.querySelector(`[data-student-bulletin-view="${view}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    const key = event.target.closest("[data-student-grade-detail]")?.dataset.studentGradeDetail;
+    if (!key || bulletinViewId !== "total") return;
+    const [subjectId, termId] = key.split(":");
+    if (!latestData.annualBulletin?.rows.find((row) => row.subjectId === subjectId)?.terms[termId]) return;
+    bulletinSelection = bulletinSelection === key ? "" : key;
+    fillBulletin(latestData, bulletinViewId, bulletinSelection); refreshIcons();
+    document.querySelector(`[data-student-grade-detail="${key}"]`)?.focus({ preventScroll: true });
+  }, { signal });
+  const syncSelection = () => document.querySelectorAll("[data-student-select-term]").forEach((button) => {
+    const active = button.dataset.studentSelectTerm === latestData?.trimesterId;
+    button.disabled = saving || !latestData;
+    button.setAttribute("aria-pressed", String(active));
+    button.className = `rounded-md px-3 py-2 text-xs transition ${active ? "bg-school-green font-semibold text-white shadow-sm" : "text-slate-600 hover:bg-white"}`;
+  });
+  document.querySelectorAll("[data-student-select-term]").forEach((button) => button.addEventListener("click", async () => {
+    if (!watcher || saving || !latestData || button.dataset.studentSelectTerm === latestData.trimesterId) return;
+    const error = document.querySelector("[data-student-term-error]");
+    if (error) { error.hidden = true; error.textContent = ""; }
+    saving = true; syncSelection();
+    try { await watcher.seleccionarTrimestre(button.dataset.studentSelectTerm); }
+    catch (failure) { if (!signal.aborted && error) { error.textContent = `No se cambio el trimestre: ${failure.message}`; error.hidden = false; } }
+    finally { saving = false; if (!signal.aborted) syncSelection(); }
+  }, { signal }));
+  const fail = (error) => {
+    if (signal.aborted) return;
     const course = document.querySelector("[data-student-course]");
     if (course) course.textContent = `No se pudo cargar el alumno: ${error.message}`;
-  }
+  };
+  try {
+    watcher = await observe((data) => {
+      if (signal.aborted) return;
+      latestData = data;
+      fillCommon(data, route); syncSelection();
+      if (route === "/alumno/boleta") {
+        bulletinViewId ??= ["t1", "t2", "t3"].includes(data.trimesterId) ? data.trimesterId : "t1";
+        fillBulletin(data, bulletinViewId, bulletinSelection);
+      }
+      else fillPanel(data);
+      calendar.actualizar(); refreshIcons();
+    }, fail);
+    if (signal.aborted) watcher.stop();
+  } catch (error) { fail(error); }
 }
 
 

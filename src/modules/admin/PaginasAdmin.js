@@ -1,12 +1,12 @@
 import { icon } from "../../ui/dom.js";
-import { COURSES, DAYS, SUBJECTS, periodsForCourse } from "../../data/catalog.js";
+import { COURSES, PRIMARY_COURSES, DAYS, SUBJECTS, periodsForCourse } from "../../data/catalog.js";
 import { AdminShell } from "./AdminShell.js";
 import { fechaEscolarIso } from "../../services/fechaEscolar.js";
 import { gestionActual } from "../../services/rutasFirestore.js";
 import { AlumnosAdminPanel } from "./AlumnosAdmin.js";
 
-function courseOptions() {
-  return COURSES.map((course) => `<option value="${course.id}">${course.nombre}</option>`).join("");
+function courseOptions(courses = COURSES) {
+  return courses.map((course) => `<option value="${course.id}">${course.nombre}</option>`).join("");
 }
 
 function subjectOptions() {
@@ -55,15 +55,15 @@ function teacherAssignmentFields() {
     <section class="hidden py-1" data-teacher-step="2">
       <div class="mb-5">
         <p class="text-[10px] font-semibold uppercase tracking-[.14em] text-school-green">Paso 2 de 5</p>
-        <h2 class="mt-1 text-xl font-semibold text-slate-900">Selecciona los cursos</h2>
-        <p class="mt-1 text-xs leading-5 text-slate-500">Marca todos los cursos en los que trabajara el docente.</p>
+        <h2 class="mt-1 text-xl font-semibold text-slate-900" data-assignment-course-heading>Selecciona los cursos</h2>
+        <p class="mt-1 text-xs leading-5 text-slate-500" data-assignment-course-detail>Selecciona cursos de una sola modalidad.</p>
       </div>
       <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
         ${COURSES.map((course) => `
           <label class="group relative flex min-h-20 cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 transition hover:border-school-green/40 hover:shadow-sm" data-assignment-course-card="${course.id}">
             <input class="peer h-4 w-4 shrink-0 rounded border-slate-300 text-school-green focus:ring-school-green" type="checkbox" data-assignment-course-check value="${course.id}">
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-green-50 text-school-green">${icon("school", "h-4 w-4")}</span>
-            <span class="min-w-0 text-xs font-medium leading-4 text-slate-700 peer-checked:text-school-green">${course.nombre}</span>
+            <span class="min-w-0 text-xs font-medium leading-4 text-slate-700 peer-checked:text-school-green">${course.nombre}<span class="mt-1 block text-[10px] font-normal text-slate-500">${course.modalidadEvaluacion === "cualitativa" ? "Cualitativa" : "Cuantitativa"}</span></span>
             <span class="pointer-events-none absolute inset-0 rounded-lg ring-2 ring-transparent peer-checked:ring-school-green/45"></span>
           </label>
         `).join("")}
@@ -72,6 +72,7 @@ function teacherAssignmentFields() {
         <span class="text-slate-500">Cursos seleccionados</span>
         <strong class="font-medium text-school-green" data-selected-course-total>0 cursos</strong>
       </div>
+      <p class="mt-2 text-xs font-medium text-school-green" data-selected-teacher-modality aria-live="polite"></p>
       <div class="mt-5 flex justify-between gap-2">
         <button type="button" class="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50" data-teacher-back="1">${icon("arrow-left", "h-4 w-4")}Atras</button>
         <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-school-green px-4 py-2.5 text-xs font-semibold text-white hover:bg-green-800" data-teacher-next="3">Continuar${icon("arrow-right", "h-4 w-4")}</button>
@@ -82,12 +83,14 @@ function teacherAssignmentFields() {
       <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p class="text-[10px] font-semibold uppercase tracking-[.14em] text-school-green">Paso 3 de 5</p>
-          <h2 class="mt-1 text-xl font-semibold text-slate-900">Selecciona las materias</h2>
-          <p class="mt-1 text-xs leading-5 text-slate-500">Asigna las materias que impartira en cada curso seleccionado.</p>
+          <h2 class="mt-1 text-xl font-semibold text-slate-900" data-assignment-step-title>Selecciona las materias</h2>
+          <p class="mt-1 text-xs leading-5 text-slate-500" data-assignment-step-detail>Asigna las materias que impartira en cada curso seleccionado.</p>
         </div>
         <span class="w-fit rounded-full bg-green-50 px-3 py-1 text-[10px] font-medium text-school-green" data-subject-course-total>0 cursos</span>
       </div>
 
+      <div class="hidden border-y border-slate-200 py-4" data-qualitative-assignment-info><p class="text-sm font-semibold text-slate-800">Evaluacion cualitativa</p><div class="mt-3 space-y-2 text-sm text-slate-600" data-qualitative-courses></div></div>
+      <div data-primary-assignment-fields>
       <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="tablist" aria-label="Cursos seleccionados">
         ${COURSES.map((course) => `
           <button type="button" role="tab" aria-selected="false" data-assignment-course-tab="${course.id}" class="hidden w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center text-xs font-medium text-slate-600 transition hover:bg-green-50">
@@ -122,6 +125,7 @@ function teacherAssignmentFields() {
             </div>
           </article>
         `).join("")}
+      </div>
       </div>
       <div class="mt-5 flex justify-between gap-2">
         <button type="button" class="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50" data-teacher-back="2">${icon("arrow-left", "h-4 w-4")}Atras</button>
@@ -160,6 +164,16 @@ function teacherCreateForm(note) {
     <form class="scroll-mt-20 rounded-lg border border-slate-200 bg-white p-4 shadow-sm" data-create-user-form data-role="docente" data-teacher-wizard>
       ${teacherWizardProgress()}
       <section class="py-1" data-teacher-step="1">
+        <fieldset class="mb-4 flex flex-wrap gap-4 border-b border-slate-200 pb-4">
+          <legend class="sr-only">Tipo de registro</legend>
+          <label class="flex items-center gap-2 text-sm text-slate-700"><input type="radio" name="tipoRegistro" value="nuevo" checked> Nuevo docente</label>
+          <label class="flex items-center gap-2 text-sm text-slate-700"><input type="radio" name="tipoRegistro" value="reemplazo"> Reemplazo de docente</label>
+        </fieldset>
+        <div class="mb-4 hidden grid gap-3 border-b border-slate-200 pb-4 sm:grid-cols-2" data-teacher-replacement-fields>
+          <label class="text-xs font-medium text-slate-700">Docente que sera reemplazado<select name="reemplazoDocente" class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm" disabled required><option value="">Seleccionar docente</option></select></label>
+          <label class="text-xs font-medium text-slate-700">El nuevo docente comienza en<select name="reemplazoTrimestre" class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm" disabled required><option value="">Seleccionar trimestre</option><option value="t2">2do trimestre</option><option value="t3">3er trimestre</option></select></label>
+          <p class="sm:col-span-2 text-sm text-slate-600" data-teacher-replacement-summary></p>
+        </div>
         <div class="mb-5">
           <p class="text-[10px] font-semibold uppercase tracking-[.14em] text-school-green">Paso 1 de 5</p>
           <h2 class="mt-1 text-xl font-semibold text-slate-900">Datos personales y cuenta</h2>
@@ -172,8 +186,8 @@ function teacherCreateForm(note) {
           <label class="text-xs font-medium text-slate-700">Usuario asignado
             <input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="username" type="text" placeholder="usuario000" required>
           </label>
-          <label class="text-xs font-medium text-slate-700">Correo de recuperacion
-            <input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="emailRecuperacion" type="email" placeholder="Opcional">
+          <label class="text-xs font-medium text-slate-700">Correo electronico
+            <input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="emailRecuperacion" type="email" autocomplete="email" maxlength="254" placeholder="nombre@correo.com" required>
           </label>
           <label class="text-xs font-medium text-slate-700">Contrasena temporal
             <input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="password" type="text" minlength="6" placeholder="Minimo 6 caracteres" required>
@@ -200,7 +214,7 @@ function standardCreateForm(role, note) {
       <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <label class="text-xs font-medium text-slate-700">Nombre completo<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="nombre" placeholder="Nombre y apellidos" required></label>
         <label class="text-xs font-medium text-slate-700">Usuario asignado<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="username" type="text" placeholder="usuario000" required></label>
-        <label class="text-xs font-medium text-slate-700">Correo de recuperacion<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="emailRecuperacion" type="email" placeholder="Opcional"></label>
+        <label class="text-xs font-medium text-slate-700">Correo electronico<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="emailRecuperacion" type="email" autocomplete="email" maxlength="254" placeholder="nombre@correo.com" required></label>
         <label class="text-xs font-medium text-slate-700">Contrasena temporal<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="password" type="text" minlength="6" placeholder="Minimo 6 caracteres" required></label>
       </div>
       <p class="mt-3 hidden rounded-lg border px-3 py-2.5 text-xs font-medium" data-form-status></p>
@@ -224,7 +238,7 @@ function userCreatePanel(role, title, note) {
         </div>
         <div class="overflow-x-auto">
         <table class="min-w-[680px] w-full text-left text-xs">
-          <thead class="bg-[#123d24] text-white"><tr><th class="px-4 py-2.5 font-medium">Nombre</th><th class="px-4 py-2.5 font-medium">Usuario</th><th class="px-4 py-2.5 font-medium">Recuperacion</th><th class="px-4 py-2.5 font-medium">Rol</th><th class="px-4 py-2.5 font-medium">Estado</th></tr></thead>
+          <thead class="bg-[#123d24] text-white"><tr><th class="px-4 py-2.5 font-medium">Nombre</th><th class="px-4 py-2.5 font-medium">Usuario</th><th class="px-4 py-2.5 font-medium">Correo</th><th class="px-4 py-2.5 font-medium">Rol</th><th class="px-4 py-2.5 font-medium">Estado</th></tr></thead>
           <tbody class="divide-y divide-slate-100" data-user-list="${role}">
             <tr><td class="px-4 py-4 text-slate-500" colspan="5">Cargando...</td></tr>
           </tbody>
@@ -246,7 +260,7 @@ function schedulePanel() {
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">
             <p class="text-[10px] font-semibold uppercase tracking-[.14em] text-school-green">Horario por curso</p>
-            <h2 class="mt-0.5 truncate text-lg font-semibold text-slate-900" data-schedule-title>Pre Inicial - Inicial</h2>
+            <h2 class="mt-0.5 truncate text-lg font-semibold text-slate-900" data-schedule-title>Preinicial</h2>
           </div>
           <div class="grid grid-cols-2 gap-2 sm:flex">
             <button type="button" class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-school-green transition hover:bg-green-50" data-action="export-schedule-all">${icon("archive", "h-3.5 w-3.5")}Exportar</button>
@@ -347,7 +361,7 @@ function historicalPanel() {
 
           <div class="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_160px_120px]">
             <label class="text-sm font-black text-slate-700">Curso
-              <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="courseId">${courseOptions()}</select>
+              <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="courseId">${courseOptions(PRIMARY_COURSES)}</select>
             </label>
             <label class="text-sm font-black text-slate-700">Materia
               <select class="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold sm:rounded-2xl sm:px-4 sm:py-3" name="materiaId">${subjectOptions()}</select>

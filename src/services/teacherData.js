@@ -22,7 +22,11 @@ import { asegurarRegistroDocente, claveCache, coleccionGestion, documentoGestion
 import { validarFechaGestion } from "./registroEscolar.js";
 import { actualizarActividadProtegida, eliminarActividadProtegida } from "./proteccionActividad.js";
 import { normalizarEstadoAsistencia } from "./calculoAcademico.js";
+import { modalidadDeContexto } from "./modalidadDocente.js";
+import { exigirTrimestreDocente, trimestresDeAsignacion } from "./relevoDocente.js";
 import { quitarActividadCalificar, sincronizarActividadCalificar, sincronizarAsistenciaCalificar, sincronizarNotaCalificar } from "./datosCalificarDocente.js";
+import { guardarConPeriodoCurso, periodosCurso } from "./periodosCurso.js";
+import { nombreDocenteAsistencia } from "./autoriaAsistencia.js";
 
 function currentUid() {
   return auth.currentUser?.uid || "";
@@ -104,7 +108,16 @@ function writeTeacherDataCache(context = {}, type = "datos", courseId = "", trim
 }
 
 function teacherContextCacheKey(uid = currentUid()) {
-  return claveCache("contexto", uid || "docente");
+  return claveCache("contexto_modalidad_v2", uid || "docente");
+}
+
+if (typeof window !== "undefined") window.addEventListener("teacher-assignment-changed", () => {
+  try { sessionStorage.removeItem(teacherContextCacheKey()); } catch { /* La proxima lectura remota valida la asignacion. */ }
+});
+
+function asegurarTrimestreRegistro(term, uid = currentUid()) {
+  const context = readTeacherContextCache(uid);
+  if (context) exigirTrimestreDocente(context, term);
 }
 
 function readTeacherContextCache(uid = currentUid()) {
@@ -228,6 +241,8 @@ export async function getTeacherContext(uid = currentUid(), options = {}) {
     trimestreActivo: userProfile?.preferencias?.trimestresPorGestion?.[gestionActual()] || "t1"
   };
   const assignment = assignmentSnap.exists() ? assignmentSnap.data() : {};
+  const terms = trimestresDeAsignacion(assignment);
+  if (!terms.includes(profile.trimestreActivo)) profile.trimestreActivo = terms[0] || "t1";
   const assignedCourses = normalizeCourses(assignment)
     .map((item) => {
       const course = findCourse(item.cursoId);
@@ -241,9 +256,19 @@ export async function getTeacherContext(uid = currentUid(), options = {}) {
     uid,
     gestionId: gestionActual(),
     profile,
+    trimestres: terms,
+    reemplazoDeUid: assignment.reemplazoDeUid || "",
+    reemplazadoPorUid: assignment.reemplazadoPorUid || "",
     courses: assignedCourses,
     subjectIds: [...new Set(assignedCourses.flatMap((course) => course.materias))]
   };
+  try {
+    Object.assign(context, modalidadDeContexto(context));
+  } catch (error) {
+    context.errorModalidad = error.message;
+    context.nivelDocente = "pendiente";
+    context.modalidadEvaluacion = "pendiente";
+  }
   writeTeacherContextCache(context);
   return context;
 }
@@ -491,8 +516,12 @@ export async function listAttendanceForCourse(courseId, trimestreId = "") {
 
 export async function saveAttendance({ course, student, fecha, estado, trimestreId = "t1", observacion = "" }) {
   asegurarRegistroDocente();
+  asegurarTrimestreRegistro(trimestreId);
   validarFechaGestion(fecha, gestionActual());
   if (student.cursoId && student.cursoId !== course.id) throw new Error("El alumno no pertenece al curso seleccionado.");
+  const teacherUid = currentUid();
+  const teacher = await getTeacherContext(teacherUid);
+  if (teacherUid !== currentUid()) throw new Error("La sesion del docente cambio. Vuelve a ingresar.");
   const id = attendanceDocId(course.id, fecha, student.id);
   const now = new Date();
   const payload = {
@@ -505,10 +534,10 @@ export async function saveAttendance({ course, student, fecha, estado, trimestre
     horaRegistro: now.toLocaleTimeString("es-BO", { hour: "2-digit", minute: "2-digit" }),
     horaRegistroISO: now.toISOString(),
     registradoPorUid: currentUid(),
-    registradoPor: currentUserLabel(),
+    registradoPor: nombreDocenteAsistencia(teacher.profile?.nombre || auth.currentUser?.displayName) || "Docente",
     updatedAt: serverTimestamp()
   };
-  await setDoc(documentoGestion(firestore, "asistencias", id), payload, { merge: true });
+  await guardarConPeriodoCurso({ db: firestore, uid: currentUid(), year: gestionActual(), courseId: course.id, termId: trimestreId, kind: "asistencia", sourceRef: documentoGestion(firestore, "asistencias", id), periodRef: doc(periodosCurso(firestore, course.id), trimestreId), payload, merge: true });
   sincronizarAsistenciaCalificar({ uid: currentUid(), gestionId: gestionActual() }, { id, ...payload });
   announceAlertDataChange();
   safeAudit({
@@ -531,6 +560,7 @@ export async function listActivities(courseId, trimestreId = "") {
 
 export async function saveActivity({ course, materiaId, fecha, titulo, tipo, maximo, calificable = false, materiales = [], trimestreId = "t1" }) {
   asegurarRegistroDocente();
+  asegurarTrimestreRegistro(trimestreId);
   validarFechaGestion(fecha, gestionActual());
   const subject = findSubject(materiaId);
   const isMaterial = ["material", "materiales"].includes(String(tipo || "").toLowerCase());
@@ -557,7 +587,7 @@ export async function saveActivity({ course, materiaId, fecha, titulo, tipo, max
     activo: true,
     updatedAt: serverTimestamp()
   };
-  await setDoc(ref, payload);
+  await guardarConPeriodoCurso({ db: firestore, uid: currentUid(), year: gestionActual(), courseId: course.id, termId: trimestreId, kind: "actividad", sourceRef: ref, periodRef: doc(periodosCurso(firestore, course.id), trimestreId), payload });
   sincronizarActividadCalificar({ uid: currentUid(), gestionId: gestionActual() }, { id, ...payload });
   await safeAudit({
     tipo: "actividades",
@@ -578,6 +608,7 @@ export async function saveActivity({ course, materiaId, fecha, titulo, tipo, max
 
 export async function saveInternalActivity({ course, materiaId, titulo, tipo, maximo, trimestreId = "t1" }) {
   asegurarRegistroDocente();
+  asegurarTrimestreRegistro(trimestreId);
   const isAuto = tipo === "auto";
   const ref = isAuto
     ? documentoGestion(firestore, "actividades", idAutoevaluacion(course.id, materiaId, trimestreId))
@@ -621,6 +652,8 @@ export async function saveInternalActivity({ course, materiaId, titulo, tipo, ma
 
 export async function updateActivity({ activity, course, materiaId, fecha, titulo, tipo, maximo, calificable = false, materiales = [], trimestreId = "t1" }) {
   asegurarRegistroDocente();
+  asegurarTrimestreRegistro(activity?.trimestreId || "t1");
+  asegurarTrimestreRegistro(trimestreId);
   if (!activity?.id) throw new Error("Actividad invalida.");
   validarFechaGestion(fecha, gestionActual(), { opcional: activity.interno === true });
   const subject = findSubject(materiaId);
@@ -673,6 +706,7 @@ export async function updateActivity({ activity, course, materiaId, fecha, titul
 
 export async function deleteActivity(activity) {
   asegurarRegistroDocente();
+  asegurarTrimestreRegistro(activity?.trimestreId || "t1");
   if (!activity?.id) throw new Error("Actividad invalida.");
   await eliminarActividadProtegida({ db: firestore, id: activity.id });
   quitarActividadCalificar({ uid: currentUid(), gestionId: gestionActual() }, activity);
@@ -745,6 +779,7 @@ export async function saveGrade({
   fechaEntrega = ""
 }, { db = firestore, uid = currentUid(), audit = safeAudit } = {}) {
   asegurarRegistroDocente();
+  asegurarTrimestreRegistro(activity?.trimestreId || "t1", uid);
   if (!activity?.id) throw new Error("No se encontro la actividad para calificar.");
   if (!student?.id) throw new Error("No se encontro el alumno para calificar.");
   validarFechaGestion(activity.fecha, gestionActual(), { opcional: true });
@@ -756,6 +791,7 @@ export async function saveGrade({
   const maximo = Number(activity.maximo || 100);
 
   if (!cursoId) throw new Error("La actividad no tiene curso asignado.");
+  if (findCourse(cursoId).nivel !== "primaria") throw new Error("Este curso usa evaluacion cualitativa y no admite notas numericas de Primaria.");
   if (!materiaId) throw new Error("La actividad no tiene materia asignada.");
   if (student.cursoId && student.cursoId !== cursoId) throw new Error("El alumno no pertenece al curso de la actividad.");
 
@@ -818,7 +854,9 @@ export async function saveGrade({
 
 export async function finalizeActivityReview({ activity, students = [], attendanceMap = {}, gradesMap = {} }, { db = firestore, uid = currentUid(), audit = safeAudit } = {}) {
   asegurarRegistroDocente();
+  asegurarTrimestreRegistro(activity?.trimestreId || "t1", uid);
   if (!activity?.id) throw new Error("No se encontro la actividad para finalizar.");
+  if (findCourse(activity.cursoId).nivel !== "primaria") throw new Error("La revision con notas numericas solo corresponde a Primaria.");
   validarFechaGestion(activity.fecha, gestionActual(), { opcional: true });
 
   const revisionFinalizadaFecha = todayIso();

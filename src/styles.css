@@ -668,3 +668,32 @@ tr.teacher-alert-focus > td:first-child {
 tr.teacher-alert-focus > td:last-child {
   border-right: 3px solid #087b2b;
 }
+
+[data-guided-modal],
+.initial-dialog-backdrop:has(.initial-attendance-guide) {
+  align-items: center;
+  padding: 20px;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+[data-guided-modal] > section,
+.initial-dialog-backdrop:has(.initial-attendance-guide) > .initial-dialog {
+  max-height: calc(100dvh - 40px);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 640px) {
+  [data-guided-modal],
+  .initial-dialog-backdrop:has(.initial-attendance-guide) {
+    align-items: flex-start;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+
+  [data-guided-modal] > section,
+  .initial-dialog-backdrop:has(.initial-attendance-guide) > .initial-dialog {
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
+  }
+}

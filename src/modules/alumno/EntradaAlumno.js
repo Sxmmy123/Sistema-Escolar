@@ -1,5 +1,6 @@
 import { createIcons, icons } from "lucide";
-import { AlumnoDashboard, bindAlumnoPage } from "./AlumnoDashboard.js";
+import { AlumnoDashboard, bindAlumnoPage, desmontarAlumno } from "./AlumnoDashboard.js";
+import "./alumno.css";
 
 export const rutas = {
   "/alumno": () => AlumnoDashboard("/alumno"),
@@ -7,4 +8,5 @@ export const rutas = {
 };
 
 export const vincular = bindAlumnoPage;
+export const desmontar = desmontarAlumno;
 export const actualizarIconos = () => createIcons({ icons });

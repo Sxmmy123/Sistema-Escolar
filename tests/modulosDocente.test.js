@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, after } from "node:test";
+import { readFile } from "node:fs/promises";
 import { claveCache, establecerConfiguracion } from "../src/services/rutasFirestore.js";
 
 const previous = new Map(["document", "sessionStorage", "localStorage"].map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
@@ -72,6 +73,26 @@ test("cada modulo expone su pantalla y no hace cargas cuando su contenedor no ex
   const controller = await import("../src/modules/docente/ControladorDocente.js");
   assert.equal(typeof controller.bindDocentePages, "function");
   await controller.bindDocentePages("/");
+});
+
+test("la asistencia guiada se posiciona en la pantalla, no a la altura del boton", async () => {
+  const { guidedAttendanceModal } = await import("../src/modules/docente/AsistenciaDocente.js");
+  teacherState.attendanceMode = "guia"; teacherState.guidedIndex = 0;
+  const html = guidedAttendanceModal({ nombre: "Cuarto A" }, [{ id: "a", nombre: "Ana" }], {});
+  assert.match(html, /data-guided-modal/);
+  assert.match(html, /role="dialog" aria-modal="true" aria-labelledby="guided-attendance-title"/);
+  assert.match(html, /data-guided-state="presente"/);
+  assert.match(html, /data-guided-prev/); assert.match(html, /data-guided-next/);
+  assert.doesNotMatch(html, /padding-top:|items-start/);
+  teacherState.attendanceMode = "lista";
+  assert.match(guidedAttendanceModal({ nombre: "Cuarto A" }, [], {}), /hidden/);
+  const source = await readFile(new URL("../src/modules/docente/AsistenciaDocente.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /guidedModalTop/);
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.initial-dialog-backdrop:has\(\.initial-attendance-guide\)/);
+  assert.match(css, /max-height: calc\(100dvh - 40px\)/);
+  assert.match(css, /align-items: flex-start;\s*padding: max\(12px, env\(safe-area-inset-top\)\)/);
+  assert.match(css, /overflow-y: auto;\s*overscroll-behavior: contain/);
 });
 
 test("las pantallas sin cursos conservan su estado vacio despues de separarse", async () => {

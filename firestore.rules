@@ -32,6 +32,20 @@ service cloud.firestore {
         (data.get("interno", false) == true && data.get("fecha", "") == "");
     }
     function validTerm(term) { return term in ["t1", "t2", "t3"]; }
+    function primaryCourse(course) { return course in ["primero_a", "segundo_a", "tercero_a", "cuarto_a", "quinto_a", "sexto_a"]; }
+    function qualitativeAssignments(courses) {
+      return (!("inicial" in courses) || (courses.inicial is map && courses.inicial.materias == [])) &&
+        (!("preinicial" in courses) || (courses.preinicial is map && courses.preinicial.materias == []));
+    }
+    function validTeacherAssignments(data) {
+      let courses = data.get("cursos", data.get("asignaciones", {}));
+      let ids = courses.keys();
+      return data.get("trimestres", ["t1", "t2", "t3"]) is list &&
+        data.get("trimestres", ["t1", "t2", "t3"]).hasOnly(["t1", "t2", "t3"]) && courses is map && (ids.size() == 0 ||
+        (ids.hasOnly(["preinicial", "inicial"]) && qualitativeAssignments(courses) && data.get("nivelDocente", "inicial") == "inicial" && data.get("modalidadEvaluacion", "cualitativa") == "cualitativa") ||
+        (ids.hasOnly(["primero_a", "segundo_a", "tercero_a", "cuarto_a", "quinto_a", "sexto_a"]) &&
+          data.get("nivelDocente", "primaria") == "primaria" && data.get("modalidadEvaluacion", "cuantitativa") == "cuantitativa"));
+    }
     function isAlumno() {
       return hasRole("alumno") && profile().get("alumnoId", "") != "" &&
         exists(/databases/$(database)/documents/alumnos/$(profile().alumnoId)) &&
@@ -56,6 +70,14 @@ service cloud.firestore {
     function teacherCourse(year, course) {
       return isDocente() && exists(/databases/$(database)/documents/gestiones/$(year)/asignaciones/$(request.auth.uid)) &&
         assignments(year) is map && course in assignments(year);
+    }
+    function teacherTerm(year, term) {
+      let data = get(/databases/$(database)/documents/gestiones/$(year)/asignaciones/$(request.auth.uid)).data;
+      return isDocente() && validTerm(term) && term in data.get("trimestres", ["t1", "t2", "t3"]);
+    }
+    function teacherOwnRecord(year, author) {
+      let data = get(/databases/$(database)/documents/gestiones/$(year)/asignaciones/$(request.auth.uid)).data;
+      return !("trimestres" in data) || author == request.auth.uid;
     }
     function teacherSubjects(year, course) {
       let data = assignments(year)[course];
@@ -88,6 +110,7 @@ service cloud.firestore {
     }
     function validGrade(year, data) {
       return writableYear(year) && exists(/databases/$(database)/documents/gestiones/$(year)/actividades/$(data.actividadId)) &&
+        teacherTerm(year, data.trimestreId) && teacherOwnRecord(year, activity(year, data.actividadId).get("creadoPorUid", request.auth.uid)) &&
         teacherSubject(year, activity(year, data.actividadId).cursoId, activity(year, data.actividadId).materiaId) &&
         data.cursoId == activity(year, data.actividadId).cursoId &&
         data.materiaId == activity(year, data.actividadId).materiaId &&
@@ -108,10 +131,17 @@ service cloud.firestore {
       let next = request.resource.data.get("preferencias", {});
       let previous = resource.data.get("preferencias", {});
       let terms = next.get("trimestresPorGestion", {});
-      return next is map && next.keys().hasOnly(["trimestresPorGestion"]) && terms is map &&
+      let views = next.get("vistasAlumnoPorGestion", {});
+      let oldViews = previous.get("vistasAlumnoPorGestion", {});
+      let view = views.get(activeYear(), {});
+      return next is map && next.keys().hasOnly(["trimestresPorGestion", "vistasAlumnoPorGestion"]) && terms is map &&
         terms.diff(previous.get("trimestresPorGestion", {})).affectedKeys().hasOnly([activeYear()]) &&
         (!(activeYear() in terms) || validTerm(terms[activeYear()])) &&
-        (terms == previous.get("trimestresPorGestion", {}) || writableYear(activeYear()));
+        (terms == previous.get("trimestresPorGestion", {}) || writableYear(activeYear())) &&
+        views is map && (views == oldViews || (isAlumno() && views.diff(oldViews).affectedKeys().hasOnly([activeYear()]) &&
+          view is map && view.keys().hasAll(["cursoId", "trimestreId", "automatico"]) &&
+          view.keys().hasOnly(["cursoId", "trimestreId", "automatico"]) && validTerm(view.trimestreId) && validTerm(view.automatico) &&
+          activeMember(activeYear(), profile().alumnoId, view.cursoId)));
     }
     function validEmailChange() {
       return !("authEmail" in request.resource.data.diff(resource.data).affectedKeys()) ||
@@ -200,40 +230,168 @@ service cloud.firestore {
       }
       match /asignaciones/{uid} {
         allow read: if isAdmin() || isDirector() || (isDocente() && request.auth.uid == uid);
-        allow write: if isAdmin();
+        allow create, update: if isAdmin() && validTeacherAssignments(request.resource.data);
+        allow delete: if isAdmin();
       }
       match /horarios/{curso} { allow read: if signedIn(); allow write: if isAdmin(); }
+      match /cursos/{curso}/trimestres/{trimestre} {
+        function activitySignal() {
+          let data = request.resource.data;
+          let source = getAfter(/databases/$(database)/documents/gestiones/$(gestion)/actividades/$(data.actividadId)).data;
+          return data.actividadId is string && data.actividadId.size() > 0 && dateInYear(gestion, data.actividadFecha) &&
+            source.cursoId == curso && source.trimestreId == trimestre && source.fecha == data.actividadFecha &&
+            source.creadoPorUid == request.auth.uid && source.get("activo", true) == true && source.get("interno", false) == false &&
+            (!exists(/databases/$(database)/documents/gestiones/$(gestion)/cursos/$(curso)/trimestres/$(trimestre)) ||
+              data.actividadFecha <= resource.data.get("actividadFecha", data.actividadFecha));
+        }
+        function attendanceSignal() {
+          let data = request.resource.data;
+          let source = getAfter(/databases/$(database)/documents/gestiones/$(gestion)/asistencias/$(data.asistenciaId)).data;
+          return data.asistenciaId is string && data.asistenciaId.size() > 0 && dateInYear(gestion, data.asistenciaFecha) &&
+            source.cursoId == curso && source.trimestreId == trimestre && source.fecha == data.asistenciaFecha &&
+            source.registradoPorUid == request.auth.uid &&
+            (!exists(/databases/$(database)/documents/gestiones/$(gestion)/cursos/$(curso)/trimestres/$(trimestre)) ||
+              data.asistenciaFecha <= resource.data.get("asistenciaFecha", data.asistenciaFecha));
+        }
+        function validSignal() {
+          return writableYear(gestion) && teacherCourse(gestion, curso) && teacherTerm(gestion, trimestre) &&
+            request.resource.data.keys().hasOnly(["actividadId", "actividadFecha", "asistenciaId", "asistenciaFecha", "updatedAt"]) &&
+            request.resource.data.updatedAt == request.time;
+        }
+        allow read: if readCourse(gestion, curso);
+        allow create: if validSignal() &&
+          ((request.resource.data.keys().hasOnly(["actividadId", "actividadFecha", "updatedAt"]) && activitySignal()) ||
+           (request.resource.data.keys().hasOnly(["asistenciaId", "asistenciaFecha", "updatedAt"]) && attendanceSignal()));
+        allow update: if validSignal() && request.resource.data.keys().hasAll(resource.data.keys()) &&
+          ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(["actividadId", "actividadFecha", "updatedAt"]) && activitySignal()) ||
+           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["asistenciaId", "asistenciaFecha", "updatedAt"]) && attendanceSignal()));
+        allow delete: if isAdmin();
+      }
+      function initialSubject(value) {
+        return value in ["matematica", "lenguaje", "ciencias_naturales", "ciencias_sociales", "educacion_fisica", "religion", "musica", "artes_plasticas", "tecnica_tecnologica"];
+      }
+      function initialText(value) { return value is string && value.size() > 0 && value.size() <= 200; }
+      function initialCriterion(row) {
+        return row is map && row.keys().hasOnly(["criterio", "opciones"]) && initialText(row.criterio) && row.opciones is map &&
+          row.opciones.keys().hasOnly(["logrado", "en_proceso", "requiere_apoyo", "no_observado"]) &&
+          initialText(row.opciones.logrado) && initialText(row.opciones.en_proceso) && initialText(row.opciones.requiere_apoyo) && initialText(row.opciones.no_observado);
+      }
+      function initialCriteria(value) {
+        return value is map && (value.size() == 0 || (value.keys().hasOnly(["ser", "saber", "hacer"]) && initialCriterion(value.ser) && initialCriterion(value.saber) && initialCriterion(value.hacer)));
+      }
+      match /actividades_inicial/{id} {
+        function validActivity(data) {
+          return writableYear(gestion) && data.cursoId in ["inicial", "preinicial"] && teacherCourse(gestion, data.cursoId) && teacherTerm(gestion, data.trimestreId) &&
+            data.docenteUid == request.auth.uid && id.matches(request.auth.uid + "_.*") && validTerm(data.trimestreId) &&
+            data.keys().hasOnly(["docenteUid", "cursoId", "trimestreId", "materiaId", "titulo", "descripcion", "prioritaria", "orden", "estado", "criterios", "tieneRegistros", "createdAt", "updatedAt"]) &&
+            initialSubject(data.materiaId) && data.titulo is string && data.titulo.size() > 0 && data.titulo.size() <= 150 &&
+            data.descripcion is string && data.descripcion.size() <= 2000 && data.prioritaria is bool &&
+            data.orden is string && data.orden.size() > 0 && data.orden.size() <= 500 && data.estado in ["pendiente", "finalizada", "eliminada"] &&
+            (data.estado == "pendiente" || data.prioritaria == false) && initialCriteria(data.criterios) && data.tieneRegistros is bool &&
+            (data.tieneRegistros == false || data.criterios.size() == 3) && data.createdAt is timestamp && data.updatedAt == request.time;
+        }
+        allow get: if isDocente() && id.matches(request.auth.uid + "_.*") && !exists(/databases/$(database)/documents/gestiones/$(gestion)/actividades_inicial/$(id));
+        allow read: if isAdmin() || isDirector() || (teacherCourse(gestion, resource.data.cursoId) && resource.data.docenteUid == request.auth.uid);
+        allow create: if validActivity(request.resource.data) && request.resource.data.createdAt == request.time && request.resource.data.estado == "pendiente" && request.resource.data.tieneRegistros == false;
+        allow update: if validActivity(request.resource.data) && resource.data.docenteUid == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(["prioritaria", "orden", "estado", "criterios", "tieneRegistros", "updatedAt"]) &&
+          (resource.data.criterios.size() == 0 || request.resource.data.criterios == resource.data.criterios) &&
+          (resource.data.tieneRegistros == false || request.resource.data.tieneRegistros == true);
+        allow delete: if isAdmin();
+      }
+      match /registros_inicial/{id} {
+        function validInitialSubject(value) {
+          return value in ["matematica", "lenguaje", "ciencias_naturales", "ciencias_sociales", "educacion_fisica", "religion", "musica", "artes_plasticas", "tecnica_tecnologica"];
+        }
+        function validInitialFollowup(data) {
+          let common = ["cursoId", "trimestreId", "tipo", "alumnoId", "descripcion", "docenteUid", "createdAt", "updatedAt"];
+          return id.matches(request.auth.uid + "_.*") && data.alumnoId != "" && data.createdAt is timestamp &&
+            ((data.tipo == "observacion" && data.keys().hasOnly(common.concat(["materiaId", "dimension", "criterio", "valoracion"])) &&
+              validInitialSubject(data.materiaId) && data.dimension in ["ser", "saber", "hacer"] &&
+              data.criterio is string && data.criterio.size() > 0 && data.criterio.size() <= 200 && data.descripcion.size() <= 1000 &&
+              data.valoracion in ["logrado", "en_proceso", "requiere_apoyo"]) ||
+            (data.tipo == "bitacora" && data.keys().hasOnly(common.concat(["materiaId"])) &&
+              (data.materiaId == "" || validInitialSubject(data.materiaId)) && data.descripcion.size() > 0 && data.descripcion.size() <= 5000) ||
+            (data.tipo == "informe" && data.keys().hasOnly(common.concat(["aprobado", "origen", "fuentesFirma"])) &&
+              id == request.auth.uid + "_informe_" + data.cursoId + "_" + data.trimestreId + "_" + data.alumnoId &&
+              data.descripcion.size() > 0 && data.descripcion.size() <= 200 && data.aprobado is bool &&
+              data.origen in ["docente", "ia"] && data.fuentesFirma is string && data.fuentesFirma.matches("[0-9]+-[a-f0-9]+")));
+        }
+        function validActivityObservation(data) {
+          let activity = getAfter(/databases/$(database)/documents/gestiones/$(gestion)/actividades_inicial/$(data.actividadId)).data;
+          return data.keys().hasOnly(["cursoId", "trimestreId", "tipo", "alumnoId", "descripcion", "docenteUid", "createdAt", "updatedAt", "actividadId", "actividadTitulo", "materiaId", "dimension", "criterio", "valoracion", "opinion"]) &&
+            data.createdAt is timestamp && data.alumnoId != "" && data.descripcion.size() <= 1000 && data.dimension in ["ser", "saber", "hacer"] &&
+            data.valoracion in ["logrado", "en_proceso", "requiere_apoyo", "no_observado"] &&
+            id == request.auth.uid + "_actividad_" + data.actividadId + "_" + data.alumnoId + "_" + data.dimension &&
+            activity.docenteUid == request.auth.uid && activity.cursoId == data.cursoId && activity.trimestreId == data.trimestreId && activity.estado == "pendiente" && activity.tieneRegistros == true &&
+            data.actividadTitulo == activity.titulo && data.materiaId == activity.materiaId && data.criterio == activity.criterios[data.dimension].criterio && data.opinion == activity.criterios[data.dimension].opciones[data.valoracion];
+        }
+        function validInitialRecord(data) {
+          return writableYear(gestion) && data.cursoId in ["inicial", "preinicial"] && teacherCourse(gestion, data.cursoId) &&
+            teacherTerm(gestion, data.trimestreId) &&
+            data.docenteUid == request.auth.uid && validTerm(data.trimestreId) &&
+            data.descripcion is string && data.updatedAt == request.time &&
+            data.alumnoId is string && (data.alumnoId == "" || activeMember(gestion, data.alumnoId, data.cursoId)) &&
+            (((data.tipo in ["diario", "semanal"]) && data.keys().hasOnly(["cursoId", "trimestreId", "tipo", "fecha", "alumnoId", "estado", "descripcion", "docenteUid", "updatedAt"]) &&
+              dateInYear(gestion, data.fecha) && data.descripcion.size() <= 1500 &&
+              ((data.tipo == "diario" && data.alumnoId != "" && data.estado in ["realiza", "apoyo", "no_realiza", "distraido"]) ||
+              (data.tipo == "semanal" && data.estado == "" && data.descripcion.size() > 0))) ||
+              (data.tipo in ["observacion", "bitacora", "informe"] && validInitialFollowup(data)) || (data.tipo == "actividad" && validActivityObservation(data)));
+        }
+        allow get: if isDocente() && id.matches(request.auth.uid + "_.*") && !exists(/databases/$(database)/documents/gestiones/$(gestion)/registros_inicial/$(id));
+        allow read: if isAdmin() || isDirector() || (teacherCourse(gestion, resource.data.cursoId) && resource.data.docenteUid == request.auth.uid);
+        allow create: if validInitialRecord(request.resource.data) &&
+          (request.resource.data.tipo in ["diario", "semanal"] || request.resource.data.createdAt == request.time);
+        allow update: if validInitialRecord(request.resource.data) && resource.data.docenteUid == request.auth.uid &&
+          request.resource.data.cursoId == resource.data.cursoId && request.resource.data.alumnoId == resource.data.alumnoId &&
+          request.resource.data.tipo == resource.data.tipo && request.resource.data.trimestreId == resource.data.trimestreId &&
+          ((resource.data.tipo in ["diario", "semanal"] && request.resource.data.fecha == resource.data.fecha) ||
+            (resource.data.tipo == "bitacora" && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["descripcion", "updatedAt"])) ||
+            (resource.data.tipo in ["informe", "actividad"] && request.resource.data.createdAt == resource.data.createdAt));
+        allow delete: if isAdmin();
+      }
       match /actividades/{id} {
         allow get: if isAdmin() || (isDocente() && !exists(/databases/$(database)/documents/gestiones/$(gestion)/actividades/$(id)));
         allow read: if readCourse(gestion, resource.data.cursoId);
         allow create: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, request.resource.data.cursoId, request.resource.data.materiaId) &&
+          teacherTerm(gestion, request.resource.data.trimestreId) &&
           request.resource.data.creadoPorUid == request.auth.uid && validTerm(request.resource.data.trimestreId) && validActivityDate(gestion, request.resource.data));
         allow update: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, resource.data.cursoId, resource.data.materiaId) &&
+          teacherTerm(gestion, resource.data.trimestreId) && teacherTerm(gestion, request.resource.data.trimestreId) &&
+          teacherOwnRecord(gestion, resource.data.get("creadoPorUid", request.auth.uid)) &&
           teacherSubject(gestion, request.resource.data.cursoId, request.resource.data.materiaId) &&
           request.resource.data.get("creadoPorUid", "") == resource.data.get("creadoPorUid", "") && validTerm(request.resource.data.trimestreId) && validActivityDate(gestion, request.resource.data) && preservesGradedActivity());
         allow delete: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, resource.data.cursoId, resource.data.materiaId) &&
+          teacherTerm(gestion, resource.data.trimestreId) && teacherOwnRecord(gestion, resource.data.get("creadoPorUid", request.auth.uid)) &&
           resource.data.get("tieneCalificaciones", false) == false);
       }
       match /asistencias/{id} {
         function validAttendance() {
           let data = request.resource.data;
           return writableYear(gestion) && teacherCourse(gestion, data.cursoId) && activeMember(gestion, data.alumnoId, data.cursoId) &&
+            teacherTerm(gestion, data.trimestreId) &&
             data.registradoPorUid == request.auth.uid && data.estado in ["presente", "falta", "atraso", "permiso", "licencia"] &&
             validTerm(data.trimestreId) && dateInYear(gestion, data.fecha);
         }
         allow read: if isAdmin() || isDirector() || teacherCourse(gestion, resource.data.cursoId) || ownEnrolledStudent(gestion, resource.data.alumnoId);
         allow create: if isAdmin() || validAttendance();
         allow update: if isAdmin() || (validAttendance() && request.resource.data.cursoId == resource.data.cursoId &&
+          teacherTerm(gestion, resource.data.trimestreId) && request.resource.data.trimestreId == resource.data.trimestreId &&
+          teacherOwnRecord(gestion, resource.data.get("registradoPorUid", request.auth.uid)) &&
           request.resource.data.alumnoId == resource.data.alumnoId && request.resource.data.fecha == resource.data.fecha);
         allow delete: if isAdmin();
       }
       match /calificaciones/{id} {
         allow read: if isAdmin() || isDirector() || teacherCourse(gestion, resource.data.cursoId) ||
           (isDocente() && teacherCourse(gestion, activity(gestion, resource.data.actividadId).cursoId)) || ownEnrolledStudent(gestion, resource.data.alumnoId);
-        allow create: if isAdmin() || validGrade(gestion, request.resource.data);
-        allow update: if isAdmin() || (request.resource.data.actividadId == resource.data.actividadId &&
-          request.resource.data.alumnoId == resource.data.alumnoId && validGrade(gestion, request.resource.data));
-        allow delete: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, activity(gestion, resource.data.actividadId).cursoId, activity(gestion, resource.data.actividadId).materiaId));
+        allow create: if primaryCourse(request.resource.data.cursoId) && (isAdmin() || validGrade(gestion, request.resource.data));
+        allow update: if primaryCourse(request.resource.data.cursoId) && (isAdmin() || (request.resource.data.actividadId == resource.data.actividadId &&
+          teacherTerm(gestion, resource.data.trimestreId) && request.resource.data.trimestreId == resource.data.trimestreId &&
+          teacherOwnRecord(gestion, resource.data.get("calificadoPorUid", request.auth.uid)) &&
+          request.resource.data.alumnoId == resource.data.alumnoId && validGrade(gestion, request.resource.data)));
+        allow delete: if isAdmin() || (writableYear(gestion) && teacherTerm(gestion, resource.data.trimestreId) &&
+          teacherOwnRecord(gestion, resource.data.get("calificadoPorUid", request.auth.uid)) &&
+          teacherSubject(gestion, activity(gestion, resource.data.actividadId).cursoId, activity(gestion, resource.data.actividadId).materiaId));
       }
       match /comunicados/{id} {
         allow read: if isAdmin() || isDirector() || isDocente();

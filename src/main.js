@@ -1,9 +1,10 @@
 import { createIcons, LogIn } from "lucide";
 import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, onSnapshot } from "firebase/firestore";
 import "./styles.css";
 import "./firebase/client.js";
 import { auth, firestore } from "./firebase/client.js";
-import { cargarConfiguracion, configuracionActual, establecerConfiguracion, observarConfiguracion, VERSION_MODELO } from "./services/rutasFirestore.js";
+import { cargarConfiguracion, claveCache, configuracionActual, establecerConfiguracion, gestionActual, observarConfiguracion, VERSION_MODELO } from "./services/rutasFirestore.js";
 import { gestionDelCalendario } from "./services/fechaEscolar.js";
 import { gestionAdministrativaDisponible } from "./services/registroEscolar.js";
 import { estadoMenuLateral } from "./ui/menuLateral.js";
@@ -27,6 +28,7 @@ let renderRevision = 0;
 let moduloMontado = null;
 let shellBindingsController = null;
 let stopConfigurationWatch = null;
+let stopTeacherAccessWatch = null;
 let configurationNeedsReload = false;
 
 const TEACHER_SIDEBAR_COLLAPSE_KEY = "colegio-sidebar-docente-colapsado";
@@ -355,6 +357,8 @@ async function render() {
 
     // Una descarga anterior no debe sustituir la pantalla de otra ruta o sesion.
     if (!vistaVigente() || auth.currentUser?.uid !== sessionUser.uid || activeUser?.uid !== sessionUser.uid || activeRole !== sessionRole) return;
+    await modulo.preparar?.();
+    if (!vistaVigente() || auth.currentUser?.uid !== sessionUser.uid || activeUser?.uid !== sessionUser.uid || activeRole !== sessionRole) return;
     const view = modulo.rutas[route];
     if (!view) {
       redirectTo(homeForRole(sessionRole));
@@ -383,6 +387,8 @@ onAuthStateChanged(auth, async (user) => {
   shellBindingsController?.abort();
   stopConfigurationWatch?.();
   stopConfigurationWatch = null;
+  stopTeacherAccessWatch?.();
+  stopTeacherAccessWatch = null;
   configurationNeedsReload = false;
   authReady = false;
   activeUser = null;
@@ -404,6 +410,23 @@ onAuthStateChanged(auth, async (user) => {
       activeUser = user;
       activeRole = role;
       rememberSession(role, user);
+      if (role === "docente") {
+        const stopProfile = onSnapshot(doc(firestore, "usuarios", user.uid), (snapshot) => {
+          if (revision !== authRevision) return;
+          if (!snapshot.exists() || snapshot.data().activo === false) doLogout();
+        }, (error) => console.warn("No se pudo verificar el acceso docente", error));
+        let previousAssignment = "";
+        const stopAssignment = onSnapshot(doc(firestore, "gestiones", gestionActual(), "asignaciones", user.uid), (snapshot) => {
+          if (revision !== authRevision) return;
+          const next = JSON.stringify(snapshot.data() || {});
+          if (next === previousAssignment) return;
+          previousAssignment = next;
+          try { sessionStorage.removeItem(claveCache("contexto_modalidad_v2", user.uid)); } catch { /* No hay cache local disponible. */ }
+          window.dispatchEvent(new Event("teacher-assignment-changed"));
+          if (authReady) render();
+        }, (error) => console.warn("No se pudo actualizar la asignacion docente", error));
+        stopTeacherAccessWatch = () => { stopProfile(); stopAssignment(); };
+      }
       stopConfigurationWatch = observarConfiguracion(firestore, (next) => {
         if (revision !== authRevision || auth.currentUser?.uid !== user.uid) return;
         next = { ...next, gestionActivaId: next.gestionActivaId || gestionDelCalendario(), versionModelo: Number(next.versionModelo || 0) };

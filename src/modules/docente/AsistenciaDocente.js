@@ -7,17 +7,17 @@ import { findSubject } from "../../data/catalog.js";
 import { activityEvaluationLabel, activityPointsLabel, sortStudentsByName } from "./ComunDocente.js";
 import { gestionActual } from "../../services/rutasFirestore.js";
 
-function guidedAttendanceModal(course, students, attendanceMap) {
+export function guidedAttendanceModal(course, students, attendanceMap) {
   const guidedStudent = students[teacherState.guidedIndex] || null;
   const guidedState = guidedStudent ? (attendanceMap[guidedStudent.id]?.estado || "falta") : "falta";
   return `
-    <div class="fixed inset-0 z-50 ${teacherState.attendanceMode === "guia" ? "flex" : "hidden"} items-start justify-center overflow-y-auto bg-slate-950/60 px-4 pb-4" style="padding-top:${Math.max(16, teacherState.guidedModalTop)}px" data-guided-modal>
-      <section class="w-full max-w-2xl overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+    <div class="fixed inset-0 z-50 ${teacherState.attendanceMode === "guia" ? "flex" : "hidden"} justify-center bg-slate-950/60" data-guided-modal>
+      <section class="w-full max-w-2xl rounded-[2rem] bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="guided-attendance-title">
         <div class="bg-school-navy px-5 py-4 text-white">
           <div class="flex items-center justify-between gap-4">
             <div>
               <p class="text-xs font-black uppercase tracking-[.18em] text-white/70">${escapeHtml(course.nombre)} · ${escapeHtml(selectedTrimester().label)}</p>
-              <h3 class="mt-1 text-2xl font-black">Modo guía</h3>
+              <h3 id="guided-attendance-title" class="mt-1 text-2xl font-black">Modo guía</h3>
             </div>
             <button type="button" class="grid h-11 w-11 place-items-center rounded-2xl bg-white/10 text-white hover:bg-white/20" data-guided-close aria-label="Cerrar">${icon("x", "h-5 w-5")}</button>
           </div>
@@ -326,10 +326,6 @@ export async function renderAttendance(context) {
 
   container.querySelectorAll("[data-attendance-mode]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (button.dataset.attendanceMode === "guia") {
-        const rect = button.getBoundingClientRect();
-        teacherState.guidedModalTop = Math.max(16, Math.round(rect.top));
-      }
       teacherState.attendanceMode = button.dataset.attendanceMode;
       if (teacherState.attendanceMode === "guia") teacherState.guidedIndex = Math.min(teacherState.guidedIndex, Math.max(students.length - 1, 0));
       sessionStorage.setItem("docenteAsistenciaModo", teacherState.attendanceMode);

@@ -1,19 +1,26 @@
 import assert from "node:assert/strict";
 import test, { before, after } from "node:test";
 import { initializeApp, deleteApp } from "firebase/app";
-import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, confirmPasswordReset } from "firebase/auth";
 import { collection, connectFirestoreEmulator, deleteDoc, doc, getDocFromServer, getDocs, getFirestore, query, runTransaction, serverTimestamp, setDoc, setLogLevel, terminate, updateDoc, where, writeBatch } from "firebase/firestore";
 import { createStudentAuthAccess, setStudentAccessActive } from "../src/services/studentAccess.js";
-import { getStudentContext, getStudentDashboardData } from "../src/services/studentData.js";
+import { getStudentContext, getStudentDashboardData, observarPanelAlumno } from "../src/services/studentData.js";
+import { crearGuardadoConPeriodo, periodosCurso } from "../src/services/periodosCurso.js";
 import { coleccionGestion, documentoGestion, documentoSeguimiento, establecerConfiguracion, observarConfiguracion } from "../src/services/rutasFirestore.js";
 import { importStudents } from "../src/services/adminData.js";
 import { registrarTablaAlumnos } from "../src/services/registroAlumnos.js";
 import { newStudentRow, pasteStudentCells } from "../src/services/tablaAlumnos.js";
-import { createSystemUser } from "../src/services/users.js";
+import { createSystemUser, setTeacherActive } from "../src/services/users.js";
 import { listarGestiones, prepararGestion } from "../src/services/configuracionSistema.js";
 import { actualizarActividadProtegida, eliminarActividadProtegida } from "../src/services/proteccionActividad.js";
 import { finalizeActivityReview, saveGrade } from "../src/services/teacherData.js";
 import { usernameToAuthEmail } from "../src/services/users.js";
+import { solicitarRecuperacion } from "../src/services/recuperacionContrasena.js";
+import { verificarEnlaceRestablecimiento, confirmarRestablecimiento } from "../src/services/restablecimientoContrasena.js";
+import { guardarRegistroInicial, listarRegistrosInicial, editarBitacoraInicial } from "../src/services/registrosInicial.js";
+import { listarActividadesInicial, modificarActividadInicial, moverActividadInicial, guardarAvanceInicial } from "../src/services/actividadesInicial.js";
+import { idAvanceInicial } from "../src/services/modeloActividadesInicial.js";
+import { findCourse } from "../src/data/catalog.js";
 
 const projectId = "demo-sistema-seguridad";
 const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST || "";
@@ -41,12 +48,13 @@ const admin = client("admin", "admin-prueba", "smichmev@gmail.com");
 const teacher = client("docente", "docente-a");
 const teacherB = client("otro-docente", "docente-b");
 const legacyTeacher = client("docente-formato-anterior", "docente-anterior");
+const initialTeacher = client("docente-inicial", "docente-inicial");
 const director = client("director", "director-a");
 const student = client("alumno", "alumno-auth-a");
 const anonymous = client("anonimo");
 const creator = authClient("creador-emulado");
 const migratedStudent = authClient("alumno-migrado");
-const anual = new Set(["matriculas", "asignaciones", "horarios", "actividades", "asistencias", "calificaciones", "comunicados"]);
+const anual = new Set(["matriculas", "asignaciones", "horarios", "actividades", "asistencias", "calificaciones", "comunicados", "registros_inicial", "actividades_inicial"]);
 const col = (actor, group) => anual.has(group) ? coleccionGestion(actor.firestore, group) : collection(actor.firestore, group);
 const ref = (actor, group, id) => doc(col(actor, group), id);
 const get = (actor, group, id) => getDocFromServer(ref(actor, group, id));
@@ -369,6 +377,72 @@ test("calificar y cambiar la escala simultaneamente no desincroniza actividad y 
   if (nota.exists()) assert.equal(nota.data().maximo, tarea.data().maximo);
 });
 
+test("la senal de trimestre exige actividad y asistencia reales y solo se consulta desde el curso propio", async () => {
+  const save = crearGuardadoConPeriodo();
+  const periodRef = doc(periodosCurso(teacher.firestore, "cuarto_a"), "t2");
+  const common = { db: teacher.firestore, uid: "docente-a", year: "2026", courseId: "cuarto_a", termId: "t2", periodRef };
+  await save({ ...common, kind: "actividad", sourceRef: ref(teacher, "actividades", "senal-tarea"), payload: { ...activity(), fecha: "2026-05-11" } });
+  await save({ ...common, kind: "asistencia", sourceRef: ref(teacher, "asistencias", "senal-asistencia"), payload: { ...attendance(), fecha: "2026-05-11", updatedAt: serverTimestamp() } });
+  const read = await getDocFromServer(doc(periodosCurso(student.firestore, "cuarto_a"), "t2"));
+  assert.equal(read.data().actividadFecha, "2026-05-11"); assert.equal(read.data().asistenciaFecha, "2026-05-11");
+  await getDocFromServer(doc(periodosCurso(director.firestore, "cuarto_a"), "t2"));
+  await denied(getDocFromServer(doc(periodosCurso(student.firestore, "quinto_a"), "t2")));
+  await denied(getDocFromServer(doc(periodosCurso(anonymous.firestore, "cuarto_a"), "t2")));
+  await denied(setDoc(doc(periodosCurso(student.firestore, "cuarto_a"), "t3"), { asistenciaId: "asistencia-a", asistenciaFecha: "2026-09-22", updatedAt: serverTimestamp() }));
+  await denied(setDoc(doc(periodosCurso(teacherB.firestore, "cuarto_a"), "t3"), { asistenciaId: "asistencia-a", asistenciaFecha: "2026-09-22", updatedAt: serverTimestamp() }));
+});
+
+test("no se puede inventar una senal ni moverla de curso o trimestre ni borrar su otra evidencia", async () => {
+  const target = doc(periodosCurso(teacher.firestore, "cuarto_a"), "t2");
+  await denied(updateDoc(target, { asistenciaId: "no-existe", asistenciaFecha: "2026-01-01", updatedAt: serverTimestamp() }));
+  await denied(updateDoc(target, { actividadId: "tarea-b", actividadFecha: "2026-01-01", updatedAt: serverTimestamp() }));
+  await denied(setDoc(doc(periodosCurso(teacher.firestore, "cuarto_a"), "t3"), { actividadId: "senal-tarea", actividadFecha: "2026-05-11", updatedAt: serverTimestamp() }));
+  await denied(setDoc(target, { actividadId: "senal-tarea", actividadFecha: "2026-05-11", updatedAt: serverTimestamp() }));
+  await denied(updateDoc(target, { asistenciaId: "asistencia-a", asistenciaFecha: "2026-09-22", updatedAt: serverTimestamp() }));
+});
+
+test("el alumno cambia solo su vista de trimestre sin editar el curso ni perfiles ajenos", async () => {
+  const own = ref(student, "usuarios", "alumno-auth-a");
+  const view = { cursoId: "cuarto_a", trimestreId: "t1", automatico: "t2" };
+  await updateDoc(own, { "preferencias.vistasAlumnoPorGestion.2026": view, updatedAt: serverTimestamp() });
+  assert.equal((await get(student, "usuarios", "alumno-auth-a")).data().preferencias.vistasAlumnoPorGestion[2026].trimestreId, "t1");
+  for (const change of [{ trimestreId: "t4" }, { automatico: "t4" }, { cursoId: "quinto_a" }, { extra: true }]) await denied(updateDoc(own, { "preferencias.vistasAlumnoPorGestion.2026": { ...view, ...change } }));
+  await denied(updateDoc(own, { "preferencias.vistasAlumnoPorGestion.2027": view }));
+  await denied(updateDoc(own, { rol: "admin", "preferencias.vistasAlumnoPorGestion.2026": view }));
+  await denied(updateDoc(ref(teacher, "usuarios", "docente-a"), { "preferencias.vistasAlumnoPorGestion.2026": view }));
+  await denied(updateDoc(ref(student, "usuarios", "docente-a"), { "preferencias.vistasAlumnoPorGestion.2026": view }));
+});
+
+test("el panel abierto recibe el avance del curso en vivo y conserva el cambio manual hasta el proximo trimestre", async () => {
+  let latest, next;
+  const changes = [];
+  const wait = (predicate) => new Promise((resolve, reject) => {
+    if (latest && predicate(latest)) return resolve(latest);
+    const timer = setTimeout(() => reject(new Error("No llego la actualizacion del alumno")), 10000);
+    next = (data) => { if (predicate(data)) { clearTimeout(timer); next = null; resolve(data); } };
+  });
+  const watcher = await observarPanelAlumno((data) => { latest = data; changes.push(data.trimesterId); next?.(data); }, (error) => assert.fail(error.message), { auth: { currentUser: { uid: "alumno-auth-a" } }, firestore: student.firestore });
+  try {
+    await wait((data) => data.trimesterId === "t1" && data.automaticTrimesterId === "t2");
+    await watcher.seleccionarTrimestre("t2"); assert.equal(latest.trimesterId, "t2");
+    await watcher.seleccionarTrimestre("t1"); assert.equal(latest.trimesterId, "t1");
+    const save = crearGuardadoConPeriodo(), periodRef = doc(periodosCurso(teacher.firestore, "cuarto_a"), "t3");
+    const common = { db: teacher.firestore, uid: "docente-a", year: "2026", courseId: "cuarto_a", termId: "t3", periodRef };
+    await save({ ...common, kind: "actividad", sourceRef: ref(teacher, "actividades", "senal-tarea-t3"), payload: activity({ trimestreId: "t3", fecha: "2026-09-23" }) });
+    await save({ ...common, kind: "asistencia", sourceRef: ref(teacher, "asistencias", "senal-asistencia-t3"), payload: attendance({ trimestreId: "t3", fecha: "2026-09-23", observacion: "Llego tarde a las 9am" }) });
+    const data = await wait((data) => data.trimesterId === "t3" && data.attendance.some((record) => record.observacion));
+    assert.equal(data.attendance.find((record) => record.observacion).observacion, "Llego tarde a las 9am");
+  } finally {
+    watcher.stop();
+    const count = changes.length;
+    await deleteDoc(doc(periodosCurso(admin.firestore, "cuarto_a"), "t3"));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(changes.length, count);
+    await deleteDoc(ref(admin, "actividades", "senal-tarea-t3"));
+    await deleteDoc(ref(admin, "asistencias", "senal-asistencia-t3"));
+  }
+});
+
 test("se mantienen trimestre, campanita, seguimientos y comunicados", async () => {
   await updateDoc(ref(teacher, "usuarios", "docente-a"), { "preferencias.trimestresPorGestion.2026": "t3", updatedAt: serverTimestamp() });
   const seguimiento = documentoSeguimiento(teacher.firestore, "docente-a", "alumno-a", "t2");
@@ -559,11 +633,243 @@ test("la importacion genera IDs estables, conserva orden y no duplica alumnos", 
 
 test("crear docente guarda perfil, indice y asignaciones juntos sin copias por rol", async () => {
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
-  const creado = await createSystemUser({ nombre: "Docente prueba", username: "estructura001", password: "Temporal123", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients);
+  const creado = await createSystemUser({ nombre: "Docente prueba", username: "estructura001", emailRecuperacion: "docente.prueba@example.test", password: "Temporal123", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients);
   assert.equal((await get(admin, "usuarios", creado.id)).data().nombre, "Docente prueba");
   assert.deepEqual((await get(admin, "asignaciones", creado.id)).data().cursos, { cuarto_a: { materias: ["matematica"] } });
   assert.deepEqual(Object.keys((await get(anonymous, "indice_accesos", "estructura001")).data()).sort(), ["authEmail", "uid"]);
   await denied(get(admin, "docentes", creado.id));
+  assert.equal(creator.auth.currentUser, null);
+  assert.equal(creado.authEmail, "docente.prueba@example.test");
+  assert.equal((await get(anonymous, "indice_accesos", "estructura001")).data().authEmail, creado.authEmail);
+  const login = await signInWithEmailAndPassword(creator.auth, creado.authEmail, "Temporal123");
+  assert.equal(login.user.uid, creado.id);
+  await signOut(creator.auth);
+});
+
+test("el enlace de recuperacion restablece la clave conservando UID, usuario y asignaciones", async () => {
+  const index = (await get(anonymous, "indice_accesos", "estructura001")).data();
+  const before = (await get(admin, "asignaciones", index.uid)).data();
+  await solicitarRecuperacion("estructura001", { auth: creator.auth, resolver: async () => index.authEmail, enviar: sendPasswordResetEmail });
+  const response = await fetch(`http://${authHost}/emulator/v1/projects/${projectId}/oobCodes`);
+  assert.equal(response.ok, true);
+  const payload = await response.json();
+  const code = payload.oobCodes.findLast((item) => item.email === index.authEmail && item.requestType === "PASSWORD_RESET");
+  assert.ok(code);
+  assert.equal(await verificarEnlaceRestablecimiento(creator.auth, code.oobCode), index.authEmail);
+  await assert.rejects(confirmarRestablecimiento({ auth: creator.auth, code: code.oobCode, password: "NuevaTemporal456", confirmation: "Distinta456" }), /no coinciden/);
+  assert.equal(await verificarEnlaceRestablecimiento(creator.auth, code.oobCode), index.authEmail);
+  await confirmarRestablecimiento({ auth: creator.auth, code: code.oobCode, password: "NuevaTemporal456", confirmation: "NuevaTemporal456" });
+  await assert.rejects(signInWithEmailAndPassword(creator.auth, index.authEmail, "Temporal123"));
+  const login = await signInWithEmailAndPassword(creator.auth, index.authEmail, "NuevaTemporal456");
+  assert.equal(login.user.uid, index.uid);
+  await signOut(creator.auth);
+  assert.deepEqual((await get(admin, "asignaciones", index.uid)).data(), before);
+  assert.equal((await get(admin, "usuarios", index.uid)).data().usuario, "estructura001");
+  await assert.rejects(confirmPasswordReset(creator.auth, code.oobCode, "OtraTemporal789"));
+  await assert.rejects(verificarEnlaceRestablecimiento(creator.auth, code.oobCode));
+});
+
+test("director y administrador nuevos tambien usan su correo real y no necesitan asignaciones", async () => {
+  const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
+  for (const rol of ["director", "admin"]) {
+    const email = `${rol}.registro@example.test`;
+    const creado = await createSystemUser({ nombre: `Prueba ${rol}`, username: `${rol}correo001`, emailRecuperacion: email, password: "Temporal123", rol }, clients);
+    assert.equal(creado.authEmail, email);
+    assert.equal(creado.correoRecuperacion, email);
+    assert.equal((await get(admin, "asignaciones", creado.id)).exists(), false);
+    const login = await signInWithEmailAndPassword(creator.auth, email, "Temporal123");
+    assert.equal(login.user.uid, creado.id);
+    await signOut(creator.auth);
+  }
+});
+
+test("un correo ocupado no crea otra cuenta, perfil ni indice de acceso", async () => {
+  const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
+  await assert.rejects(createSystemUser({ nombre: "Duplicado", username: "correorepetido001", emailRecuperacion: "docente.prueba@example.test", password: "Temporal123", rol: "director" }, clients), /correo ya pertenece/);
+  assert.equal((await get(admin, "indice_accesos", "correorepetido001")).exists(), false);
+  assert.equal(creator.auth.currentUser, null);
+});
+
+test("las reglas permiten Inicial y Preinicial pero rechazan mezclar Primaria o asignar materias numericas", async () => {
+  const target = ref(admin, "asignaciones", "docente-inicial");
+  const data = { cursos: { inicial: { materias: [] }, preinicial: { materias: [] } }, nivelDocente: "inicial", modalidadEvaluacion: "cualitativa" };
+  await setDoc(target, data);
+  await denied(setDoc(target, { ...data, cursos: { ...data.cursos, cuarto_a: { materias: ["matematica"] } } }));
+  await denied(setDoc(target, { ...data, nivelDocente: "primaria" }));
+  await denied(setDoc(target, { ...data, cursos: { inicial: { materias: ["matematica"] } } }));
+  await denied(setDoc(target, { cursos: { preinicial_inicial: { materias: [] } } }));
+  assert.deepEqual((await get(admin, "asignaciones", "docente-inicial")).data(), data);
+});
+
+test("Inicial y Preinicial tienen sus propias matriculas y no conceden acceso a Primaria", async () => {
+  await setDoc(ref(admin, "usuarios", "docente-inicial"), { rol: "docente", activo: true, nivelDocente: "inicial", modalidadEvaluacion: "cualitativa" });
+  await registrarAlumno({ id: "alumno-inicial", cursoId: "inicial" });
+  await registrarAlumno({ id: "alumno-preinicial", cursoId: "preinicial" });
+  for (const courseId of ["inicial", "preinicial"]) {
+    const enrolled = await getDocs(query(col(initialTeacher, "matriculas"), where("cursoId", "==", courseId)));
+    assert.equal(enrolled.size, 1);
+    assert.equal(enrolled.docs[0].data().cursoId, courseId);
+  }
+  await denied(get(initialTeacher, "alumnos", "alumno-a"));
+  await denied(get(teacher, "alumnos", "alumno-inicial"));
+  await denied(getDocs(query(col(initialTeacher, "matriculas"), where("cursoId", "==", "cuarto_a"))));
+});
+
+test("ninguna cuenta puede guardar notas numericas de Inicial ni Preinicial", async () => {
+  for (const cursoId of ["inicial", "preinicial"]) {
+    await denied(setDoc(ref(admin, "calificaciones", `nota-${cursoId}`), grade({ cursoId })));
+    await denied(setDoc(ref(initialTeacher, "calificaciones", `nota-${cursoId}`), grade({ cursoId, calificadoPorUid: "docente-inicial" })));
+  }
+});
+
+const initialContext = { uid: "docente-inicial", gestionId: "2026", courses: [findCourse("inicial"), findCourse("preinicial")] };
+const initialClients = { db: initialTeacher.firestore, authClient: { currentUser: { uid: "docente-inicial" } } };
+const activityCriteria = Object.fromEntries(["ser", "saber", "hacer"].map((dimension) => [dimension, { criterio: `Criterio ${dimension}`, opciones: { logrado: "Lo realiza con autonomia", en_proceso: "Lo realiza con orientacion", requiere_apoyo: "Requiere acompanamiento", no_observado: "Todavia no se observo" } }]));
+let qualitativeActivity, otherQualitativeActivity;
+test("crear actividad con criterios aprobados es atomico y reintentar no duplica ni sobreescribe", async () => {
+  const input = { id: "docente-inicial_aprobada-al-crear", cursoId: "inicial", trimestreId: "t1", accion: "crear", titulo: "Construimos figuras", materiaId: "artes_plasticas", descripcion: "Construir con material reciclado", prioritaria: true, criterios: activityCriteria };
+  const result = await modificarActividadInicial(initialContext, input, initialClients);
+  assert.equal(Object.keys(result.criterios).length, 3);
+  const retried = await modificarActividadInicial(initialContext, { ...input, titulo: "No debe reemplazar el original" }, initialClients);
+  assert.equal(retried.id, result.id); assert.equal(retried.titulo, input.titulo);
+  await denied(updateDoc(ref(initialTeacher, "actividades_inicial", result.id), { criterios: { ser: {} }, updatedAt: serverTimestamp() }));
+});
+test("actividades cualitativas son privadas, sin fecha obligatoria y ordenables por su docente", async () => {
+  const input = { cursoId: "inicial", trimestreId: "t1", accion: "crear", titulo: "Muneco de carton", materiaId: "artes_plasticas", descripcion: "Construccion con material reciclado", prioritaria: true };
+  qualitativeActivity = await modificarActividadInicial(initialContext, input, initialClients);
+  otherQualitativeActivity = await modificarActividadInicial(initialContext, { ...input, titulo: "Vocales", materiaId: "lenguaje" }, initialClients);
+  assert.equal(qualitativeActivity.fecha, undefined);
+  const rows = await listarActividadesInicial(initialContext, "inicial", "t1", initialClients); assert.equal(rows.filter((item) => [qualitativeActivity.id, otherQualitativeActivity.id].includes(item.id)).length, 2);
+  const moved = await moverActividadInicial(initialContext, qualitativeActivity, otherQualitativeActivity, initialClients);
+  assert.equal(moved[0].orden, otherQualitativeActivity.orden);
+  qualitativeActivity = moved[0]; otherQualitativeActivity = moved[1];
+  for (const actor of [anonymous, student, teacherB]) await denied(get(actor, "actividades_inicial", qualitativeActivity.id));
+  assert.equal((await get(director, "actividades_inicial", qualitativeActivity.id)).exists(), true);
+  await denied(updateDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id), { materiaId: "matematica", updatedAt: serverTimestamp() }));
+  await denied(updateDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id), { criterios: { ser: {} }, updatedAt: serverTimestamp() }));
+});
+test("habilitar criterios los fija; guardar avances es atomico y permite corregir sin duplicar", async () => {
+  qualitativeActivity = await modificarActividadInicial(initialContext, { ...qualitativeActivity, accion: "criterios", criterios: activityCriteria }, initialClients);
+  await assert.rejects(modificarActividadInicial(initialContext, { ...qualitativeActivity, accion: "criterios", criterios: activityCriteria }, initialClients), /habilitados/);
+  const first = await guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-inicial", { ser: { valoracion: "logrado" }, saber: { valoracion: "en_proceso" }, hacer: { valoracion: "requiere_apoyo", descripcion: "Requiere ayuda al recortar" } }, initialClients);
+  assert.equal(first.records.length, 3); assert.equal(first.activity.tieneRegistros, true);
+  const createdAt = (await get(initialTeacher, "registros_inicial", first.records[2].id)).data().createdAt;
+  const corrected = await guardarAvanceInicial(initialContext, first.activity, "alumno-inicial", { hacer: { valoracion: "logrado", descripcion: "Correccion docente" } }, initialClients);
+  assert.equal(corrected.records[0].id, first.records[2].id);
+  assert.equal(corrected.records[0].createdAt.toMillis(), createdAt.toMillis());
+  assert.equal((await get(initialTeacher, "registros_inicial", corrected.records[0].id)).data().opinion, activityCriteria.hacer.opciones.logrado);
+  await denied(updateDoc(ref(initialTeacher, "registros_inicial", corrected.records[0].id), { opinion: "Nota inventada", updatedAt: serverTimestamp() }));
+  await denied(updateDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id), { criterios: { ...activityCriteria, ser: { ...activityCriteria.ser, criterio: "Cambiar significado" } }, updatedAt: serverTimestamp() }));
+});
+test("avance no admite alumnos de otro curso ni ausencia de criterios ni notas numericas", async () => {
+  await denied(guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-preinicial", { ser: { valoracion: "logrado" } }, initialClients));
+  await assert.rejects(guardarAvanceInicial(initialContext, otherQualitativeActivity, "alumno-inicial", { ser: { valoracion: "logrado" } }, initialClients));
+  const id = idAvanceInicial(initialContext.uid, qualitativeActivity.id, "alumno-inicial", "ser");
+  await denied(updateDoc(ref(initialTeacher, "registros_inicial", id), { puntaje: 100, updatedAt: serverTimestamp() }));
+  for (const actor of [anonymous, student, teacher]) await denied(get(actor, "registros_inicial", id));
+});
+test("eliminar y restaurar actividades conserva las observaciones, y finalizadas no admiten avances", async () => {
+  const input = { ...qualitativeActivity, accion: "eliminar" };
+  const removed = await modificarActividadInicial(initialContext, input, initialClients); assert.equal(removed.estado, "eliminada"); assert.equal(removed.prioritaria, false);
+  const id = idAvanceInicial(initialContext.uid, qualitativeActivity.id, "alumno-inicial", "ser"); assert.equal((await get(initialTeacher, "registros_inicial", id)).exists(), true);
+  await assert.rejects(guardarAvanceInicial(initialContext, removed, "alumno-inicial", { ser: { valoracion: "logrado" } }, initialClients));
+  const restored = await modificarActividadInicial(initialContext, { ...removed, accion: "restaurar" }, initialClients);
+  const finished = await modificarActividadInicial(initialContext, { ...restored, accion: "finalizar" }, initialClients);
+  await assert.rejects(guardarAvanceInicial(initialContext, finished, "alumno-inicial", { ser: { valoracion: "logrado" } }, initialClients));
+  await denied(deleteDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id)));
+});
+const initialRecord = (changes = {}) => ({ cursoId: "inicial", trimestreId: "t1", tipo: "diario", fecha: "2026-03-10", alumnoId: "alumno-inicial", estado: "realiza", descripcion: "Participo en la actividad.", docenteUid: "docente-inicial", updatedAt: serverTimestamp(), ...changes });
+
+test("Inicial acumula observaciones y bitacoras sin fecha manual y reintentar no duplica", async () => {
+  const input = { id: "docente-inicial_observacion-nueva", cursoId: "inicial", trimestreId: "t1", alumnoId: "alumno-inicial", tipo: "observacion", materiaId: "artes_plasticas", dimension: "ser", criterio: "Comparte sus materiales", valoracion: "logrado", descripcion: "Es amable con sus companeros." };
+  await guardarRegistroInicial(initialContext, input, initialClients);
+  await guardarRegistroInicial(initialContext, input, initialClients);
+  const first = await get(initialTeacher, "registros_inicial", input.id);
+  assert.equal(first.data().fecha, undefined);
+  assert.ok(first.data().createdAt);
+  await guardarRegistroInicial(initialContext, { ...input, id: "docente-inicial_bitacora-uno", tipo: "bitacora", descripcion: "Comentario uno" }, initialClients);
+  await guardarRegistroInicial(initialContext, { ...input, id: "docente-inicial_bitacora-dos", tipo: "bitacora", descripcion: "Comentario dos" }, initialClients);
+  const rows = await listarRegistrosInicial(initialContext, "inicial", "t1", initialClients);
+  assert.equal(rows.filter((item) => [input.id, "docente-inicial_bitacora-uno", "docente-inicial_bitacora-dos"].includes(item.id)).length, 3);
+  await denied(updateDoc(ref(initialTeacher, "registros_inicial", input.id), { valoracion: "requiere_apoyo", updatedAt: serverTimestamp() }));
+  for (const actor of [student, anonymous, teacher]) await denied(get(actor, "registros_inicial", input.id));
+});
+test("Bitacora permite corregir solo texto del autor y rechaza cambio de identidad o conflictos", async () => {
+  const input = { id: "docente-inicial_bitacora-editable", cursoId: "inicial", trimestreId: "t1", alumnoId: "alumno-inicial", tipo: "bitacora", materiaId: "", descripcion: "Comentario original" };
+  await guardarRegistroInicial(initialContext, input, initialClients);
+  const original = (await get(initialTeacher, "registros_inicial", input.id)).data();
+  const edit = { ...input, descripcionAnterior: input.descripcion, descripcion: "Comentario corregido" };
+  await editarBitacoraInicial(initialContext, edit, initialClients);
+  const updated = (await get(initialTeacher, "registros_inicial", input.id)).data();
+  assert.equal(updated.descripcion, "Comentario corregido"); assert.equal(updated.createdAt.toMillis(), original.createdAt.toMillis());
+  await assert.rejects(editarBitacoraInicial(initialContext, edit, initialClients), /cambio/);
+  for (const changes of [{ cursoId: "preinicial" }, { trimestreId: "t2" }, { alumnoId: "alumno-preinicial" }, { docenteUid: "docente-a" }, { tipo: "informe" }, { materiaId: "matematica" }, { createdAt: serverTimestamp() }, { descripcion: "a".repeat(5001) }, { descripcion: "" }]) await denied(updateDoc(ref(initialTeacher, "registros_inicial", input.id), { ...changes, updatedAt: serverTimestamp() }));
+  for (const actor of [student, anonymous, teacher, teacherB]) await denied(updateDoc(ref(actor, "registros_inicial", input.id), { descripcion: "No autorizado", updatedAt: serverTimestamp() }));
+});
+
+test("informe cualitativo conserva un unico documento y limita el texto a 200 caracteres", async () => {
+  const input = { cursoId: "inicial", trimestreId: "t1", alumnoId: "alumno-inicial", tipo: "informe", descripcion: "Participa con entusiasmo. Requiere apoyo al recortar.", origen: "docente", aprobado: false, fuentesFirma: "3-abcd" };
+  const draft = await guardarRegistroInicial(initialContext, input, initialClients);
+  const approved = await guardarRegistroInicial(initialContext, { ...input, aprobado: true }, initialClients);
+  assert.equal(draft.id, approved.id);
+  assert.equal((await get(initialTeacher, "registros_inicial", draft.id)).data().aprobado, true);
+  await denied(updateDoc(ref(initialTeacher, "registros_inicial", draft.id), { descripcion: "a".repeat(201), updatedAt: serverTimestamp() }));
+  await denied(updateDoc(ref(initialTeacher, "registros_inicial", draft.id), { trimestreId: "t2", updatedAt: serverTimestamp() }));
+  await denied(updateDoc(ref(initialTeacher, "registros_inicial", draft.id), { puntaje: 100, updatedAt: serverTimestamp() }));
+});
+
+test("Inicial guarda y edita observaciones reales sin crear notas ni duplicar el mismo registro", async () => {
+  const input = initialRecord();
+  const first = await guardarRegistroInicial(initialContext, input, initialClients);
+  const second = await guardarRegistroInicial(initialContext, { ...input, estado: "apoyo", descripcion: "Necesito acompanamiento." }, initialClients);
+  assert.equal(first.id, second.id);
+  const rows = await listarRegistrosInicial(initialContext, "inicial", "t1", initialClients);
+  assert.equal(rows.filter((item) => item.tipo === "diario").length, 1);
+  assert.equal(rows.find((item) => item.id === first.id).estado, "apoyo");
+  assert.equal(Object.hasOwn(rows.find((item) => item.id === first.id), "nota"), false);
+  assert.equal((await getDocs(query(col(admin, "calificaciones"), where("cursoId", "==", "inicial")))).size, 0);
+});
+test("la bitacora semanal admite curso y alumno y usa una sola entrada por semana", async () => {
+  const first = await guardarRegistroInicial(initialContext, initialRecord({ tipo: "semanal", alumnoId: "", fecha: "2026-03-11" }), initialClients);
+  const second = await guardarRegistroInicial(initialContext, initialRecord({ tipo: "semanal", alumnoId: "", fecha: "2026-03-13", descripcion: "Progreso del curso." }), initialClients);
+  assert.equal(first.id, second.id);
+  assert.equal(second.fecha, "2026-03-09");
+  await guardarRegistroInicial(initialContext, initialRecord({ tipo: "semanal", cursoId: "preinicial", alumnoId: "alumno-preinicial" }), initialClients);
+  assert.equal((await listarRegistrosInicial(initialContext, "preinicial", "t1", initialClients)).length, 1);
+});
+test("los registros cualitativos rechazan otro curso, alumno incorrecto, estados inventados y puntajes", async () => {
+  for (const changes of [{ cursoId: "cuarto_a", alumnoId: "alumno-a" }, { alumnoId: "alumno-preinicial" }, { alumnoId: "inexistente" }, { estado: "80" }, { nota: 100 }, { valor: 90 }, { descripcion: "x".repeat(1501) }, { fecha: "2027-03-10" }, { docenteUid: "docente-a" }]) await denied(setDoc(ref(initialTeacher, "registros_inicial", "registro-no-valido"), initialRecord(changes)));
+});
+test("las bitacoras son privadas para su autor asignado, director y admin, no para alumnos ni anonimos", async () => {
+  const saved = await guardarRegistroInicial(initialContext, initialRecord(), initialClients);
+  assert.equal((await get(director, "registros_inicial", saved.id)).exists(), true);
+  assert.equal((await get(admin, "registros_inicial", saved.id)).exists(), true);
+  for (const actor of [student, anonymous, teacher, teacherB]) await denied(get(actor, "registros_inicial", saved.id));
+  await denied(getDocs(query(col(initialTeacher, "registros_inicial"), where("cursoId", "==", "inicial"))));
+  await denied(setDoc(ref(teacher, "registros_inicial", "spoof-inicial"), initialRecord({ docenteUid: "docente-a" })));
+});
+test("una observacion no puede moverse de alumno, curso, fecha o trimestre al editar", async () => {
+  const saved = await guardarRegistroInicial(initialContext, initialRecord(), initialClients);
+  for (const changes of [{ tipo: "semanal", estado: "" }, { fecha: "2026-03-11" }, { trimestreId: "t2" }, { alumnoId: "" }, { cursoId: "preinicial", alumnoId: "alumno-preinicial" }]) await denied(updateDoc(ref(initialTeacher, "registros_inicial", saved.id), { ...changes, updatedAt: serverTimestamp() }));
+});
+test("sin habilitacion anual y con matricula retirada no se registran nuevas observaciones", async () => {
+  await updateDoc(ref(admin, "matriculas", "alumno-inicial"), { estado: "retirado" });
+  await denied(setDoc(ref(initialTeacher, "registros_inicial", "retirado"), initialRecord()));
+  await updateDoc(ref(admin, "matriculas", "alumno-inicial"), { estado: "activo" });
+  await deleteDoc(doc(admin.firestore, "gestiones", "2026"));
+  await denied(setDoc(ref(initialTeacher, "registros_inicial", "sin-gestion"), initialRecord()));
+  await setDoc(doc(admin.firestore, "gestiones", "2026"), { ano: 2026, createdBy: "admin-prueba" });
+});
+
+test("crear un docente cualitativo guarda el nivel y no requiere materias de Primaria", async () => {
+  const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
+  const creado = await createSystemUser({ nombre: "Docente cualitativo", username: "inicial001", emailRecuperacion: "inicial.prueba@example.test", password: "Temporal123", rol: "docente", asignaciones: { inicial: { materias: [] } } }, clients);
+  const perfil = (await get(admin, "usuarios", creado.id)).data();
+  const asignacion = (await get(admin, "asignaciones", creado.id)).data();
+  assert.equal(perfil.nivelDocente, "inicial");
+  assert.equal(perfil.modalidadEvaluacion, "cualitativa");
+  assert.equal(asignacion.nivelDocente, perfil.nivelDocente);
+  assert.deepEqual(asignacion.cursos, { inicial: { materias: [] } });
   assert.equal(creator.auth.currentUser, null);
 });
 
@@ -581,10 +887,65 @@ test("cargas simultaneas del mismo alumno no duplican identidad ni numero", asyn
 test("si falla el alta del perfil del docente tambien se revierte Authentication", async () => {
   let lecturas = 0;
   const clients = { auth: { get currentUser() { return ++lecturas === 1 ? { uid: "admin-prueba" } : null; } }, creatorAuth: creator.auth, firestore: admin.firestore };
-  await assert.rejects(createSystemUser({ nombre: "No debe quedar", username: "rollback001", password: "Temporal123", rol: "docente" }, clients), /sesion cambio/);
+  await assert.rejects(createSystemUser({ nombre: "No debe quedar", username: "rollback001", emailRecuperacion: "rollback.prueba@example.test", password: "Temporal123", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients), /sesion cambio/);
   assert.equal((await get(admin, "indice_accesos", "rollback001")).exists(), false);
   assert.equal(creator.auth.currentUser, null);
-  await assert.rejects(signInWithEmailAndPassword(creator.auth, "rollback001@usuarios.ue-nueva-bolivia.edu.bo", "Temporal123"), (error) => ["auth/user-not-found", "auth/invalid-credential"].includes(error.code));
+  await assert.rejects(signInWithEmailAndPassword(creator.auth, "rollback.prueba@example.test", "Temporal123"), (error) => ["auth/user-not-found", "auth/invalid-credential"].includes(error.code));
+});
+
+test("reemplazar crea acceso y reparte trimestres atomicamente sin borrar ni desactivar al anterior", async () => {
+  const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
+  const oldTeacher = await createSystemUser({ nombre: "Docente anterior", username: "relevoanterior", emailRecuperacion: "relevo.anterior@example.test", password: "Temporal123", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients);
+  const source = client("relevo-origen", oldTeacher.id);
+  await setDoc(ref(source, "actividades", "relevo-historico"), activity({ trimestreId: "t1", creadoPorUid: oldTeacher.id }));
+  await guardarNota(source, "relevo-nota-historica", grade({ actividadId: "relevo-historico", trimestreId: "t1", calificadoPorUid: oldTeacher.id }));
+  const before = (await get(admin, "calificaciones", "relevo-nota-historica")).data();
+  const replacement = await createSystemUser({ nombre: "Docente nuevo", username: "relevonuevo", emailRecuperacion: "relevo.nuevo@example.test", password: "Temporal123", rol: "docente", reemplazo: { docenteUid: oldTeacher.id, trimestreInicio: "t2" } }, clients);
+  const target = client("relevo-destino", replacement.id);
+  const oldAssignment = (await get(admin, "asignaciones", oldTeacher.id)).data();
+  const newAssignment = (await get(admin, "asignaciones", replacement.id)).data();
+  assert.deepEqual(oldAssignment.trimestres, ["t1"]);
+  assert.deepEqual(newAssignment.trimestres, ["t2", "t3"]);
+  assert.deepEqual(newAssignment.cursos, oldAssignment.cursos);
+  assert.equal(oldAssignment.reemplazadoPorUid, replacement.id);
+  assert.equal(newAssignment.reemplazoDeUid, oldTeacher.id);
+  assert.equal((await get(admin, "usuarios", oldTeacher.id)).data().activo, true);
+  assert.deepEqual((await get(target, "calificaciones", "relevo-nota-historica")).data(), before);
+  await denied(updateDoc(ref(target, "calificaciones", "relevo-nota-historica"), { nota: 100, valor: 100, calificadoPorUid: replacement.id }));
+  await denied(deleteDoc(ref(target, "calificaciones", "relevo-nota-historica")));
+  await denied(updateDoc(ref(target, "actividades", "relevo-historico"), { trimestreId: "t2" }));
+  await denied(setDoc(ref(source, "actividades", "relevo-invasion"), activity({ creadoPorUid: oldTeacher.id })));
+  await setDoc(ref(target, "actividades", "relevo-propia"), activity({ creadoPorUid: replacement.id }));
+  await guardarNota(target, "relevo-propia-nota", grade({ actividadId: "relevo-propia", calificadoPorUid: replacement.id }));
+  await denied(updateDoc(ref(source, "calificaciones", "relevo-propia-nota"), { valor: 90, nota: 90, calificadoPorUid: oldTeacher.id }));
+  await setDoc(ref(source, "asistencias", "relevo-asistencia-primero"), attendance({ trimestreId: "t1", registradoPorUid: oldTeacher.id }));
+  await denied(updateDoc(ref(target, "asistencias", "relevo-asistencia-primero"), { trimestreId: "t2", registradoPorUid: replacement.id }));
+  await denied(setDoc(ref(source, "asistencias", "relevo-asistencia-segundo"), attendance({ registradoPorUid: oldTeacher.id })));
+  await setDoc(ref(target, "asistencias", "relevo-asistencia-segundo"), attendance({ registradoPorUid: replacement.id }));
+  await updateDoc(ref(source, "calificaciones", "relevo-nota-historica"), { valor: 85, nota: 85 });
+  await setTeacherActive(oldTeacher.id, false, clients);
+  await denied(get(source, "actividades", "relevo-historico"));
+  await denied(updateDoc(ref(source, "calificaciones", "relevo-nota-historica"), { valor: 90, nota: 90 }));
+  assert.equal((await get(target, "calificaciones", "relevo-nota-historica")).data().nota, 85);
+  await setTeacherActive(oldTeacher.id, true, clients);
+  assert.equal((await get(source, "actividades", "relevo-historico")).exists(), true);
+  await assert.rejects(createSystemUser({ nombre: "Duplicado", username: "relevoduplicado", emailRecuperacion: "relevo.duplicado@example.test", password: "Temporal123", rol: "docente", reemplazo: { docenteUid: oldTeacher.id, trimestreInicio: "t2" } }, clients), /ya tiene un reemplazo/);
+  assert.equal((await get(admin, "indice_accesos", "relevoduplicado")).exists(), false);
+  await denied(setTeacherActive(oldTeacher.id, false, { auth: { currentUser: { uid: "docente-a" } }, firestore: teacher.firestore }));
+});
+
+test("las reglas de Inicial separan tambien los trimestres del relevo", async () => {
+  const a = client("inicial-relevo-a", "inicial-relevo-a");
+  const b = client("inicial-relevo-b", "inicial-relevo-b");
+  for (const [id, terms] of [["inicial-relevo-a", ["t1"]], ["inicial-relevo-b", ["t2", "t3"]]]) {
+    await setDoc(ref(admin, "usuarios", id), { rol: "docente", activo: true });
+    await setDoc(ref(admin, "asignaciones", id), { cursos: { inicial: { materias: [] } }, trimestres: terms });
+  }
+  const record = { cursoId: "inicial", trimestreId: "t1", tipo: "diario", fecha: "2026-03-10", alumnoId: "alumno-inicial", estado: "apoyo", descripcion: "Observacion", docenteUid: "inicial-relevo-a", updatedAt: serverTimestamp() };
+  await setDoc(ref(a, "registros_inicial", "relevo-observacion"), record);
+  await denied(setDoc(ref(b, "registros_inicial", "relevo-observacion-b"), { ...record, docenteUid: "inicial-relevo-b" }));
+  await setDoc(ref(b, "registros_inicial", "relevo-observacion-b"), { ...record, trimestreId: "t2", docenteUid: "inicial-relevo-b" });
+  await denied(updateDoc(ref(b, "registros_inicial", "relevo-observacion"), { trimestreId: "t2", docenteUid: "inicial-relevo-b", updatedAt: serverTimestamp() }));
 });
 
 test("gestiones separadas pueden tener los mismos IDs sin mezclar datos ni permisos", async () => {
@@ -622,6 +983,23 @@ test("iniciar gestion es explicito e idempotente, conserva catalogos y no copia 
   assert.deepEqual(await listarGestiones(clients), ["2026"]);
   await prepararGestion("2026", siguienteAno);
   assert.equal((await get(admin, "matriculas", "alumno-a")).data().cursoId, "cuarto_a");
+});
+
+test("actualizar un catalogo anterior separa cursos sin mover alumnos ni sobreescribir nombres de Primaria", async () => {
+  const clients = { auth: { currentUser: { uid: "admin-prueba", email: "smichmev@gmail.com" } }, firestore: admin.firestore, now: () => new Date("2026-10-06T16:00:00Z") };
+  await setDoc(doc(admin.firestore, "catalogos", "escolar"), { version: 1 });
+  await setDoc(doc(admin.firestore, "catalogos", "escolar", "cursos", "preinicial_inicial"), { nombre: "Pre Inicial - Inicial", activo: true });
+  await registrarAlumno({ id: "alumno-curso-anterior", cursoId: "preinicial_inicial" });
+  await prepararGestion("2026", clients);
+  assert.equal((await getDocFromServer(doc(admin.firestore, "catalogos", "escolar"))).data().version, 2);
+  for (const id of ["inicial", "preinicial"]) {
+    const course = (await getDocFromServer(doc(admin.firestore, "catalogos", "escolar", "cursos", id))).data();
+    assert.equal(course.activo, true);
+    assert.equal(course.modalidadEvaluacion, "cualitativa");
+  }
+  assert.equal((await getDocFromServer(doc(admin.firestore, "catalogos", "escolar", "cursos", "preinicial_inicial"))).data().activo, false);
+  assert.equal((await getDocFromServer(doc(admin.firestore, "catalogos", "escolar", "cursos", "cuarto_a"))).data().nombre, "Cuarto A personalizado");
+  assert.equal((await get(admin, "matriculas", "alumno-curso-anterior")).data().cursoId, "preinicial_inicial");
 });
 
 test("director puede cambiar el umbral, pero no gestion ni version del sistema", async () => {

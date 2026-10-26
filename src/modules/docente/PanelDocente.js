@@ -10,6 +10,7 @@ import {
   TRIMESTERS
 } from "../../services/teacherData.js";
 import { persistActiveTrimester, selectedTrimester, teacherState } from "./EstadoDocente.js";
+import { puedeRegistrarTrimestre } from "../../services/relevoDocente.js";
 import { emptyState, escapeHtml, refreshIcons, scheduleList, setHtml, setText } from "./UtilidadesDocente.js";
 
 function teacherCoursesCards(context) {
@@ -63,7 +64,7 @@ function renderDashboardTrimester(context) {
   const shortLabels = ["1ro", "2do", "3er"];
   setText("[data-teacher-active-trimester]", selectedTrimester().label);
   holder.innerHTML = TRIMESTERS.map((trimester, index) => `
-    <button type="button" data-dashboard-trimester="${trimester.id}" class="shrink-0 rounded-lg border px-2 py-1 text-[10px] font-bold transition sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs sm:font-black ${trimester.id === teacherState.trimesterId ? "border-school-green bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/40"}"><span class="sm:hidden">${shortLabels[index]}</span><span class="hidden sm:inline">${escapeHtml(trimester.label)}</span></button>
+    <button type="button" data-dashboard-trimester="${trimester.id}" ${puedeRegistrarTrimestre(context, trimester.id) ? "" : 'disabled title="Consulta este trimestre en Boletin"'} class="shrink-0 rounded-lg border px-2 py-1 text-[10px] font-bold transition disabled:opacity-40 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs sm:font-black ${trimester.id === teacherState.trimesterId ? "border-school-green bg-school-green text-white shadow-soft" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/40"}"><span class="sm:hidden">${shortLabels[index]}</span><span class="hidden sm:inline">${escapeHtml(trimester.label)}</span></button>
   `).join("");
   holder.querySelectorAll("[data-dashboard-trimester]").forEach((button) => {
     button.addEventListener("click", () => openTrimesterConfirm(button.dataset.dashboardTrimester));

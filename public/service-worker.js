@@ -1,5 +1,5 @@
 ﻿const CACHE_PREFIX = "ue-ecologica-nb";
-const CACHE_VERSION = "v1.0.4";
+const CACHE_VERSION = "v1.0.5";
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -74,6 +74,10 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (isRemoteDataRequest(url)) return;
+  if (url.pathname.endsWith("/restablecer.html") || url.searchParams.has("oobCode")) {
+    event.respondWith(fetch(request, { cache: "no-store" }));
+    return;
+  }
 
   const isLocalViteAsset = ["localhost", "127.0.0.1"].includes(url.hostname) && (
     url.pathname.startsWith("/src/") ||

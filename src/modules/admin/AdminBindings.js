@@ -5,16 +5,21 @@ import { gestionAdministrativaDisponible, validarFechaGestion } from "../../serv
 import { bindGestionEscolar } from "./GestionEscolarAdmin.js";
 import { bindGuiaRegistroAdmin } from "./InicioRegistroAdmin.js";
 import { auth } from "../../firebase/client.js";
-import { createSystemUser, listUsersByRole } from "../../services/users.js";
+import { createSystemUser, listUsersByRole, listTeachersWithAssignments, setTeacherActive } from "../../services/users.js";
+import { planificarRelevo, trimestresDeAsignacion } from "../../services/relevoDocente.js";
+import { icon } from "../../ui/dom.js";
 import { bindAlumnosAdmin } from "./AlumnosAdmin.js";
 import { listAudit, safeAudit } from "../../services/auditData.js";
+import { modalidadDeCursos, validarAsignacionesDocente } from "../../services/modalidadDocente.js";
+import { normalizarCorreoReal } from "../../services/correoCuenta.js";
 
 const state = {
   scheduleCourseId: COURSES[0].id,
   selectedSubjectId: "",
   schedule: null,
   historicalPreview: null,
-  historicalGradesPreview: null
+  historicalGradesPreview: null,
+  teachers: []
 };
 
 const roleLabels = {
@@ -50,11 +55,11 @@ function renderUserRows(role, users) {
 
   tbody.innerHTML = users.map((user) => `
     <tr>
-      <td class="px-4 py-2.5 font-medium text-slate-800">${user.nombre || "Sin nombre"}</td>
-      <td class="px-4 py-2.5 text-slate-600">${user.usuario || "-"}</td>
-      <td class="px-4 py-2.5 text-slate-600">${user.correoRecuperacion || "-"}</td>
-      <td class="px-4 py-2.5 text-slate-600">${user.rol || role}</td>
-      <td class="px-4 py-2.5"><span class="rounded-full ${user.activo === false ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"} px-2.5 py-1 text-[10px] font-medium">${user.activo === false ? "Inactivo" : "Activo"}</span></td>
+      <td class="px-4 py-2.5 font-medium text-slate-800">${escapeHtml(user.nombre || "Sin nombre")}${role === "docente" && user.asignacion ? `<span class="mt-1 block text-xs font-normal text-slate-500">${trimestresDeAsignacion(user.asignacion).map((id) => `${id.slice(1)}er`.replace("2er", "2do")).join(" · ")} trimestre</span>` : ""}</td>
+      <td class="px-4 py-2.5 text-slate-600">${escapeHtml(user.usuario || "-")}</td>
+      <td class="px-4 py-2.5 text-slate-600">${escapeHtml(user.correoRecuperacion || "-")}</td>
+      <td class="px-4 py-2.5 text-slate-600">${escapeHtml(user.rol || role)}${user.nivelDocente ? `<span class="mt-1 block text-[10px] text-school-green">${user.nivelDocente === "inicial" ? "Inicial · Cualitativa" : "Primaria · Cuantitativa"}</span>` : ""}</td>
+      <td class="px-4 py-2.5">${role === "docente" ? `<div class="flex items-center gap-3"><button type="button" role="switch" aria-checked="${user.activo !== false}" aria-label="Acceso de ${escapeHtml(user.nombre)}" title="${user.activo === false ? "Habilitar" : "Deshabilitar"} docente" data-teacher-active="${escapeHtml(user.id)}" class="relative h-6 w-11 shrink-0 rounded-full ${user.activo === false ? "bg-red-600" : "bg-green-600"}"><span class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow ${user.activo === false ? "left-0.5" : "right-0.5"}"></span></button><span class="text-xs ${user.activo === false ? "text-red-700" : "text-green-700"}">${user.activo === false ? "Inactivo" : "Activo"}</span></div>${user.asignacion && !user.asignacion.reemplazadoPorUid ? `<button type="button" data-teacher-replace="${escapeHtml(user.id)}" class="mt-2 inline-flex items-center gap-1.5 text-xs text-school-green">${icon("user-round-plus", "h-4 w-4")}Reemplazar</button>` : user.asignacion?.reemplazadoPorUid ? `<span class="mt-2 block text-xs text-slate-500">Reemplazo registrado</span>` : ""}` : `<span class="text-xs">${user.activo === false ? "Inactivo" : "Activo"}</span>`}</td>
     </tr>
   `).join("");
 }
@@ -64,8 +69,18 @@ async function refreshUsers(role) {
   if (tbody) tbody.innerHTML = `<tr><td class="px-4 py-4 font-bold text-slate-500" colspan="5">Cargando...</td></tr>`;
 
   try {
-    const users = await listUsersByRole(role);
+    const users = role === "docente" ? await listTeachersWithAssignments() : await listUsersByRole(role);
+    if (role === "docente") state.teachers = users;
     renderUserRows(role, users);
+    if (role === "docente") {
+      const select = document.querySelector('[name="reemplazoDocente"]');
+      if (select) {
+        const previous = select.value;
+        select.innerHTML = `<option value="">Seleccionar docente</option>${users.filter((user) => user.asignacion && !user.asignacion.reemplazadoPorUid).map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.nombre)} (${escapeHtml(user.usuario)})</option>`).join("")}`;
+        select.value = previous;
+      }
+      bindTeacherList();
+    }
   } catch (error) {
     if (tbody) tbody.innerHTML = `<tr><td class="px-4 py-4 font-bold text-red-600" colspan="5">No se pudo cargar la lista: ${error.message}</td></tr>`;
   }
@@ -78,7 +93,8 @@ function collectTeacherAssignments(form) {
     const checked = form.querySelector(`[data-assignment-course-check][value="${courseId}"]`)?.checked;
     if (!checked) return;
     const materias = [...panel.querySelectorAll(`[data-assignment-subject="${courseId}"]:checked`)].map((input) => input.value);
-    if (materias.length) result[courseId] = { materias };
+    if (findCourse(courseId).nivel === "inicial") result[courseId] = { materias: [] };
+    else if (materias.length) result[courseId] = { materias };
   });
   return result;
 }
@@ -100,6 +116,7 @@ function bindTeacherAssignmentBuilder(form) {
   const courseTotal = form.querySelector("[data-selected-course-total]");
   const subjectCourseTotal = form.querySelector("[data-subject-course-total]");
   let activeCourseId = "";
+  let locked = false;
 
   const selectedCourseIds = () => courseChecks.filter((input) => input.checked).map((input) => input.value);
 
@@ -117,6 +134,30 @@ function bindTeacherAssignmentBuilder(form) {
 
   const render = () => {
     const selectedIds = selectedCourseIds();
+    const qualitative = selectedIds.length > 0 && findCourse(selectedIds[0]).nivel === "inicial";
+    const selectedLevel = selectedIds.length ? findCourse(selectedIds[0]).nivel : "";
+    courseChecks.forEach((input) => {
+      input.disabled = locked || Boolean(selectedLevel && findCourse(input.value).nivel !== selectedLevel);
+      const card = form.querySelector(`[data-assignment-course-card="${input.value}"]`);
+      card?.classList.toggle("opacity-40", input.disabled && !input.checked);
+      card?.setAttribute("aria-disabled", String(input.disabled));
+    });
+    const modalityLabel = form.querySelector("[data-selected-teacher-modality]");
+    if (modalityLabel) modalityLabel.textContent = selectedLevel ? qualitative ? "Inicial y Preinicial · Modalidad cualitativa" : "Primaria · Modalidad cuantitativa" : "";
+    root.querySelector("[data-primary-assignment-fields]")?.classList.toggle("hidden", qualitative);
+    root.querySelector("[data-qualitative-assignment-info]")?.classList.toggle("hidden", !qualitative);
+    const qualitativeCourses = root.querySelector("[data-qualitative-courses]");
+    if (qualitativeCourses) qualitativeCourses.innerHTML = qualitative ? selectedIds.map((id) => `<p>${escapeHtml(findCourse(id).nombre)}</p>`).join("") : "";
+    const progressTitle = form.querySelector('[data-teacher-progress-step="3"] [data-teacher-progress-title]');
+    if (progressTitle) progressTitle.textContent = qualitative ? "Modalidad" : "Materias";
+    const stepTitle = root.querySelector("[data-assignment-step-title]");
+    const stepDetail = root.querySelector("[data-assignment-step-detail]");
+    if (stepTitle) stepTitle.textContent = qualitative ? "Modalidad del docente" : locked ? "Materias heredadas" : "Selecciona las materias";
+    if (stepDetail) stepDetail.textContent = qualitative ? "Inicial y Preinicial · Cualitativa" : locked ? "Asignacion del docente reemplazado." : "Asigna las materias que impartira en cada curso seleccionado.";
+    const courseHeading = form.querySelector("[data-assignment-course-heading]");
+    const courseDetail = form.querySelector("[data-assignment-course-detail]");
+    if (courseHeading) courseHeading.textContent = locked ? "Cursos heredados" : "Selecciona los cursos";
+    if (courseDetail) courseDetail.textContent = locked ? "Asignacion del docente reemplazado." : "Selecciona cursos de una sola modalidad.";
     if (!selectedIds.includes(activeCourseId)) activeCourseId = selectedIds[0] || "";
 
     panels.forEach((panel) => {
@@ -142,6 +183,7 @@ function bindTeacherAssignmentBuilder(form) {
     });
 
     const totalLabel = `${selectedIds.length} ${selectedIds.length === 1 ? "curso" : "cursos"}`;
+    root.querySelectorAll("[data-assignment-subject], [data-assignment-select-all], [data-assignment-clear]").forEach((input) => { input.disabled = locked; });
     if (courseTotal) courseTotal.textContent = totalLabel;
     if (subjectCourseTotal) subjectCourseTotal.textContent = totalLabel;
   };
@@ -189,6 +231,7 @@ function bindTeacherAssignmentBuilder(form) {
   });
 
   const reset = () => {
+    locked = false;
     form.querySelectorAll("[data-assignment-subject], [data-assignment-course-check]").forEach((input) => {
       input.checked = false;
     });
@@ -197,12 +240,100 @@ function bindTeacherAssignmentBuilder(form) {
   };
 
   const missingCourses = () => selectedCourseIds().filter((courseId) => {
+    if (findCourse(courseId).nivel === "inicial") return false;
     const panel = panels.find((item) => item.dataset.assignmentCourse === courseId);
     return !panel?.querySelector(`[data-assignment-subject="${courseId}"]:checked`);
   });
 
   render();
-  return { getSelectedCourseIds: selectedCourseIds, missingCourses, render, reset, setActiveCourse };
+  const assign = (assignments) => {
+    reset();
+    courseChecks.forEach((input) => { input.checked = Boolean(assignments[input.value]); });
+    root.querySelectorAll("[data-assignment-subject]").forEach((input) => {
+      input.checked = assignments[input.dataset.assignmentSubject]?.materias?.includes(input.value) || false;
+    });
+    locked = true;
+    render();
+  };
+  return { getSelectedCourseIds: selectedCourseIds, missingCourses, render, reset, setActiveCourse, assign };
+}
+
+function bindTeacherReplacement(form, builder) {
+  const fields = form.querySelector("[data-teacher-replacement-fields]");
+  const source = form.elements.namedItem("reemplazoDocente");
+  const term = form.elements.namedItem("reemplazoTrimestre");
+  if (!fields) return;
+  const update = () => {
+    const replacing = form.elements.namedItem("tipoRegistro").value === "reemplazo";
+    fields.classList.toggle("hidden", !replacing);
+    source.disabled = term.disabled = !replacing;
+    const teacher = state.teachers.find((user) => user.id === source.value);
+    builder.reset();
+    if (replacing && teacher?.asignacion) builder.assign(teacher.asignacion.cursos || teacher.asignacion.asignaciones);
+    for (const option of term.options) {
+      if (!option.value) continue;
+      try { if (replacing && teacher) planificarRelevo(teacher.asignacion, option.value); option.disabled = false; }
+      catch { option.disabled = true; }
+    }
+    if (term.selectedOptions[0]?.disabled) term.value = "";
+    const summary = form.querySelector("[data-teacher-replacement-summary]");
+    summary.textContent = "";
+    if (replacing && teacher && term.value) {
+      try {
+        const plan = planificarRelevo(teacher.asignacion, term.value);
+        summary.textContent = `${teacher.nombre} conserva ${plan.anteriores.map((id) => id.slice(1)).join(", ")} trimestre. El reemplazo registra ${plan.siguientes.map((id) => id.slice(1)).join(" y ")}. La cuenta anterior seguira activa hasta que la deshabilites.`;
+      } catch (error) { summary.textContent = error.message; }
+    }
+  };
+  form.addEventListener("change", (event) => { if (["tipoRegistro", "reemplazoDocente", "reemplazoTrimestre"].includes(event.target.name)) update(); });
+  form.replacementUpdate = update;
+}
+
+function confirmTeacherState(user, active) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "students-confirm-dialog";
+    dialog.setAttribute("aria-labelledby", "teacher-state-heading");
+    dialog.innerHTML = `<header><h2 id="teacher-state-heading">${active ? "Habilitar" : "Deshabilitar"} docente</h2></header><p><strong>${escapeHtml(user.nombre)}</strong></p><p>${active ? "Podra ingresar y trabajar en sus trimestres asignados." : "Perdera el acceso al sistema. Sus actividades, notas y asistencias se conservaran. Confirma que termino de registrar sus notas."}</p><footer><button type="button" data-cancel autofocus>Cancelar</button><button type="button" class="${active ? "students-primary-button" : "students-danger-button"}" data-confirm>Confirmar</button></footer>`;
+    document.body.appendChild(dialog);
+    const finish = (value) => { dialog.close(); dialog.remove(); resolve(value); };
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); finish(false); });
+    dialog.querySelector("[data-cancel]").onclick = () => finish(false);
+    dialog.querySelector("[data-confirm]").onclick = () => finish(true);
+    dialog.showModal();
+  });
+}
+
+function bindTeacherList() {
+  document.querySelectorAll("[data-teacher-active]").forEach((button) => {
+    button.onclick = async () => {
+      const user = state.teachers.find((item) => item.id === button.dataset.teacherActive);
+      const active = user?.activo === false;
+      if (!user) return;
+      button.disabled = true;
+      const adminUid = auth.currentUser?.uid;
+      try {
+        if (!await confirmTeacherState(user, active) || auth.currentUser?.uid !== adminUid || !button.isConnected) return;
+        await setTeacherActive(user.id, active);
+        await safeAudit({ tipo: "usuarios", accion: active ? "habilitar_docente" : "deshabilitar_docente", detalle: `${active ? "Habilito" : "Deshabilito"} a ${user.nombre}`, datos: { docenteUid: user.id } });
+        await refreshUsers("docente");
+      } catch (error) {
+        const form = document.querySelector("[data-teacher-wizard]");
+        statusFor(form, "[data-form-status]", error.message, "error");
+      } finally { button.disabled = false; }
+    };
+  });
+  document.querySelectorAll("[data-teacher-replace]").forEach((button) => {
+    button.onclick = () => {
+      const form = document.querySelector("[data-teacher-wizard]");
+      form.querySelector('[name="tipoRegistro"][value="reemplazo"]').checked = true;
+      form.elements.namedItem("reemplazoDocente").value = button.dataset.teacherReplace;
+      form.replacementUpdate();
+      form.querySelector('[data-teacher-back="1"]').click();
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
+      form.elements.namedItem("reemplazoTrimestre").focus();
+    };
+  });
 }
 
 function hideFormStatus(form) {
@@ -220,6 +351,7 @@ function renderTeacherConfirmation(form) {
   const email = String(data.get("emailRecuperacion") || "").trim();
 
   target.innerHTML = `
+    ${data.get("tipoRegistro") === "reemplazo" ? `<section class="border-l-4 border-school-green bg-green-50 p-3 text-sm text-slate-800"><strong>Reemplazo desde ${escapeHtml(form.elements.namedItem("reemplazoTrimestre").selectedOptions[0]?.textContent)}</strong><p class="mt-1">${escapeHtml(form.elements.namedItem("reemplazoDocente").selectedOptions[0]?.textContent)} conserva los trimestres anteriores y sigue activo. Las notas existentes no se modifican.</p></section>` : ""}
     <section class="rounded-lg border border-slate-200 bg-slate-50 p-4">
       <div class="flex items-center justify-between gap-3">
         <div><p class="text-[10px] font-semibold uppercase tracking-[.12em] text-school-green">Cuenta del docente</p><h3 class="mt-0.5 text-base font-semibold text-slate-900">${escapeHtml(data.get("nombre") || "-")}</h3></div>
@@ -227,7 +359,7 @@ function renderTeacherConfirmation(form) {
       </div>
       <dl class="mt-3 grid gap-2 sm:grid-cols-3">
         <div class="rounded-md bg-white px-3 py-2"><dt class="text-[9px] uppercase text-slate-400">Usuario</dt><dd class="mt-0.5 text-xs font-medium text-slate-800">${escapeHtml(data.get("username") || "-")}</dd></div>
-        <div class="rounded-md bg-white px-3 py-2"><dt class="text-[9px] uppercase text-slate-400">Recuperacion</dt><dd class="mt-0.5 break-all text-xs font-medium text-slate-800">${escapeHtml(email || "Sin correo")}</dd></div>
+        <div class="rounded-md bg-white px-3 py-2"><dt class="text-[9px] uppercase text-slate-400">Correo electronico</dt><dd class="mt-0.5 break-all text-xs font-medium text-slate-800">${escapeHtml(email)}</dd></div>
         <div class="rounded-md bg-white px-3 py-2"><dt class="text-[9px] uppercase text-slate-400">Contrasena temporal</dt><dd class="mt-0.5 text-xs font-medium text-slate-800">${escapeHtml(data.get("password") || "-")}</dd></div>
       </dl>
     </section>
@@ -237,7 +369,7 @@ function renderTeacherConfirmation(form) {
         ${Object.entries(assignments).map(([courseId, value]) => `
           <article class="rounded-lg border border-slate-100 bg-slate-50 p-3">
             <p class="text-xs font-semibold text-slate-900">${findCourse(courseId).nombre}</p>
-            <div class="mt-2 flex flex-wrap gap-1">${value.materias.map((subjectId) => {
+            <div class="mt-2 flex flex-wrap gap-1">${findCourse(courseId).nivel === "inicial" ? `<span class="text-xs text-school-green">Evaluacion cualitativa</span>` : value.materias.map((subjectId) => {
               const subject = findSubject(subjectId);
               return `<span class="rounded-md px-2 py-1 text-[9px] text-slate-700" style="background:${subject?.color || "#f1f5f9"}">${subject?.nombre || subjectId}</span>`;
             }).join("")}</div>
@@ -285,11 +417,23 @@ function bindTeacherWizard(form, assignmentBuilder) {
         if (input && typeof input.value === "string") input.value = input.value.trim();
       });
       if (!form.reportValidity()) return;
+      try { form.elements.namedItem("emailRecuperacion").value = normalizarCorreoReal(form.elements.namedItem("emailRecuperacion").value); }
+      catch (error) { statusFor(form, "[data-form-status]", error.message, "error"); return; }
+      if (form.elements.namedItem("tipoRegistro").value === "reemplazo") {
+        try {
+          const teacher = state.teachers.find((user) => user.id === form.elements.namedItem("reemplazoDocente").value);
+          planificarRelevo(teacher?.asignacion, form.elements.namedItem("reemplazoTrimestre").value);
+        } catch (error) { statusFor(form, "[data-form-status]", error.message, "error"); return; }
+      }
     }
 
     if (currentStep === 2 && !assignmentBuilder?.getSelectedCourseIds().length) {
       statusFor(form, "[data-form-status]", "Selecciona al menos un curso para continuar.", "error");
       return;
+    }
+    if (currentStep === 2) {
+      try { modalidadDeCursos(assignmentBuilder.getSelectedCourseIds()); }
+      catch (error) { statusFor(form, "[data-form-status]", error.message, "error"); return; }
     }
 
     if (currentStep === 3) {
@@ -340,7 +484,7 @@ function bindTeacherWizard(form, assignmentBuilder) {
           <div><p class="text-[9px] uppercase text-slate-400">Docente</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${escapeHtml(createdUser.nombre || "-")}</p></div>
           <div><p class="text-[9px] uppercase text-slate-400">Usuario</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${escapeHtml(createdUser.usuario || "-")}</p></div>
           <div><p class="text-[9px] uppercase text-slate-400">Contrasena temporal</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${escapeHtml(password || "-")}</p></div>
-          <div><p class="text-[9px] uppercase text-slate-400">Asignacion</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${Object.keys(assignments).length} curso(s) · ${subjectCount} materia(s)</p></div>
+          <div><p class="text-[9px] uppercase text-slate-400">Asignacion</p><p class="mt-0.5 text-xs font-semibold text-slate-900">${Object.keys(assignments).length} curso(s) · ${createdUser.nivelDocente === "inicial" ? "Cualitativa" : `${subjectCount} materia(s)`}</p></div>
         </div>`;
     }
     setStep(5);
@@ -357,6 +501,7 @@ function assignmentSummary(assignments) {
 function bindCreateForms() {
   document.querySelectorAll("[data-create-user-form]").forEach((form) => {
     const assignmentBuilder = form.dataset.role === "docente" ? bindTeacherAssignmentBuilder(form) : null;
+    if (assignmentBuilder) bindTeacherReplacement(form, assignmentBuilder);
     const teacherWizard = form.dataset.role === "docente" ? bindTeacherWizard(form, assignmentBuilder) : null;
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -370,6 +515,10 @@ function bindCreateForms() {
         statusFor(form, "[data-form-status]", "Selecciona al menos un curso y una materia para el docente.", "error");
         return;
       }
+      if (role === "docente") {
+        try { validarAsignacionesDocente(assignments); }
+        catch (error) { statusFor(form, "[data-form-status]", error.message, "error"); return; }
+      }
 
       button.disabled = true;
       statusFor(form, "[data-form-status]", "Creando usuario...");
@@ -381,14 +530,17 @@ function bindCreateForms() {
           emailRecuperacion: data.get("emailRecuperacion"),
           password: data.get("password"),
           rol: role,
-          asignaciones: assignments
+          asignaciones: assignments,
+          reemplazo: role === "docente" && data.get("tipoRegistro") === "reemplazo" ? {
+            docenteUid: data.get("reemplazoDocente"), trimestreInicio: data.get("reemplazoTrimestre")
+          } : null
         });
         await safeAudit({
           tipo: "usuarios",
           accion: `crear_${role}`,
           detalle: role === "docente" ? `Creo docente ${createdUser.nombre} con asignacion` : `Creo usuario ${role}: ${createdUser.nombre}`,
           datos: role === "docente"
-            ? { rol: role, usuario: createdUser.usuario, nombre: createdUser.nombre, asignacion: assignmentSummary(assignments) }
+            ? { rol: role, usuario: createdUser.usuario, nombre: createdUser.nombre, asignacion: assignmentSummary(assignments), ...(data.get("tipoRegistro") === "reemplazo" ? { reemplazoDeUid: data.get("reemplazoDocente"), trimestreInicio: data.get("reemplazoTrimestre") } : {}) }
             : { rol: role, usuario: createdUser.usuario, nombre: createdUser.nombre }
         });
         if (role === "docente") {

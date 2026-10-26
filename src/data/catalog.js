@@ -1,12 +1,21 @@
 ﻿export const COURSES = [
-  { id: "preinicial_inicial", nombre: "Pre Inicial - Inicial", corto: "Inicial", orden: 0 },
+  { id: "preinicial", nombre: "Preinicial", corto: "Preinicial", orden: -1, nivel: "inicial", modalidadEvaluacion: "cualitativa" },
+  { id: "inicial", nombre: "Inicial", corto: "Inicial", orden: 0, nivel: "inicial", modalidadEvaluacion: "cualitativa" },
   { id: "primero_a", nombre: "Primero A", corto: "1ro", orden: 1 },
   { id: "segundo_a", nombre: "Segundo A", corto: "2do", orden: 2 },
   { id: "tercero_a", nombre: "Tercero A", corto: "3ro", orden: 3 },
   { id: "cuarto_a", nombre: "Cuarto A", corto: "4to", orden: 4 },
   { id: "quinto_a", nombre: "Quinto A", corto: "5to", orden: 5 },
   { id: "sexto_a", nombre: "Sexto A", corto: "6to", orden: 6 }
-];
+].map((course) => ({ nivel: "primaria", modalidadEvaluacion: "cuantitativa", ...course }));
+
+export const INITIAL_COURSES = COURSES.filter((course) => course.nivel === "inicial");
+export const PRIMARY_COURSES = COURSES.filter((course) => course.nivel === "primaria");
+export const LEGACY_INITIAL_COURSE_ID = "preinicial_inicial";
+
+export function isQualitativeCourse(courseId) {
+  return INITIAL_COURSES.some((course) => course.id === courseId);
+}
 
 export const SUBJECTS = [
   { id: "matematica", nombre: "Matematica", corto: "Mat", color: "#f8c7c7" },
@@ -49,11 +58,14 @@ export const INITIAL_PERIODS = [
 ];
 
 export function periodsForCourse(courseId) {
-  return courseId === "preinicial_inicial" ? INITIAL_PERIODS : PRIMARY_PERIODS;
+  return isQualitativeCourse(courseId) || courseId === LEGACY_INITIAL_COURSE_ID ? INITIAL_PERIODS : PRIMARY_PERIODS;
 }
 
 export function findCourse(courseId) {
-  return COURSES.find((course) => course.id === courseId) || COURSES[0];
+  return COURSES.find((course) => course.id === courseId) || {
+    id: courseId, nombre: courseId === LEGACY_INITIAL_COURSE_ID ? "Pre Inicial - Inicial (anterior)" : "Curso desconocido",
+    corto: "Por revisar", nivel: "pendiente", modalidadEvaluacion: "pendiente", requiereRevision: true
+  };
 }
 
 export function findSubject(subjectId) {

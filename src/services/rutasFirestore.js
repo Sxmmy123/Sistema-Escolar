@@ -4,7 +4,7 @@ import { estadoRegistroEscolar } from "./registroEscolar.js";
 
 export const VERSION_MODELO = 2;
 const COLECCIONES_GESTION = new Set([
-  "matriculas", "asignaciones", "horarios", "actividades", "asistencias", "calificaciones", "comunicados"
+  "matriculas", "asignaciones", "horarios", "actividades", "asistencias", "calificaciones", "comunicados", "registros_inicial", "actividades_inicial", "cursos"
 ]);
 let configuracion = { gestionActivaId: gestionDelCalendario(), versionModelo: 0 };
 

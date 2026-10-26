@@ -22,6 +22,7 @@ function aplicacion(importadorEspecial = {}) {
   const vinculados = [];
   const desmontados = [];
   const errores = [];
+  const snapshots = new Map();
   const modulos = Object.fromEntries(roles.map((rol) => [rol, {
     rutas: Object.fromEntries([`/${rol}`, `/${rol}/notas`, `/${rol}/asistencia`, `/${rol}/boleta`].map((ruta) => [ruta, () => `Pantalla ${ruta}`])),
     actualizarIconos() {},
@@ -36,9 +37,12 @@ function aplicacion(importadorEspecial = {}) {
   const clases = { remove() {}, toggle() {}, contains: () => false };
   const contexto = vm.createContext({
     AbortController, console: { error: (...args) => errores.push(args), warn() {} },
-    window: { location: { hash: "#/", reload() {} }, addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
+    window: { location: { hash: "#/", reload() {} }, addEventListener() {}, dispatchEvent() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
     document: { body: { classList: clases }, documentElement: { classList: clases }, querySelector: () => null, querySelectorAll: () => [], addEventListener() {} },
-    sessionStorage: { setItem() {}, clear() {} },
+    sessionStorage: { setItem() {}, removeItem() {}, clear() {} },
+    Event, claveCache: (...parts) => parts.join(":"), gestionActual: () => configuracion.gestionActivaId,
+    doc: (_, ...parts) => ({ path: parts.join("/") }),
+    onSnapshot: (ref, callback) => { snapshots.set(ref.path, callback); return () => snapshots.delete(ref.path); },
     auth, firestore: {}, VERSION_MODELO: 2,
     crearCargaPorRol: () => crearCargaPorRol(importadores),
     createIcons() {}, LogIn: {}, registerServiceWorker() {}, bindRegistroDocente() {},
@@ -60,7 +64,7 @@ function aplicacion(importadorEspecial = {}) {
   // Ejecuta el router real sustituyendo solamente sus dependencias externas.
   vm.runInContext(codigoPrincipal.replace(/^import .*;\r?$/gm, ""), contexto);
   return {
-    modulos, descargados, vinculados, desmontados, errores,
+    modulos, descargados, vinculados, desmontados, errores, snapshots,
     html: () => html,
     async sesion(rol, uid = rol) {
       auth.currentUser = rol ? { uid, email: `${rol}@example.test`, rol } : null;
@@ -256,6 +260,34 @@ test("el cambio de sesion desmonta los listeners del rol anterior", async () => 
   assert.deepEqual(app.desmontados, ["docente"]);
 });
 
+test("el router espera a identificar la modalidad antes de elegir las rutas docentes", async () => {
+  const app = aplicacion();
+  app.modulos.docente.rutas = {};
+  app.modulos.docente.preparar = async () => {
+    app.modulos.docente.rutas = { "/docente": () => "Panel cualitativo" };
+  };
+  app.fijarRuta("/docente");
+  await app.sesion("docente");
+  await app.render();
+  assert.equal(app.html(), "Panel cualitativo");
+  assert.deepEqual(app.errores, []);
+});
+
+test("cerrar sesion durante la preparacion de modalidad no muestra el panel anterior", async () => {
+  const pending = diferida();
+  const app = aplicacion();
+  app.modulos.docente.preparar = () => pending.promesa;
+  app.fijarRuta("/docente");
+  await app.sesion("docente");
+  const loading = app.render();
+  await app.sesion(null);
+  await app.navegar("/");
+  pending.resolver();
+  await loading;
+  assert.equal(app.html(), "Pantalla login");
+  assert.deepEqual(app.vinculados, []);
+});
+
 test("el router muestra reintento sin expulsar al usuario por un error de descarga", async () => {
   let intentos = 0;
   const app = aplicacion({ alumno: (modulo) => {
@@ -269,4 +301,33 @@ test("el router muestra reintento sin expulsar al usuario por un error de descar
   await app.render();
   assert.equal(app.html(), "Pantalla /alumno");
   assert.equal(app.ruta(), "#/alumno");
+});
+
+test("deshabilitar un docente cierra su sesion abierta y retira las suscripciones privadas", async () => {
+  const app = aplicacion();
+  app.fijarRuta("/docente");
+  await app.sesion("docente", "docente-a");
+  assert.equal(app.snapshots.size, 2);
+  app.snapshots.get("usuarios/docente-a")({ exists: () => true, data: () => ({ activo: false }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(app.html(), "Pantalla login");
+  assert.equal(app.snapshots.size, 0);
+});
+
+test("los cambios de asignacion actualizan la pantalla sin descargar otro rol", async () => {
+  const app = aplicacion();
+  let preparations = 0;
+  app.modulos.docente.preparar = async () => { preparations++; };
+  app.fijarRuta("/docente");
+  await app.sesion("docente", "docente-a");
+  const before = preparations;
+  const callback = app.snapshots.get("gestiones/2026/asignaciones/docente-a");
+  callback({ data: () => ({ trimestres: ["t1"] }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(preparations, before + 1);
+  callback({ data: () => ({ trimestres: ["t1"] }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(preparations, before + 1);
+  assert.deepEqual(app.descargados, ["docente"]);
+  assert.deepEqual(app.errores, []);
 });

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asistencia guiada Primaria - prueba aislada</title>
+</head>
+<body class="bg-slate-50">
+  <main class="p-5">
+    <h1 class="text-xl font-semibold">Asistencia</h1>
+    <p class="mt-2">Cuarto A - 1er trimestre</p>
+    <div style="height:420px" aria-hidden="true"></div>
+    <button type="button" class="rounded border bg-white px-4 py-2" data-open-guide disabled>Modo guiado</button>
+    <div data-guide-fixture></div>
+  </main>
+  <script type="module">
+    import "/src/styles.css";
+    import { guidedAttendanceModal } from "/src/modules/docente/AsistenciaDocente.js";
+    import { teacherState } from "/src/modules/docente/EstadoDocente.js";
+    import { refreshIcons } from "/src/modules/docente/UtilidadesDocente.js";
+    // Prueba visual aislada: no guarda asistencia ni consulta alumnos reales.
+    const course = { nombre: "Cuarto A" };
+    const students = [{ id: "a", nombre: "ALVAREZ LOPEZ ANA" }, { id: "b", nombre: "ROJAS VILLCA MARIA FERNANDA" }];
+    teacherState.attendanceMode = "lista"; teacherState.trimesterId = "t1"; teacherState.guidedIndex = 0;
+    const host = document.querySelector("[data-guide-fixture]");
+    const render = () => { host.innerHTML = guidedAttendanceModal(course, students, {}); refreshIcons(); };
+    document.querySelector("[data-open-guide]").addEventListener("click", () => { teacherState.attendanceMode = "guia"; render(); });
+    host.addEventListener("click", (event) => {
+      if (event.target.closest("[data-guided-close]") || event.target.matches("[data-guided-modal]")) teacherState.attendanceMode = "lista";
+      else if (event.target.closest("[data-guided-next]")) teacherState.guidedIndex = Math.min(students.length - 1, teacherState.guidedIndex + 1);
+      else if (event.target.closest("[data-guided-prev]")) teacherState.guidedIndex = Math.max(0, teacherState.guidedIndex - 1);
+      else return;
+      render();
+    });
+    render(); document.querySelector("[data-open-guide]").disabled = false;
+  </script>
+</body>
+</html>

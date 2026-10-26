@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocs, serverTimestamp, writeBatch } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
-import { COURSES, SUBJECTS } from "../data/catalog.js";
+import { COURSES, SUBJECTS, LEGACY_INITIAL_COURSE_ID } from "../data/catalog.js";
 import { establecerConfiguracion, validarGestion, VERSION_MODELO } from "./rutasFirestore.js";
 import { gestionDelCalendario } from "./fechaEscolar.js";
 
@@ -40,7 +40,7 @@ export async function prepararGestion(gestionId, clients = { auth, firestore }) 
   const datos = { limiteFaltasDirector: 4, ...(sistema.exists() ? sistema.data() : {}), gestionActivaId: gestion, versionModelo: VERSION_MODELO };
   if (gestion < calendario && !anual.exists()) throw new Error("Solo puedes seleccionar gestiones anteriores que ya estan registradas.");
   if (sistema.exists() && sistema.data().gestionActivaId === gestion && sistema.data().versionModelo === VERSION_MODELO &&
-      institucion.exists() && catalogo.exists() && anual.exists() && anual.data().ano === Number(gestion) && perfil.exists()) {
+      institucion.exists() && catalogo.exists() && catalogo.data().version >= 2 && anual.exists() && anual.data().ano === Number(gestion) && perfil.exists()) {
     if (clients.auth.currentUser?.uid !== uid) throw new Error("La sesion cambio. Vuelve a ingresar.");
     return establecerConfiguracion({ ...datos, gestionHabilitada: true });
   }
@@ -58,9 +58,17 @@ export async function prepararGestion(gestionId, clients = { auth, firestore }) 
   });
   if (!anual.exists() || anual.data().ano !== Number(gestion)) batch.set(doc(db, "gestiones", gestion), { ano: Number(gestion), ...(!anual.exists() ? { createdAt: serverTimestamp(), createdBy: uid } : {}) }, { merge: true });
   if (!catalogo.exists()) {
-    batch.set(doc(db, "catalogos", "escolar"), { version: 1, createdAt: serverTimestamp() });
+    batch.set(doc(db, "catalogos", "escolar"), { version: 2, createdAt: serverTimestamp() });
     for (const curso of COURSES) batch.set(doc(db, "catalogos", "escolar", "cursos", curso.id), { ...curso, activo: true });
     for (const [orden, materia] of SUBJECTS.entries()) batch.set(doc(db, "catalogos", "escolar", "materias", materia.id), { ...materia, orden, activo: true });
+  } else if (catalogo.data().version < 2 || !catalogo.data().version) {
+    batch.set(doc(db, "catalogos", "escolar"), { version: 2, updatedAt: serverTimestamp() }, { merge: true });
+    for (const curso of COURSES) {
+      const metadata = curso.nivel === "inicial" ? { ...curso, activo: true } : { nivel: curso.nivel, modalidadEvaluacion: curso.modalidadEvaluacion };
+      batch.set(doc(db, "catalogos", "escolar", "cursos", curso.id), metadata, { merge: true });
+    }
+    // Retain the combined course for explicit review; never move its enrollments automatically.
+    batch.set(doc(db, "catalogos", "escolar", "cursos", LEGACY_INITIAL_COURSE_ID), { activo: false, requiereRevision: true }, { merge: true });
   }
   if (clients.auth.currentUser?.uid !== uid) throw new Error("La sesion cambio. Vuelve a ingresar.");
   await batch.commit();
