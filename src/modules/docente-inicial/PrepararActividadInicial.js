@@ -2,6 +2,7 @@ import { SUBJECTS, findSubject } from "../../data/catalog.js";
 import { dimensionesActividad, opcionesActividad, etiquetasOpcionesActividad, validarCriteriosActividad } from "../../services/modeloActividadesInicial.js";
 import { validarBorradorCriterios } from "../../../functions/criterios-core.js";
 import { e, icon } from "./ComponentesInicial.js";
+import { cursoActividadInicial } from "../../services/grupoInicial.js";
 
 export function abrirPreparacionActividad({ state, data, activity, dialog, run, assertWritable, generate, refreshIcons, drafts }) {
   const key = JSON.stringify([state.courseId, state.termId, activity?.id || "nueva"]);
@@ -11,7 +12,7 @@ export function abrirPreparacionActividad({ state, data, activity, dialog, run, 
     draft = { id: activity?.id || data.nuevoId(), materiaId: activity?.materiaId || SUBJECTS[0].id, titulo: activity?.titulo || "", descripcion: activity?.descripcion || "", prioritaria: activity?.prioritaria ?? true, criterios: activity?.criterios || null, dimension: "ser", step: locked ? "criterios" : "datos" };
     drafts.set(key, draft);
   }
-  const scope = { cursoId: state.courseId, trimestreId: state.termId };
+  const scope = { cursoId: cursoActividadInicial(state, activity), trimestreId: state.termId };
   let busy = false, error = "";
   const modal = dialog(existing ? "Criterios de la actividad" : "Nueva actividad", '<div data-activity-wizard></div>');
   modal.host.querySelector(".initial-dialog").classList.add("initial-activity-wizard");

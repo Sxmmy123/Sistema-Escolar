@@ -3,6 +3,7 @@ import { getSchedule } from "../../services/adminData.js";
 import { listarRegistrosInicial, guardarRegistroInicial, editarBitacoraInicial, nuevoIdRegistroInicial } from "../../services/registrosInicial.js";
 import { cursoInicial } from "../../services/modeloInicial.js";
 import { listarActividadesInicial, modificarActividadInicial, moverActividadInicial, guardarAvanceInicial } from "../../services/actividadesInicial.js";
+import { GRUPO_INICIAL, cursosGrupoInicial, esMultigradoInicial } from "../../services/grupoInicial.js";
 
 export function crearDatosInicial(context, dependencies = {}) {
   const services = { getTeacherStudents, listAttendanceForCourseDate, saveAttendance, getSchedule, listarRegistrosInicial, guardarRegistroInicial, editarBitacoraInicial, nuevoIdRegistroInicial, listarActividadesInicial, modificarActividadInicial, moverActividadInicial, guardarAvanceInicial, ...dependencies };
@@ -11,9 +12,36 @@ export function crearDatosInicial(context, dependencies = {}) {
   const versions = new Map();
   let active = true;
   const key = (type, courseId, term = "", date = "") => JSON.stringify([type, courseId, term, date]);
-  const check = (courseId) => { if (!active) throw new Error("La sesion cambio."); cursoInicial(context, courseId); };
+  const check = (courseId) => {
+    if (!active) throw new Error("La sesion cambio.");
+    if (courseId === GRUPO_INICIAL && esMultigradoInicial(context)) cursosGrupoInicial(context).forEach((id) => cursoInicial(context, id));
+    else cursoInicial(context, courseId);
+  };
+  function combine(type, values) {
+    if (values.some((value) => value === undefined)) return undefined;
+    if (type === "schedule") return values.find((value) => Object.keys(value?.clases || {}).length) || values[0];
+    if (type === "attendance") return Object.assign({}, ...values);
+    const courses = cursosGrupoInicial(context);
+    const rows = values.flatMap((items, index) => type === "students" ? items.map((student) => ({ ...student, cursoId: courses[index] })) : items);
+    return [...new Map(rows.map((item) => [item.id, item])).values()];
+  }
+  function read(type, courseId, term = "", date = "") {
+    if (courseId !== GRUPO_INICIAL) return cache.get(key(type, courseId, term, date));
+    return combine(type, cursosGrupoInicial(context).map((id) => cache.get(key(type, id, term, date))));
+  }
+  function studentCourse(courseId, studentId) {
+    if (courseId !== GRUPO_INICIAL) return courseId;
+    const course = cursosGrupoInicial(context).find((id) => cache.get(key("students", id))?.some((student) => student.id === studentId));
+    if (!course) throw new Error("El estudiante no pertenece al grupo multigrado cargado.");
+    return course;
+  }
   async function load(type, courseId, term, date, force = false) {
     check(courseId);
+    if (courseId === GRUPO_INICIAL) {
+      const values = await Promise.all(cursosGrupoInicial(context).map((id) => load(type, id, term, date, force)));
+      check(courseId);
+      return combine(type, values);
+    }
     const id = key(type, courseId, term, date);
     if (pending.has(id)) {
       const entry = pending.get(id);
@@ -51,23 +79,28 @@ export function crearDatosInicial(context, dependencies = {}) {
   }
   return {
     nuevoId: () => services.nuevoIdRegistroInicial(context.uid),
-    leer: (type, courseId, term = "", date = "") => cache.get(key(type, courseId, term, date)),
+    leer: read,
     cargar: (type, courseId, term = "", date = "", force = false) => load(type, courseId, term, date, force),
     async guardarActividad(input) {
-      check(input.cursoId); const row = await services.modificarActividadInicial(context, input); check(input.cursoId);
-      merge("activities", input.cursoId, input.trimestreId, [row]); return row;
+      check(input.cursoId);
+      const courseId = input.cursoId === GRUPO_INICIAL ? read("activities", GRUPO_INICIAL, input.trimestreId)?.find((item) => item.id === input.id)?.cursoId || cursosGrupoInicial(context)[0] : input.cursoId;
+      const row = await services.modificarActividadInicial(context, { ...input, cursoId: courseId }); check(courseId);
+      merge("activities", courseId, input.trimestreId, [row]); return row;
     },
     async moverActividad(activity, neighbor) {
       check(activity.cursoId); const rows = await services.moverActividadInicial(context, activity, neighbor); check(activity.cursoId);
-      merge("activities", activity.cursoId, activity.trimestreId, rows);
+      for (const row of rows) merge("activities", row.cursoId || activity.cursoId, activity.trimestreId, [row]);
     },
     async guardarAvance(activity, studentId, entries) {
-      check(activity.cursoId); const result = await services.guardarAvanceInicial(context, activity, studentId, entries); check(activity.cursoId);
+      check(activity.cursoId);
+      const courseId = esMultigradoInicial(context) ? studentCourse(GRUPO_INICIAL, studentId) : activity.cursoId;
+      const result = await services.guardarAvanceInicial(context, activity, studentId, entries, { cursoAlumnoId: courseId }); check(courseId);
       merge("activities", activity.cursoId, activity.trimestreId, [result.activity]);
-      merge("records", activity.cursoId, activity.trimestreId, result.records); return result;
+      merge("records", courseId, activity.trimestreId, result.records); return result;
     },
     async guardarAsistencia(courseId, student, date, term, state, observation) {
       check(courseId);
+      courseId = studentCourse(courseId, student.id);
       const record = await services.saveAttendance({ course: cursoInicial(context, courseId), student, fecha: date, trimestreId: term, estado: state, observacion: observation });
       check(courseId);
       const id = key("attendance", courseId, term, date);
@@ -77,9 +110,10 @@ export function crearDatosInicial(context, dependencies = {}) {
     },
     async guardarRegistro(input) {
       check(input.cursoId);
-      const result = await services.guardarRegistroInicial(context, input);
-      check(input.cursoId);
-      merge("records", input.cursoId, input.trimestreId, [result]);
+      const courseId = studentCourse(input.cursoId, input.alumnoId);
+      const result = await services.guardarRegistroInicial(context, { ...input, cursoId: courseId });
+      check(courseId);
+      merge("records", courseId, input.trimestreId, [result]);
       return result;
     },
     async editarBitacora(input) {

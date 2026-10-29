@@ -843,7 +843,21 @@ test("habilitar criterios los fija; guardar avances es atomico y permite corregi
   await denied(updateDoc(ref(initialTeacher, "registros_inicial", corrected.records[0].id), { opinion: "Nota inventada", updatedAt: serverTimestamp() }));
   await denied(updateDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id), { criterios: { ...activityCriteria, ser: { ...activityCriteria.ser, criterio: "Cambiar significado" } }, updatedAt: serverTimestamp() }));
 });
-test("avance no admite alumnos de otro curso ni ausencia de criterios ni notas numericas", async () => {
+test("multigrado comparte una actividad sin cambiar la matricula ni mezclar los registros de cada curso", async () => {
+  const shared = await guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-preinicial", { ser: { valoracion: "logrado" }, saber: { valoracion: "en_proceso" }, hacer: { valoracion: "logrado" } }, { ...initialClients, cursoAlumnoId: "preinicial" });
+  assert.equal(shared.records.length, 3);
+  assert.ok(shared.records.every((record) => record.cursoId === "preinicial" && record.actividadId === qualitativeActivity.id));
+  assert.equal((await get(initialTeacher, "matriculas", "alumno-preinicial")).data().cursoId, "preinicial");
+  const initialRows = await listarRegistrosInicial(initialContext, "inicial", "t1", initialClients);
+  const preinitialRows = await listarRegistrosInicial(initialContext, "preinicial", "t1", initialClients);
+  assert.ok(initialRows.every((record) => record.alumnoId !== "alumno-preinicial"));
+  assert.ok(preinitialRows.some((record) => record.id === shared.records[0].id));
+  const limited = { ...initialContext, courses: [findCourse("inicial")] };
+  await assert.rejects(guardarAvanceInicial(limited, qualitativeActivity, "alumno-preinicial", { ser: { valoracion: "logrado" } }, { ...initialClients, cursoAlumnoId: "preinicial" }));
+  await denied(guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-a", { ser: { valoracion: "logrado" } }, { ...initialClients, cursoAlumnoId: "inicial" }));
+});
+
+test("avance exige el curso real del alumno y no admite ausencia de criterios ni notas numericas", async () => {
   await denied(guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-preinicial", { ser: { valoracion: "logrado" } }, initialClients));
   await assert.rejects(guardarAvanceInicial(initialContext, otherQualitativeActivity, "alumno-inicial", { ser: { valoracion: "logrado" } }, initialClients));
   const id = idAvanceInicial(initialContext.uid, qualitativeActivity.id, "alumno-inicial", "ser");
@@ -917,7 +931,7 @@ test("la bitacora semanal admite curso y alumno y usa una sola entrada por seman
   assert.equal(first.id, second.id);
   assert.equal(second.fecha, "2026-03-09");
   await guardarRegistroInicial(initialContext, initialRecord({ tipo: "semanal", cursoId: "preinicial", alumnoId: "alumno-preinicial" }), initialClients);
-  assert.equal((await listarRegistrosInicial(initialContext, "preinicial", "t1", initialClients)).length, 1);
+  assert.equal((await listarRegistrosInicial(initialContext, "preinicial", "t1", initialClients)).filter((record) => record.tipo === "semanal").length, 1);
 });
 test("los registros cualitativos rechazan otro curso, alumno incorrecto, estados inventados y puntajes", async () => {
   for (const changes of [{ cursoId: "cuarto_a", alumnoId: "alumno-a" }, { alumnoId: "alumno-preinicial" }, { alumnoId: "inexistente" }, { estado: "80" }, { nota: 100 }, { valor: 90 }, { descripcion: "x".repeat(1501) }, { fecha: "2027-03-10" }, { docenteUid: "docente-a" }]) await denied(setDoc(ref(initialTeacher, "registros_inicial", "registro-no-valido"), initialRecord(changes)));

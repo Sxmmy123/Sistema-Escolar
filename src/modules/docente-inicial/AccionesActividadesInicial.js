@@ -25,7 +25,7 @@ export function crearAccionesActividades({ state, data, dialog, draw, run, asser
         assertWritable(); await data.guardarAvance(activity, student.id, snapshot);
         for (const key of Object.keys(snapshot)) if (JSON.stringify(draft[key]) === JSON.stringify(snapshot[key])) delete draft[key];
         if (!current()) return;
-        const next = siguientePasoRegistroInicial(data.leer("records", activity.cursoId, activity.trimestreId) || [], activity.id, alumnosInicial(state), student.id, dimension);
+        const next = siguientePasoRegistroInicial(data.leer("records", state.courseId, activity.trimestreId) || [], activity.id, alumnosInicial(state), student.id, dimension);
         state.studentId = next.studentId; state.dimension = next.dimension;
       } finally { state.autoSaving = false; }
     }, "Avance guardado automaticamente.");

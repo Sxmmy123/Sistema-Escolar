@@ -33,6 +33,12 @@ npm run build
 
 ## Notas
 
+### Inicial y Preinicial multigrado
+
+Cuando una misma docente tiene asignados Inicial y Preinicial, su trabajo se presenta como un solo grupo: Panel, Asistencia, Actividades, Registro, Bitacora y Horario. Las actividades de cualquiera de ambos cursos son comunes al grupo y se crean una sola vez; conservan su identificador y curso de origen para no migrar ni duplicar documentos existentes.
+
+Cada alumno conserva su matricula. Las asistencias, valoraciones de SER/SABER/HACER y comentarios se guardan con el curso real del alumno, aunque la actividad compartida tenga otro curso de origen. Seguimiento e Informe trimestral mantienen la seleccion de curso, y la generacion e impresion de informes usan solamente los alumnos y registros del curso seleccionado. Una docente con un solo curso conserva su funcionamiento individual; no se agrupa Primaria.
+
 ### Gemini en desarrollo y GitHub Pages
 
 La demostracion publicada conecta directamente el navegador con Gemini, sin Cloud Functions ni Blaze. En GitHub > Settings > Secrets and variables > Actions > Variables se configuran `VITE_GEMINI_API_KEY` y `VITE_GEMINI_MODEL`. Al volver a publicar, Pages compila esos valores en la aplicacion y habilita la generacion de criterios e informes. No basta con modificar `.env.local` en el equipo.

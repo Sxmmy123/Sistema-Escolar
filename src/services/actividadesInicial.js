@@ -50,19 +50,21 @@ export async function modificarActividadInicial(context, input, { db = firestore
 }
 export async function moverActividadInicial(context, activity, neighbor, { db = firestore, authClient = auth } = {}) {
   check(context, activity.cursoId, activity.trimestreId, authClient);
+  check(context, neighbor.cursoId, activity.trimestreId, authClient);
   const refs = [activity, neighbor].map((item) => documentoGestion(db, "actividades_inicial", item.id));
   let result;
   await runTransaction(db, async (tx) => {
     const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
     const rows = snapshots.map((item) => item.data());
-    if (rows.some((item, index) => !item || item.docenteUid !== context.uid || item.cursoId !== activity.cursoId || item.trimestreId !== activity.trimestreId || item.estado === "eliminada" || item.orden !== [activity, neighbor][index].orden)) throw new Error("El orden cambio. Actualiza la lista antes de moverla.");
+    if (rows.some((item, index) => !item || item.docenteUid !== context.uid || item.cursoId !== [activity, neighbor][index].cursoId || item.trimestreId !== activity.trimestreId || item.estado === "eliminada" || item.orden !== [activity, neighbor][index].orden)) throw new Error("El orden cambio. Actualiza la lista antes de moverla.");
     result = rows.map((row, index) => ({ id: refs[index].id, ...row, orden: rows[1 - index].orden, updatedAt: Timestamp.now() }));
     refs.forEach((ref, index) => tx.update(ref, { orden: result[index].orden, updatedAt: serverTimestamp() }));
   });
   check(context, activity.cursoId, activity.trimestreId, authClient); return result;
 }
-export async function guardarAvanceInicial(context, activity, studentId, entries, { db = firestore, authClient = auth } = {}) {
+export async function guardarAvanceInicial(context, activity, studentId, entries, { db = firestore, authClient = auth, cursoAlumnoId = activity.cursoId } = {}) {
   check(context, activity.cursoId, activity.trimestreId, authClient);
+  check(context, cursoAlumnoId, activity.trimestreId, authClient);
   if (!studentId || studentId.includes("/")) throw new Error("Selecciona un estudiante.");
   const changes = Object.entries(entries);
   if (!changes.length || changes.some(([dimension, entry]) => !dimensionesActividad.includes(dimension) || !opcionesActividad.includes(entry.valoracion) || String(entry.descripcion || "").length > 1000)) throw new Error("Selecciona una valoracion valida.");
@@ -75,7 +77,7 @@ export async function guardarAvanceInicial(context, activity, studentId, entries
     const refs = changes.map(([dimension]) => documentoGestion(db, "registros_inicial", idAvanceInicial(context.uid, activity.id, studentId, dimension)));
     const previous = await Promise.all(refs.map((item) => tx.get(item)));
     const rows = changes.map(([dimension, entry], index) => ({
-      tipo: "actividad", actividadId: activity.id, actividadTitulo: current.titulo, alumnoId: studentId, cursoId: current.cursoId, trimestreId: current.trimestreId, materiaId: current.materiaId, docenteUid: context.uid,
+      tipo: "actividad", actividadId: activity.id, actividadTitulo: current.titulo, alumnoId: studentId, cursoId: cursoAlumnoId, trimestreId: current.trimestreId, materiaId: current.materiaId, docenteUid: context.uid,
       dimension, criterio: criteria[dimension].criterio, valoracion: entry.valoracion, opinion: criteria[dimension].opciones[entry.valoracion], descripcion: String(entry.descripcion || "").trim(),
       createdAt: previous[index].data()?.createdAt || serverTimestamp(), updatedAt: serverTimestamp()
     }));

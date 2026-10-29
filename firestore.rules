@@ -327,7 +327,7 @@ service cloud.firestore {
             data.createdAt is timestamp && data.alumnoId != "" && data.descripcion.size() <= 1000 && data.dimension in ["ser", "saber", "hacer"] &&
             data.valoracion in ["logrado", "en_proceso", "requiere_apoyo", "no_observado"] &&
             id == request.auth.uid + "_actividad_" + data.actividadId + "_" + data.alumnoId + "_" + data.dimension &&
-            activity.docenteUid == request.auth.uid && activity.cursoId == data.cursoId && activity.trimestreId == data.trimestreId && activity.estado == "pendiente" && activity.tieneRegistros == true &&
+            activity.docenteUid == request.auth.uid && activity.cursoId in ["inicial", "preinicial"] && teacherCourse(gestion, activity.cursoId) && activity.trimestreId == data.trimestreId && activity.estado == "pendiente" && activity.tieneRegistros == true &&
             data.actividadTitulo == activity.titulo && data.materiaId == activity.materiaId && data.criterio == activity.criterios[data.dimension].criterio && data.opinion == activity.criterios[data.dimension].opciones[data.valoracion];
         }
         function validInitialRecord(data) {

@@ -29,6 +29,7 @@ import { generarConGemini, validarAccesoInforme, fuentesParaGemini, validarTexto
 import { geminiDevPlugin } from "../functions/dev-gemini.js";
 import { registrosAlumnoInicial } from "../src/services/modeloInicial.js";
 import { validarAccesoActividad, validarBorradorCriterios, validarCriteriosActividad } from "../functions/criterios-core.js";
+import { GRUPO_INICIAL, esMultigradoInicial, separaCursosInicial } from "../src/services/grupoInicial.js";
 
 const context = { uid: "docente-inicial", gestionId: "2026", courses: [findCourse("inicial"), findCourse("preinicial")] };
 const daily = { cursoId: "inicial", trimestreId: "t1", tipo: "diario", fecha: "2026-03-10", alumnoId: "alumno-a", estado: "apoyo", descripcion: " Completo la actividad con ayuda. " };
@@ -105,6 +106,20 @@ test("los informes de Flash Lite usan respuesta rapida sin cambiar el limite ni 
   assert.equal(sent.generationConfig.thinkingConfig.thinkingLevel, "MINIMAL");
   assert.ok(result.texto.length <= 200);
   assert.equal(result.aprobado, undefined);
+});
+
+test("multigrado unifica el trabajo y recuerda el curso elegido solo para Seguimiento e Informe", async () => {
+  const { controller, click } = await controllerFixture(async () => assert.fail("Navegar no guarda registros"));
+  assert.equal(controller.state.courseId, GRUPO_INICIAL);
+  controller.vincular("/docente/informe");
+  assert.equal(controller.state.courseId, "inicial");
+  click({ initialCourse: "preinicial" });
+  assert.equal(controller.state.courseId, "preinicial");
+  controller.vista("/docente/bitacora");
+  assert.equal(controller.state.courseId, GRUPO_INICIAL);
+  controller.vista("/docente/resumenes");
+  assert.equal(controller.state.courseId, "preinicial");
+  controller.desmontar();
 });
 
 test("SER SABER HACER guardan valoraciones sin fecha manual y sin puntaje", () => {
@@ -578,7 +593,7 @@ async function controllerFixture(save, dependencies = {}) {
     signal.addEventListener("abort", () => { if (listeners.get(type) === handler) listeners.delete(type); }, { once: true });
   } };
   const document = { activeElement: trigger, querySelector: (selector) => selector === "[data-teacher-ui]" ? main : null, querySelectorAll: () => [], addEventListener() {} };
-  const create = vm.runInNewContext(`${code}; crearControladorInicial`, { document, crearAccionesActividades, crearAccionesAsistenciaInicial, animarCambioAlumnoInicial, medirSeleccionAlumnoInicial, animarSelectorAlumnosInicial, animarSeleccionResumenInicial, crearNavegacionMapaInicial, listaResumenInicial, materiasSeguimientoInicial, structuredClone, AbortController, todayIso: () => "2026-03-10", puedeRegistrarInicial: () => true, activeCommunications: () => [], exigirTrimestreDocente, puedeRegistrarTrimestre, trimestresDeAsignacion, trimestresInicial, geminiInicialDisponible: () => false, generarInformeConIA: () => {}, alumnoInicial, criteriosInicial, dimensionesInicial, materiasInicial, valoracionesInicial, firmaRegistrosInicial, cuadriculaAlumnosInicial, recopilarInformesCursoInicial, selectorImpresionInformesInicial, e: escaparInicial, icon });
+  const create = vm.runInNewContext(`${code}; crearControladorInicial`, { GRUPO_INICIAL, esMultigradoInicial, separaCursosInicial, document, crearAccionesActividades, crearAccionesAsistenciaInicial, animarCambioAlumnoInicial, medirSeleccionAlumnoInicial, animarSelectorAlumnosInicial, animarSeleccionResumenInicial, crearNavegacionMapaInicial, listaResumenInicial, materiasSeguimientoInicial, structuredClone, AbortController, todayIso: () => "2026-03-10", puedeRegistrarInicial: () => true, activeCommunications: () => [], exigirTrimestreDocente, puedeRegistrarTrimestre, trimestresDeAsignacion, trimestresInicial, geminiInicialDisponible: () => false, generarInformeConIA: () => {}, alumnoInicial, criteriosInicial, dimensionesInicial, materiasInicial, valoracionesInicial, firmaRegistrosInicial, cuadriculaAlumnosInicial, recopilarInformesCursoInicial, selectorImpresionInformesInicial, e: escaparInicial, icon });
   let sequence = 0;
   const activity = { id: "actividad-a", cursoId: "inicial", trimestreId: "t1", estado: "pendiente", prioritaria: true, criterios: Object.fromEntries(["ser", "saber", "hacer"].map((id) => [id, { criterio: id, opciones: { logrado: "Lo logra", en_proceso: "En proceso", requiere_apoyo: "Requiere apoyo", no_observado: "Sin observar" } }])) };
   let stored = [];
@@ -866,7 +881,7 @@ async function termControllerFixture(saveTerm, terms = ["t1", "t2", "t3"]) {
   const host = { innerHTML: "", addEventListener() {}, querySelector: (selector) => selector === ".initial-dialog" ? { querySelectorAll: () => [] } : selector === "textarea" ? null : control(selector) };
   const main = { innerHTML: "", querySelector: (selector) => selector === "[data-initial-dialog-host]" ? host : null, addEventListener(type, handler) { listeners.set(type, handler); } };
   const document = { activeElement: null, querySelector: (selector) => selector === "[data-teacher-ui]" ? main : null, querySelectorAll: () => [], addEventListener() {} };
-  const create = vm.runInNewContext(`${code}; crearControladorInicial`, { document, crearAccionesActividades, crearAccionesAsistenciaInicial, animarCambioAlumnoInicial, medirSeleccionAlumnoInicial, crearNavegacionMapaInicial, structuredClone, AbortController, todayIso: () => "2026-03-09", puedeRegistrarInicial: () => true, activeCommunications: () => [], exigirTrimestreDocente, puedeRegistrarTrimestre, trimestresDeAsignacion, trimestresInicial, e: escaparInicial, icon, geminiInicialDisponible: () => false, generarInformeConIA: () => {}, materiasInicial });
+  const create = vm.runInNewContext(`${code}; crearControladorInicial`, { GRUPO_INICIAL, esMultigradoInicial, separaCursosInicial, document, crearAccionesActividades, crearAccionesAsistenciaInicial, animarCambioAlumnoInicial, medirSeleccionAlumnoInicial, crearNavegacionMapaInicial, structuredClone, AbortController, todayIso: () => "2026-03-09", puedeRegistrarInicial: () => true, activeCommunications: () => [], exigirTrimestreDocente, puedeRegistrarTrimestre, trimestresDeAsignacion, trimestresInicial, e: escaparInicial, icon, geminiInicialDisponible: () => false, generarInformeConIA: () => {}, materiasInicial });
   const ownContext = { ...context, profile: { trimestreActivo: "t2" }, trimestres: terms };
   const views = { "/docente": () => "Panel", "/docente/asistencia": () => "Asistencia" };
   const controller = create(ownContext, views, { data: { leer: () => [], cargar: async () => [], desmontar() {} }, saveTerm, watchCommunications: () => () => {} });

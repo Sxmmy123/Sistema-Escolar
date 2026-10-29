@@ -16,6 +16,7 @@ import { estadoInformeInicial } from "./InformeInicial.js";
 import { listaResumenInicial, materiasSeguimientoInicial } from "./ResumenesInicial.js";
 import { recopilarInformesCursoInicial, selectorImpresionInformesInicial, imprimirInformesCursoInicial } from "./ImpresionInformesInicial.js";
 import { exigirTrimestreDocente, puedeRegistrarTrimestre, trimestresDeAsignacion } from "../../services/relevoDocente.js";
+import { GRUPO_INICIAL, esMultigradoInicial, separaCursosInicial } from "../../services/grupoInicial.js";
 
 export function crearControladorInicial(context, views, dependencies = {}) {
   const data = dependencies.data || crearDatosInicial(context);
@@ -27,7 +28,7 @@ export function crearControladorInicial(context, views, dependencies = {}) {
   const drafts = new Map(), notes = new Map(), reports = new Map(), attendanceNotes = new Map();
   const newId = () => data.nuevoId();
   const state = {
-    context, data, courseId: context.courses[0]?.id || "", termId: puedeRegistrarTrimestre(context, context.profile?.trimestreActivo) ? context.profile.trimestreActivo : trimestresDeAsignacion(context)[0] || "t1", date,
+    context, data, courseId: esMultigradoInicial(context) ? GRUPO_INICIAL : context.courses[0]?.id || "", reportCourseId: context.courses[0]?.id || "", termId: puedeRegistrarTrimestre(context, context.profile?.trimestreActivo) ? context.profile.trimestreActivo : trimestresDeAsignacion(context)[0] || "t1", date,
     route: "/docente", studentId: "", subjectId: "lenguaje", dimension: "ser", message: "", error: false, busy: false, loading: false, loadError: "",
     iaAvailable: dependencies.iaAvailable ?? geminiInicialDisponible(),
     activityId: "", activityLimit: 5, activityView: "board", activityArchive: false, registrationStudentSelected: false, autoSaving: false,
@@ -68,6 +69,13 @@ export function crearControladorInicial(context, views, dependencies = {}) {
   const currentView = () => (views[state.route] || views["/docente"])(state);
   const students = () => data.leer("students", state.courseId) || [];
   const records = () => data.leer("records", state.courseId, state.termId) || [];
+  function setRoute(route) {
+    if (esMultigradoInicial(context)) {
+      if (state.courseId !== GRUPO_INICIAL) state.reportCourseId = state.courseId;
+      state.courseId = separaCursosInicial(route) ? state.reportCourseId : GRUPO_INICIAL;
+    }
+    state.route = route;
+  }
   const isCurrent = (request) => alive && revision === request;
   const showMessage = (message, error = false) => { state.message = message; state.error = error; };
   const activityActions = crearAccionesActividades({ state, data, dialog, draw, run, assertWritable, selectActivity, generate: dependencies.generateCriteria, refreshIcons: dependencies.refreshIcons });
@@ -360,7 +368,7 @@ export function crearControladorInicial(context, views, dependencies = {}) {
     cancelStudentPickerTransition();
     studentTransition?.cancel(); studentTransition = null;
     modalBindings?.abort(); journalEditorOpen = false; redrawAfterJournal = false; bindings?.abort(); bindings = new AbortController(); revision++;
-    state.route = route; if (route !== "/docente/asistencia") attendanceActions.reset(); main = document.querySelector("[data-teacher-ui]"); if (!main) return;
+    setRoute(route); if (route !== "/docente/asistencia") attendanceActions.reset(); main = document.querySelector("[data-teacher-ui]"); if (!main) return;
     const { signal } = bindings;
     document.querySelectorAll("[data-current-user-name]").forEach((element) => { element.textContent = context.profile?.nombre || "Docente"; });
     main.addEventListener("click", (event) => {
@@ -368,7 +376,7 @@ export function crearControladorInicial(context, views, dependencies = {}) {
       if (activityActions.click(button)) return;
       if (attendanceActions.click(button)) return;
       const targetCourse = button.dataset.initialCourse;
-      if (targetCourse && context.courses.some((item) => item.id === targetCourse)) { attendanceActions.reset(); state.courseId = targetCourse; state.summaryStudentId = ""; state.summarySearch = ""; state.summarySubjectId = "all"; revision++; showMessage(""); loadView(); return; }
+      if (targetCourse && (!esMultigradoInicial(context) || separaCursosInicial(state.route)) && context.courses.some((item) => item.id === targetCourse)) { attendanceActions.reset(); state.courseId = targetCourse; state.reportCourseId = targetCourse; state.summaryStudentId = ""; state.summarySearch = ""; state.summarySubjectId = "all"; revision++; showMessage(""); loadView(); return; }
       if (button.dataset.initialSelectTerm) { confirmTerm(button.dataset.initialSelectTerm); return; }
       if (button.dataset.initialSubject) { state.subjectId = button.dataset.initialSubject === "general" ? "" : button.dataset.initialSubject; draw(); return; }
       if (button.dataset.initialDimension && dimensionesInicial.some((item) => item.id === button.dataset.initialDimension)) { state.dimension = button.dataset.initialDimension; draw(); return; }
@@ -424,7 +432,7 @@ export function crearControladorInicial(context, views, dependencies = {}) {
     bindCommunications(signal); loadView();
   }
   return {
-    state, vista(route) { if (state.route !== route && !state.busy) showMessage(""); state.route = route; return currentView(); }, vincular: bind,
+    state, vista(route) { if (state.route !== route && !state.busy) showMessage(""); setRoute(route); return currentView(); }, vincular: bind,
     desmontar() { alive = false; revision++; loadRevision++; cancelActivityTransition(); cancelStudentPickerTransition(); summaryTransition?.cancel(); summaryTransition = null; studentTransition?.cancel(); modalBindings?.abort(); bindings?.abort(); stopWatch?.(); mapNavigation.desmontar(); data.desmontar(); drafts.clear(); notes.clear(); reports.clear(); attendanceNotes.clear(); main = null; }
   };
 }

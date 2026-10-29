@@ -213,13 +213,13 @@
 .initial-class strong { display: block; margin: 3px 0; color: #172033; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .initial-class > span { display: block; font-size: 12px; color: #475569; }
 .initial-course-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
-.initial-course-list > button { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--theme-border,#dfe6e2); border-radius: 8px; background: var(--theme-surface,#fff); text-align: left; }
-.initial-course-list > button > span:nth-child(2) { flex: 1; min-width: 0; }
-.initial-course-list strong, .initial-course-list > button > span > span { display: block; }
+.initial-course-list > :is(button, .initial-group-link) { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--theme-border,#dfe6e2); border-radius: 8px; background: var(--theme-surface,#fff); text-align: left; }
+.initial-course-list > :is(button, .initial-group-link) > span:nth-child(2) { flex: 1; min-width: 0; }
+.initial-course-list strong, .initial-course-list > :is(button, .initial-group-link) > span > span { display: block; }
 .initial-course-list strong { font-weight: 600; color: var(--theme-ink,#293d32); }
-.initial-course-list > button > span > span { margin-top: 3px; font-size: 12px; color: var(--theme-muted,#64748b); }
+.initial-course-list > :is(button, .initial-group-link) > span > span { margin-top: 3px; font-size: 12px; color: var(--theme-muted,#64748b); }
 .initial-panel-courses .initial-course-list { grid-template-columns: minmax(0,1fr); gap: 0; }
-.initial-panel-courses .initial-course-list > button { padding: 12px 4px; border: 0; border-bottom: 1px solid var(--theme-border,#dfe5ec); border-radius: 0; background: transparent; }
+.initial-panel-courses .initial-course-list > :is(button, .initial-group-link) { padding: 12px 4px; border: 0; border-bottom: 1px solid var(--theme-border,#dfe5ec); border-radius: 0; background: transparent; }
 .initial-course-symbol { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 6px; }
 .initial-course-symbol.preinicial { background: #edf4fc; color: #33699b; }
 .initial-course-symbol.inicial { background: #f1eef9; color: #7960a4; }

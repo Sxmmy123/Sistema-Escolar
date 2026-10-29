@@ -4,6 +4,7 @@ import { configuracionActual } from "../../services/rutasFirestore.js";
 import { estadoRegistroEscolar } from "../../services/registroEscolar.js";
 import { puedeRegistrarTrimestre } from "../../services/relevoDocente.js";
 import { escaparInicial as e, navegacionInicial, trimestresInicial } from "../../services/modeloInicial.js";
+import { cursoTrabajoInicial, separaCursosInicial } from "../../services/grupoInicial.js";
 
 export { e, icon };
 export const puedeRegistrarInicial = (state) => estadoRegistroEscolar(configuracionActual()).habilitada && (!state || puedeRegistrarTrimestre(state.context, state.termId));
@@ -27,7 +28,7 @@ export function controlTrimestreInicial(state) {
 }
 export function paginaInicial(state, title, content, actions = "", beforeHeading = "") {
   const context = state.context;
-  const currentCourse = context.courses.find((course) => course.id === state.courseId);
+  const currentCourse = cursoTrabajoInicial(state);
   const term = trimestresInicial.find((item) => item.id === state.termId) || trimestresInicial[0];
   const blocked = Boolean(context.errorModalidad);
   const unavailable = blocked || !context.courses.length;
@@ -38,7 +39,7 @@ export function paginaInicial(state, title, content, actions = "", beforeHeading
       <div class="teacher-module-context"><span class="teacher-module-context-item">${icon("graduation-cap")}<span>${e(currentCourse?.nombre || "Sin curso asignado")}</span></span><span class="teacher-module-context-item initial-active-term" data-initial-active-term title="Trimestre activo">${icon("calendar-range")}<span>${e(term.label)}</span></span></div></div>
       ${actions ? `<div class="initial-header-actions">${actions}</div>` : ""}
     </section>
-    ${!blocked && context.courses.length > 1 ? `<nav class="initial-course-tabs" aria-label="Cursos asignados">${context.courses.map((course) => `<button type="button" data-initial-course="${e(course.id)}" class="${state.courseId === course.id ? "is-active" : ""}" aria-pressed="${state.courseId === course.id}" ${state.busy ? "disabled" : ""}>${icon("school")} ${e(course.nombre)}</button>`).join("")}</nav>` : ""}
+    ${!blocked && context.courses.length > 1 && separaCursosInicial(state.route) ? `<nav class="initial-course-tabs" aria-label="Cursos asignados">${context.courses.map((course) => `<button type="button" data-initial-course="${e(course.id)}" class="${state.courseId === course.id ? "is-active" : ""}" aria-pressed="${state.courseId === course.id}" ${state.busy ? "disabled" : ""}>${icon("school")} ${e(course.nombre)}</button>`).join("")}</nav>` : ""}
     <p class="initial-status ${state.error ? "is-error" : ""}" role="status" data-initial-status ${state.message ? "" : "hidden"}>${e(state.message)}</p>
     ${state.loadError ? `<div class="initial-status is-error" role="alert">${e(state.loadError)} ${botonInicial("retry", "Reintentar", "refresh-cw", false, state.loading)}</div>` : ""}
     ${blocked ? `<div class="initial-warning" role="alert">${e(context.errorModalidad)}</div>` : content}

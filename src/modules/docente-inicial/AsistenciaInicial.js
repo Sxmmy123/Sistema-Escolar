@@ -1,6 +1,7 @@
 import { resumirAsistenciaInicial, trimestresInicial } from "../../services/modeloInicial.js";
 import { controlFechaInicial, e, icon, paginaInicial, puedeRegistrarInicial, vacioInicial } from "./ComponentesInicial.js";
 import { alumnosInicial } from "./SeguimientoInicial.js";
+import { cursoTrabajoInicial } from "../../services/grupoInicial.js";
 
 export const opcionesAsistenciaInicial = [
   { id: "presente", short: "P", label: "Presente", icon: "check-circle-2" },
@@ -25,7 +26,7 @@ export function guiaAsistenciaInicial(state) {
   const students = alumnosInicial(state), index = Math.min(state.attendanceGuidedIndex || 0, Math.max(0, students.length - 1)), student = students[index];
   const records = state.data.leer("attendance", state.courseId, state.termId, state.date) || {};
   if (!student) return vacioInicial("Sin estudiantes activos", "");
-  const course = state.context.courses.find((item) => item.id === state.courseId), current = estadoAlumno(records, student.id);
+  const course = cursoTrabajoInicial(state), current = estadoAlumno(records, student.id);
   return `<div class="initial-attendance-guide"><p class="initial-dialog-context">${e(course?.nombre)} · ${e(trimestresInicial.find((item) => item.id === state.termId)?.label)}</p>${state.error ? `<p class="initial-status is-error" role="alert">${e(state.message)}</p>` : ""}<div class="initial-attendance-guide-student"><span>Alumno ${index + 1} de ${students.length}</span><h3>${e(student.nombre)}</h3><span class="initial-attendance-badge ${current.id}">${current.label}</span></div>${opciones(state, student, records, true)}${observacion(state, student, records)}<div class="initial-attendance-guide-navigation"><button type="button" class="initial-icon-button" data-initial-attendance-prev aria-label="Alumno anterior" title="Anterior" ${state.busy || !index ? "disabled" : ""}>${icon("chevron-left")}</button><progress max="${students.length}" value="${index + 1}" aria-label="Alumno ${index + 1} de ${students.length}"></progress><button type="button" class="initial-icon-button" data-initial-attendance-next aria-label="Alumno siguiente" title="Siguiente" ${state.busy || index === students.length - 1 ? "disabled" : ""}>${icon("chevron-right")}</button></div>${state.attendanceSavingId ? `<span class="initial-auto-status" role="status">${icon("refresh-cw")}Guardando...</span>` : ""}</div>`;
 }
 export function AsistenciaInicial(state) {
