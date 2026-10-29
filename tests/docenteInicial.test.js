@@ -27,10 +27,85 @@ import { exigirTrimestreDocente, puedeRegistrarTrimestre, trimestresDeAsignacion
 import { criteriosInicial, dimensionesInicial, valoracionesInicial, materiasInicial, firmaRegistrosInicial, validarSeguimientoInicial } from "../src/services/modeloInicial.js";
 import { generarConGemini, validarAccesoInforme, fuentesParaGemini, validarTextoInforme } from "../functions/informe-core.js";
 import { geminiDevPlugin } from "../functions/dev-gemini.js";
+import { registrosAlumnoInicial } from "../src/services/modeloInicial.js";
+import { validarAccesoActividad, validarBorradorCriterios, validarCriteriosActividad } from "../functions/criterios-core.js";
 
 const context = { uid: "docente-inicial", gestionId: "2026", courses: [findCourse("inicial"), findCourse("preinicial")] };
 const daily = { cursoId: "inicial", trimestreId: "t1", tipo: "diario", fecha: "2026-03-10", alumnoId: "alumno-a", estado: "apoyo", descripcion: " Completo la actividad con ayuda. " };
 const observation = { cursoId: "inicial", trimestreId: "t1", alumnoId: "alumno-a", tipo: "observacion", materiaId: "artes_plasticas", dimension: "ser", criterio: "Comparte sus materiales", valoracion: "logrado", descripcion: "Es amable con sus companeros." };
+
+async function geminiPagesFixture({ rows = [], activity, key = "clave-demo", generateReport, generateCriteria } = {}) {
+  const source = (await readFile(new URL("../src/services/informeInicialIA.js", import.meta.url), "utf8")).replace(/^import .*;\r?$/gm, "").replaceAll("import.meta.env", "env").replaceAll("export ", "");
+  const calls = [], authClient = { currentUser: { uid: context.uid } };
+  const criteria = Object.fromEntries(["ser", "saber", "hacer"].map((dimension) => [dimension, { criterio: `Criterio ${dimension}`, opciones: { logrado: "Lo realiza", en_proceso: "Lo realiza con ayuda", requiere_apoyo: "Requiere apoyo", no_observado: "Sin evidencia" } }]));
+  const api = vm.runInNewContext(`${source}; ({ generarCriteriosConIA, generarInformeConIA, geminiInicialDisponible })`, {
+    env: { DEV: false, VITE_GEMINI_API_KEY: key, VITE_GEMINI_MODEL: "modelo-demo" },
+    app: {}, firestore: {}, auth: authClient, cursoInicial, exigirTrimestreDocente,
+    getFunctions() { throw new Error("No debe usar Cloud Functions en modo directo."); },
+    documentoGestion: (_, collection, id) => ({ collection, id }),
+    getDoc: async (ref) => { calls.push({ read: ref }); return { data: () => activity }; },
+    listarRegistrosInicial: async (...args) => { calls.push({ records: args }); return rows; },
+    registrosAlumnoInicial, validarAccesoActividad, validarBorradorCriterios, validarCriteriosActividad, validarTextoInforme,
+    generarCriteriosGemini: generateCriteria || (async (input) => { calls.push({ criteria: input }); return { criterios: criteria }; }),
+    generarConGemini: generateReport || (async (input) => { calls.push({ report: input }); return { texto: "Comparte materiales y recorta con apoyo.", fuentesFirma: firmaRegistrosInicial(input.records, "alumno-a") }; })
+  });
+  return { api, calls, authClient };
+}
+
+test("GitHub Pages genera criterios directamente sin servidor y sin enviar alumnos", async () => {
+  const { api, calls } = await geminiPagesFixture();
+  assert.equal(api.geminiInicialDisponible(), true);
+  const borrador = { materiaId: "artes_plasticas", titulo: "Muneco", descripcion: "Construir con carton", alumnoId: "NO-ENVIAR" };
+  const result = await api.generarCriteriosConIA(context, { cursoId: "inicial", trimestreId: "t1", borrador });
+  assert.equal(Object.keys(result.criterios).length, 3);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].criteria.apiKey, "clave-demo");
+  assert.equal(calls[0].criteria.model, "modelo-demo");
+  assert.equal(calls[0].criteria.activity.alumnoId, undefined);
+});
+
+test("la conexion directa valida la propiedad de una actividad guardada", async () => {
+  const scope = { cursoId: "inicial", trimestreId: "t1", actividadId: "actividad" };
+  const activity = { ...scope, docenteUid: context.uid, estado: "pendiente", materiaId: "lenguaje", titulo: "Vocales", descripcion: "Identificar vocales" };
+  const valid = await geminiPagesFixture({ activity });
+  await valid.api.generarCriteriosConIA(context, scope);
+  assert.equal(valid.calls[0].read.collection, "actividades_inicial");
+  const invalid = await geminiPagesFixture({ activity: { ...activity, docenteUid: "otro" } });
+  await assert.rejects(invalid.api.generarCriteriosConIA(context, scope), /No puedes generar/);
+  assert.equal(invalid.calls.length, 1);
+});
+
+test("el informe directo usa registros frescos de un solo alumno, sin informes anteriores", async () => {
+  const rows = [{ id: "registro", ...observation }, { id: "otro", ...observation, alumnoId: "otro" }, { id: "informe", ...observation, tipo: "informe" }];
+  const { api, calls } = await geminiPagesFixture({ rows });
+  const result = await api.generarInformeConIA(context, { cursoId: "inicial", trimestreId: "t1", alumnoId: "alumno-a" });
+  assert.equal(calls[0].records[3].fresh, true);
+  assert.deepEqual(calls[1].report.records.map((row) => row.id), ["registro"]);
+  assert.equal(result.fuentesFirma, firmaRegistrosInicial(rows, "alumno-a"));
+  assert.ok(result.texto.length <= 200);
+});
+
+test("Gemini directo no entrega respuestas a otra sesion ni oculta errores del proveedor", async () => {
+  const invalid = await geminiPagesFixture();
+  invalid.authClient.currentUser = { uid: "otro" };
+  await assert.rejects(invalid.api.generarInformeConIA(context, { cursoId: "inicial", trimestreId: "t1", alumnoId: "alumno-a" }), /sesion cambio/);
+  assert.equal(invalid.calls.length, 0);
+  const unavailable = await geminiPagesFixture({ generateCriteria: async () => { throw new Error("Gemini alcanzo su limite."); } });
+  await assert.rejects(unavailable.api.generarCriteriosConIA(context, { cursoId: "inicial", trimestreId: "t1", borrador: { materiaId: "lenguaje", titulo: "Vocales", descripcion: "Reconocer vocales" } }), /limite/);
+  const disabled = await geminiPagesFixture({ key: "" });
+  assert.equal(disabled.api.geminiInicialDisponible(), false);
+});
+
+test("los informes de Flash Lite usan respuesta rapida sin cambiar el limite ni aprobarlos", async () => {
+  let sent;
+  const result = await generarConGemini({ records: [observation], apiKey: "prueba", model: "gemini-3.1-flash-lite", fetcher: async (_, options) => {
+    sent = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({ texto: "Comparte sus materiales con sus companeros." }) }] } }] }) };
+  } });
+  assert.equal(sent.generationConfig.thinkingConfig.thinkingLevel, "MINIMAL");
+  assert.ok(result.texto.length <= 200);
+  assert.equal(result.aprobado, undefined);
+});
 
 test("SER SABER HACER guardan valoraciones sin fecha manual y sin puntaje", () => {
   const result = validarSeguimientoInicial(context, { ...observation, fecha: "2026-03-01", puntaje: 100 });

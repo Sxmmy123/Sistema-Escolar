@@ -35,9 +35,15 @@ npm run build
 
 ### Gemini en desarrollo y GitHub Pages
 
-GitHub Pages solo aloja la web compilada. No ejecuta los endpoints locales de Vite (`/api/inicial/criterios` y `/api/inicial/informe`) ni lee el archivo `.env.local` de este equipo. En produccion, la web llama a `generarCriteriosInicial` y `generarInformeInicial` de Firebase Functions en `us-central1`.
+La demostracion publicada conecta directamente el navegador con Gemini, sin Cloud Functions ni Blaze. En GitHub > Settings > Secrets and variables > Actions > Variables se configuran `VITE_GEMINI_API_KEY` y `VITE_GEMINI_MODEL`. Al volver a publicar, Pages compila esos valores en la aplicacion y habilita la generacion de criterios e informes. No basta con modificar `.env.local` en el equipo.
 
-Por eso subir el repositorio no activa Gemini. Se necesita publicar el backend por separado y despues habilitar los botones en la compilacion de la web:
+Esta modalidad fue elegida para demostracion: la clave se puede extraer del navegador y consumir su cuota. No da acceso administrativo a Firebase. Los datos academicos conservan sus reglas, la docente revisa los criterios y los informes siguen siendo borradores de hasta 200 caracteres hasta que ella los apruebe.
+
+Para compilar localmente con conexion directa se usan las mismas variables `VITE_GEMINI_API_KEY` y `VITE_GEMINI_MODEL`. Sin clave de navegador, el desarrollo conserva los endpoints locales de Vite con `GEMINI_API_KEY`, `GEMINI_MODEL` y `VITE_INFORMES_IA_HABILITADA=true` en `.env.local`.
+
+#### Alternativa con clave privada en servidor
+
+Si se retira `VITE_GEMINI_API_KEY`, se puede usar el backend preparado en Firebase. Pages no ejecuta los endpoints locales de Vite. Para esa alternativa se despliegan `generarCriteriosInicial` y `generarInformeInicial` en `us-central1`:
 
 1. Comprobar que Firebase tenga un plan compatible con Cloud Functions (Blaze). Activar la facturacion requiere una decision del propietario; este proyecto no la cambia automaticamente.
 2. Ejecutar `npm ci --prefix functions`.

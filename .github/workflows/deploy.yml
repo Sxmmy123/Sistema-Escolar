@@ -37,6 +37,8 @@ jobs:
       - name: Build
         env:
           VITE_INFORMES_IA_HABILITADA: ${{ vars.VITE_INFORMES_IA_HABILITADA || 'false' }}
+          VITE_GEMINI_API_KEY: ${{ vars.VITE_GEMINI_API_KEY }}
+          VITE_GEMINI_MODEL: ${{ vars.VITE_GEMINI_MODEL }}
         run: npm run build
 
       - name: Upload artifact
