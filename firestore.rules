@@ -4,8 +4,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function isMainAdmin() {
-      return signedIn() && (request.auth.uid == "6GJAf3WiBaVBXypSDDR1xKLalnq2" ||
-        request.auth.token.email == "smichmev@gmail.com");
+      return signedIn() && request.auth.uid == "6GJAf3WiBaVBXypSDDR1xKLalnq2";
     }
     function profile() { return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data; }
     function hasRole(role) {
@@ -49,7 +48,8 @@ service cloud.firestore {
     function isAlumno() {
       return hasRole("alumno") && profile().get("alumnoId", "") != "" &&
         exists(/databases/$(database)/documents/alumnos/$(profile().alumnoId)) &&
-        get(/databases/$(database)/documents/alumnos/$(profile().alumnoId)).data.activo == true;
+        get(/databases/$(database)/documents/alumnos/$(profile().alumnoId)).data.activo == true &&
+        get(/databases/$(database)/documents/alumnos/$(profile().alumnoId)).data.get("authUid", "") == request.auth.uid;
     }
     function ownStudent(id) { return isAlumno() && profile().alumnoId == id; }
     function enrollment(year, id) { return get(/databases/$(database)/documents/gestiones/$(year)/matriculas/$(id)).data; }
@@ -97,6 +97,10 @@ service cloud.firestore {
         (isAlumno() && ownEnrolledStudent(year, profile().alumnoId) && enrollment(year, profile().alumnoId).cursoId == course);
     }
     function activity(year, id) { return get(/databases/$(database)/documents/gestiones/$(year)/actividades/$(id)).data; }
+    function sharedAuto(id, data) {
+      return data.get("interno", false) == true && data.get("tipo", "") == "auto" &&
+        id == "auto_" + data.trimestreId + "_" + data.cursoId + "_" + data.materiaId + "_autoevaluacion";
+    }
     function preservesGradedActivity() {
       let before = resource.data;
       let next = request.resource.data;
@@ -109,16 +113,16 @@ service cloud.firestore {
       );
     }
     function validGrade(year, data) {
-      return writableYear(year) && exists(/databases/$(database)/documents/gestiones/$(year)/actividades/$(data.actividadId)) &&
-        teacherTerm(year, data.trimestreId) && teacherOwnRecord(year, activity(year, data.actividadId).get("creadoPorUid", request.auth.uid)) &&
-        teacherSubject(year, activity(year, data.actividadId).cursoId, activity(year, data.actividadId).materiaId) &&
-        data.cursoId == activity(year, data.actividadId).cursoId &&
-        data.materiaId == activity(year, data.actividadId).materiaId &&
-        data.trimestreId == activity(year, data.actividadId).trimestreId &&
+      let task = activity(year, data.actividadId);
+      return writableYear(year) && task != null &&
+        teacherTerm(year, data.trimestreId) &&
+        (sharedAuto(data.actividadId, task) || teacherOwnRecord(year, task.get("creadoPorUid", request.auth.uid))) &&
+        teacherSubject(year, task.cursoId, task.materiaId) &&
+        data.cursoId == task.cursoId && data.materiaId == task.materiaId && data.trimestreId == task.trimestreId &&
         (data.get("fechaEntrega", "") == "" || dateInYear(year, data.fechaEntrega)) &&
         activeMember(year, data.alumnoId, data.cursoId) && data.calificadoPorUid == request.auth.uid &&
         data.maximo is number && data.maximo - data.maximo == 0 &&
-        data.maximo == activity(year, data.actividadId).get("maximo", 100) && data.maximo > 0 &&
+        data.maximo == task.get("maximo", 100) && data.maximo > 0 &&
         data.valor is number && data.valor >= 0 && data.valor <= data.maximo &&
         data.nota is number && data.nota >= 35 && data.nota <= 100 && matchingGradeScore(data) &&
         getAfter(/databases/$(database)/documents/gestiones/$(year)/actividades/$(data.actividadId)).data.get("tieneCalificaciones", false) == true;
@@ -357,10 +361,11 @@ service cloud.firestore {
           teacherTerm(gestion, request.resource.data.trimestreId) &&
           request.resource.data.creadoPorUid == request.auth.uid && validTerm(request.resource.data.trimestreId) && validActivityDate(gestion, request.resource.data));
         allow update: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, resource.data.cursoId, resource.data.materiaId) &&
-          teacherTerm(gestion, resource.data.trimestreId) && teacherTerm(gestion, request.resource.data.trimestreId) &&
-          teacherOwnRecord(gestion, resource.data.get("creadoPorUid", request.auth.uid)) &&
+          teacherTerm(gestion, resource.data.trimestreId) &&
+          ((sharedAuto(id, resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["tieneCalificaciones", "updatedAt"]) && request.resource.data.tieneCalificaciones == true) ||
+          (teacherTerm(gestion, request.resource.data.trimestreId) && teacherOwnRecord(gestion, resource.data.get("creadoPorUid", request.auth.uid)) &&
           teacherSubject(gestion, request.resource.data.cursoId, request.resource.data.materiaId) &&
-          request.resource.data.get("creadoPorUid", "") == resource.data.get("creadoPorUid", "") && validTerm(request.resource.data.trimestreId) && validActivityDate(gestion, request.resource.data) && preservesGradedActivity());
+          request.resource.data.get("creadoPorUid", "") == resource.data.get("creadoPorUid", "") && validTerm(request.resource.data.trimestreId) && validActivityDate(gestion, request.resource.data) && preservesGradedActivity())));
         allow delete: if isAdmin() || (writableYear(gestion) && teacherSubject(gestion, resource.data.cursoId, resource.data.materiaId) &&
           teacherTerm(gestion, resource.data.trimestreId) && teacherOwnRecord(gestion, resource.data.get("creadoPorUid", request.auth.uid)) &&
           resource.data.get("tieneCalificaciones", false) == false);
@@ -382,12 +387,13 @@ service cloud.firestore {
         allow delete: if isAdmin();
       }
       match /calificaciones/{id} {
+        allow get: if isDocente() && !exists(/databases/$(database)/documents/gestiones/$(gestion)/calificaciones/$(id));
         allow read: if isAdmin() || isDirector() || teacherCourse(gestion, resource.data.cursoId) ||
           (isDocente() && teacherCourse(gestion, activity(gestion, resource.data.actividadId).cursoId)) || ownEnrolledStudent(gestion, resource.data.alumnoId);
         allow create: if primaryCourse(request.resource.data.cursoId) && (isAdmin() || validGrade(gestion, request.resource.data));
         allow update: if primaryCourse(request.resource.data.cursoId) && (isAdmin() || (request.resource.data.actividadId == resource.data.actividadId &&
-          teacherTerm(gestion, resource.data.trimestreId) && request.resource.data.trimestreId == resource.data.trimestreId &&
-          teacherOwnRecord(gestion, resource.data.get("calificadoPorUid", request.auth.uid)) &&
+          request.resource.data.trimestreId == resource.data.trimestreId &&
+          (sharedAuto(resource.data.actividadId, activity(gestion, resource.data.actividadId)) || teacherOwnRecord(gestion, resource.data.get("calificadoPorUid", request.auth.uid))) &&
           request.resource.data.alumnoId == resource.data.alumnoId && validGrade(gestion, request.resource.data)));
         allow delete: if isAdmin() || (writableYear(gestion) && teacherTerm(gestion, resource.data.trimestreId) &&
           teacherOwnRecord(gestion, resource.data.get("calificadoPorUid", request.auth.uid)) &&
@@ -410,7 +416,21 @@ service cloud.firestore {
     }
     match /auditoria/{id} {
       allow read: if isAdmin() || isDirector();
-      allow create: if signedIn() && request.resource.data.usuarioUid == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.keys().hasOnly([
+          "gestionId", "tipo", "accion", "detalle", "datos", "usuarioUid", "usuario", "rol", "fecha", "hora", "createdAt"
+        ]) && request.resource.data.keys().hasAll([
+          "gestionId", "tipo", "accion", "detalle", "datos", "usuarioUid", "usuario", "rol", "fecha", "hora", "createdAt"
+        ]) && request.resource.data.usuarioUid == request.auth.uid &&
+        request.resource.data.gestionId is string && request.resource.data.gestionId.matches("20[0-9]{2}") &&
+        request.resource.data.tipo is string && request.resource.data.tipo.size() > 0 && request.resource.data.tipo.size() <= 40 &&
+        request.resource.data.accion is string && request.resource.data.accion.size() > 0 && request.resource.data.accion.size() <= 80 &&
+        request.resource.data.detalle is string && request.resource.data.detalle.size() <= 500 &&
+        request.resource.data.datos is map && request.resource.data.datos.size() <= 20 &&
+        request.resource.data.usuario is string && request.resource.data.usuario.size() <= 160 &&
+        request.resource.data.rol in ["admin", "docente", "director", "alumno", "-"] &&
+        request.resource.data.fecha is string && request.resource.data.fecha.matches("20[0-9]{2}-[0-9]{2}-[0-9]{2}") &&
+        request.resource.data.hora is string && request.resource.data.hora.matches("([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]") &&
+        request.resource.data.createdAt == request.time;
       allow update, delete: if false;
     }
     match /{document=**} { allow read, write: if false; }

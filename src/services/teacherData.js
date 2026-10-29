@@ -514,7 +514,7 @@ export async function listAttendanceForCourse(courseId, trimestreId = "") {
   });
 }
 
-export async function saveAttendance({ course, student, fecha, estado, trimestreId = "t1", observacion = "" }) {
+export async function saveAttendance({ course, student, fecha, estado, trimestreId = "t1", observacion }) {
   asegurarRegistroDocente();
   asegurarTrimestreRegistro(trimestreId);
   validarFechaGestion(fecha, gestionActual());
@@ -530,23 +530,25 @@ export async function saveAttendance({ course, student, fecha, estado, trimestre
     fecha,
     trimestreId,
     estado,
-    observacion: String(observacion || "").trim(),
+    ...(observacion !== undefined ? { observacion: String(observacion || "").trim() } : {}),
     horaRegistro: now.toLocaleTimeString("es-BO", { hour: "2-digit", minute: "2-digit" }),
     horaRegistroISO: now.toISOString(),
     registradoPorUid: currentUid(),
     registradoPor: nombreDocenteAsistencia(teacher.profile?.nombre || auth.currentUser?.displayName) || "Docente",
     updatedAt: serverTimestamp()
   };
-  await guardarConPeriodoCurso({ db: firestore, uid: currentUid(), year: gestionActual(), courseId: course.id, termId: trimestreId, kind: "asistencia", sourceRef: documentoGestion(firestore, "asistencias", id), periodRef: doc(periodosCurso(firestore, course.id), trimestreId), payload, merge: true });
-  sincronizarAsistenciaCalificar({ uid: currentUid(), gestionId: gestionActual() }, { id, ...payload });
+  const sourceRef = documentoGestion(firestore, "asistencias", id);
+  await guardarConPeriodoCurso({ db: firestore, uid: currentUid(), year: gestionActual(), courseId: course.id, termId: trimestreId, kind: "asistencia", sourceRef, periodRef: doc(periodosCurso(firestore, course.id), trimestreId), payload, merge: true });
+  const saved = observacion === undefined ? { ...(await getDoc(sourceRef)).data(), id } : { id, ...payload };
+  sincronizarAsistenciaCalificar({ uid: currentUid(), gestionId: gestionActual() }, saved);
   announceAlertDataChange();
   safeAudit({
     tipo: "asistencia",
     accion: "registrar",
     detalle: `${student.nombre} marcado como ${estado} en ${course.nombre}`,
-    datos: { cursoId: course.id, alumnoId: student.id, fecha, trimestreId, estado, observacion: payload.observacion }
+    datos: { cursoId: course.id, alumnoId: student.id, fecha, trimestreId, estado, observacion: saved.observacion || "" }
   });
-  return { id, ...payload };
+  return saved;
 }
 
 export async function listActivities(courseId, trimestreId = "") {
@@ -813,10 +815,11 @@ export async function saveGrade({
   };
   const batch = writeBatch(db);
   batch.set(documentoGestion(db, "calificaciones", id), payload, { merge: true });
-  if (activity.tieneCalificaciones !== true || activity.estadoRevision === "sin_iniciar") {
+  const startsReview = !activity.interno && activity.estadoRevision === "sin_iniciar";
+  if (activity.tieneCalificaciones !== true || startsReview) {
     batch.update(documentoGestion(db, "actividades", activity.id), {
       tieneCalificaciones: true,
-      ...(activity.estadoRevision === "sin_iniciar" ? {
+      ...(startsReview ? {
         estadoRevision: "en_proceso",
         revisionIniciadaAt: serverTimestamp(),
         revisionIniciadaPorUid: uid
@@ -832,7 +835,7 @@ export async function saveGrade({
   activity.tieneCalificaciones = true;
   announceAlertDataChange();
   if (hadPendingDelivery) delete activity.entregasPendientes[student.id];
-  if (activity.estadoRevision === "sin_iniciar") activity.estadoRevision = "en_proceso";
+  if (startsReview) activity.estadoRevision = "en_proceso";
   sincronizarNotaCalificar({ uid, gestionId: gestionActual() }, activity, { id, ...payload });
   await audit({
     tipo: "calificaciones",
@@ -862,6 +865,7 @@ export async function finalizeActivityReview({ activity, students = [], attendan
   const revisionFinalizadaFecha = todayIso();
   const regularizacionDesde = todayIso();
   const generatedGrades = [];
+  const candidates = [];
   students.forEach((student) => {
     if (!student?.id || gradesMap[student.id]) return;
     if (student.cursoId && student.cursoId !== activity.cursoId) throw new Error("Hay un alumno de otro curso en la revision.");
@@ -887,25 +891,30 @@ export async function finalizeActivityReview({ activity, students = [], attendan
       }),
       updatedAt: serverTimestamp()
     };
-    generatedGrades.push({ id, ...payload });
+    candidates.push({ id, ...payload });
   });
 
-  // Two grades fit the rules budget even without cached checks across writes.
-  for (let index = 0; index < generatedGrades.length; index += 2) {
-    const gradesBatch = writeBatch(db);
-    generatedGrades.slice(index, index + 2).forEach(({ id, ...payload }) => {
-      gradesBatch.set(documentoGestion(db, "calificaciones", id), payload, { merge: true });
+  // Only create defaults after reading the authoritative grade inside the transaction.
+  for (const { id, ...payload } of candidates) {
+    const gradeRef = documentoGestion(db, "calificaciones", id);
+    const activityRef = documentoGestion(db, "actividades", activity.id);
+    const existing = await runTransaction(db, async (transaction) => {
+      const [gradeSnapshot, activitySnapshot] = await Promise.all([
+        transaction.get(gradeRef),
+        transaction.get(activityRef)
+      ]);
+      if (gradeSnapshot.exists()) return { ...gradeSnapshot.data(), id };
+      if (!activitySnapshot.exists()) throw new Error("No se encontro la actividad para finalizar.");
+      if (activitySnapshot.data().tieneCalificaciones !== true) {
+        transaction.update(activityRef, { tieneCalificaciones: true, updatedAt: serverTimestamp() });
+      }
+      transaction.set(gradeRef, payload);
+      return null;
     });
-    if (activity.tieneCalificaciones !== true) {
-      gradesBatch.update(documentoGestion(db, "actividades", activity.id), {
-        tieneCalificaciones: true, updatedAt: serverTimestamp()
-      });
-    }
-    await gradesBatch.commit();
     activity.tieneCalificaciones = true;
-    generatedGrades.slice(index, index + 2).forEach((grade) => {
-      sincronizarNotaCalificar({ uid, gestionId: gestionActual() }, activity, grade);
-    });
+    const grade = existing || { id, ...payload };
+    if (!existing) generatedGrades.push(grade);
+    sincronizarNotaCalificar({ uid, gestionId: gestionActual() }, activity, grade);
   }
   const batch = writeBatch(db);
   batch.update(documentoGestion(db, "actividades", activity.id), {

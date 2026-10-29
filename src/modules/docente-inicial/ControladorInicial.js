@@ -61,6 +61,7 @@ export function crearControladorInicial(context, views, dependencies = {}) {
   };
   let bindings = null, stopWatch = null, modalBindings = null, main = null;
   let alive = true, revision = 0, loadRevision = 0;
+  let journalEditorOpen = false, redrawAfterJournal = false;
   let activityTransition = null, studentTransition = null, studentPickerTransition = null;
   let summaryTransition = null;
   let communications = [], communicationsError = "";
@@ -109,6 +110,7 @@ export function crearControladorInicial(context, views, dependencies = {}) {
   }
   function draw() {
     if (!main || !alive) return;
+    if (journalEditorOpen) { redrawAfterJournal = true; return; }
     mapNavigation.guardarPosicion();
     summaryTransition?.cancel(); summaryTransition = null;
     const previousStudent = medirSeleccionAlumnoInicial(main);
@@ -266,7 +268,7 @@ export function crearControladorInicial(context, views, dependencies = {}) {
     const request = revision, courseId = state.courseId;
     let rows;
     await run(async (current) => {
-      const loaded = await Promise.all(trimestresInicial.map(async (term) => [term.id, await data.cargar("records", courseId, term.id)]));
+      const loaded = await Promise.all(trimestresInicial.map(async (term) => [term.id, await data.cargar("records", courseId, term.id, "", true)]));
       if (current()) rows = recopilarInformesCursoInicial(students(), Object.fromEntries(loaded));
     });
     if (!rows || !isCurrent(request) || state.route !== "/docente/informe") return;
@@ -290,11 +292,20 @@ export function crearControladorInicial(context, views, dependencies = {}) {
       } else return;
       sync();
     }, { signal });
-    print.addEventListener("click", () => {
+    print.addEventListener("click", async () => {
       const chosen = rows.filter((row) => selected.has(row.student.id));
       if (!isCurrent(request) || print.disabled || !chosen.length) return;
-      close();
-      (dependencies.printReports || imprimirInformesCursoInicial)({ rows: chosen, course, year: context.gestionId, teacher: context.profile?.nombre || "Docente" });
+      print.disabled = true;
+      try {
+        const loaded = await Promise.all(trimestresInicial.map(async (term) => [term.id, await data.cargar("records", courseId, term.id, "", true)]));
+        if (!isCurrent(request) || signal.aborted) return;
+        const currentRows = recopilarInformesCursoInicial(chosen.map((row) => row.student), Object.fromEntries(loaded));
+        if (JSON.stringify(currentRows) !== JSON.stringify(chosen)) {
+          close(); showMessage("Los registros o informes cambiaron. Revisa y aprueba los informes actualizados antes de imprimir.", true); draw(); return;
+        }
+        close();
+        (dependencies.printReports || imprimirInformesCursoInicial)({ rows: currentRows, course, year: context.gestionId, teacher: context.profile?.nombre || "Docente" });
+      } catch { if (!isCurrent(request) || signal.aborted) return; close(); showMessage("No se pudieron verificar los informes actuales. Comprueba la conexion e intenta de nuevo.", true); draw(); }
     }, { signal });
     sync();
   }
@@ -303,7 +314,11 @@ export function crearControladorInicial(context, views, dependencies = {}) {
     if (state.route !== "/docente/resumenes" || !record || !puedeRegistrarInicial(state)) return;
     const student = students().find((item) => item.id === record.alumnoId), request = revision;
     if (!student) return;
-    const { host, close, signal } = dialog("Editar observacion de bitacora", `<p class="initial-dialog-context">${e(student.nombre)}</p><label class="initial-field" for="initial-edit-journal">Observacion</label><textarea id="initial-edit-journal" data-initial-edit-journal-text maxlength="5000" rows="7">${e(record.descripcion)}</textarea><div class="initial-form-footer"><span data-initial-edit-journal-count>${record.descripcion.length}/5000</span></div><p class="initial-status is-error" data-initial-edit-journal-error role="alert" hidden></p><div class="initial-dialog-actions"><button type="button" class="initial-button" data-initial-cancel-term>Cancelar</button><button type="button" class="initial-button is-primary" data-initial-confirm-edit-journal>${icon("save")}Guardar cambios</button></div>`);
+    const { host, close, signal } = dialog("Editar observacion de bitacora", `<p class="initial-dialog-context">${e(student.nombre)}</p><label class="initial-field" for="initial-edit-journal">Observacion</label><textarea id="initial-edit-journal" data-initial-edit-journal-text maxlength="5000" rows="7">${e(record.descripcion)}</textarea><div class="initial-form-footer"><span data-initial-edit-journal-count>${record.descripcion.length}/5000</span></div><p class="initial-status is-error" data-initial-edit-journal-error role="alert" hidden></p><div class="initial-dialog-actions"><button type="button" class="initial-button" data-initial-cancel-term>Cancelar</button><button type="button" class="initial-button is-primary" data-initial-confirm-edit-journal>${icon("save")}Guardar cambios</button></div>`, () => {
+      journalEditorOpen = false;
+      if (redrawAfterJournal) { redrawAfterJournal = false; draw(); }
+    });
+    journalEditorOpen = true;
     const text = host.querySelector("[data-initial-edit-journal-text]"), save = host.querySelector("[data-initial-confirm-edit-journal]"), error = host.querySelector("[data-initial-edit-journal-error]");
     text.addEventListener("input", () => { text.value = text.value.slice(0, 5000); host.querySelector("[data-initial-edit-journal-count]").textContent = `${text.value.length}/5000`; save.disabled = !text.value.trim() || text.value === record.descripcion; }, { signal });
     save.disabled = true;
@@ -344,7 +359,7 @@ export function crearControladorInicial(context, views, dependencies = {}) {
     cancelActivityTransition();
     cancelStudentPickerTransition();
     studentTransition?.cancel(); studentTransition = null;
-    modalBindings?.abort(); bindings?.abort(); bindings = new AbortController(); revision++;
+    modalBindings?.abort(); journalEditorOpen = false; redrawAfterJournal = false; bindings?.abort(); bindings = new AbortController(); revision++;
     state.route = route; if (route !== "/docente/asistencia") attendanceActions.reset(); main = document.querySelector("[data-teacher-ui]"); if (!main) return;
     const { signal } = bindings;
     document.querySelectorAll("[data-current-user-name]").forEach((element) => { element.textContent = context.profile?.nombre || "Docente"; });

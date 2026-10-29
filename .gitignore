@@ -13,7 +13,7 @@ accesos-privados-*.txt
 npm-debug.log*
 
 .env
-.env.local
+.env.*
 .DS_Store
 Thumbs.db
 

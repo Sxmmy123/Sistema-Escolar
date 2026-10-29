@@ -131,7 +131,7 @@ export async function renderTasks(context) {
       )]
     }))
     .filter((item) => item.subjectIds.length);
-  if (!coursesForDate.some((item) => item.course.id === teacherState.taskDraftCourseId)) {
+  if (!teacherState.taskEditActivityId && !coursesForDate.some((item) => item.course.id === teacherState.taskDraftCourseId)) {
     teacherState.taskDraftCourseId = coursesForDate.some((item) => item.course.id === course.id)
       ? course.id
       : (coursesForDate[0]?.course.id || "");
@@ -139,7 +139,7 @@ export async function renderTasks(context) {
   const draftCourseData = coursesForDate.find((item) => item.course.id === teacherState.taskDraftCourseId) || coursesForDate[0] || { course: course || context.courses[0], subjectIds: [] };
   const draftCourse = draftCourseData.course;
   const scheduledSubjectIds = draftCourseData.subjectIds;
-  if (!scheduledSubjectIds.includes(teacherState.taskDraftMateriaId)) {
+  if (!teacherState.taskEditActivityId && !scheduledSubjectIds.includes(teacherState.taskDraftMateriaId)) {
     teacherState.taskDraftMateriaId = scheduledSubjectIds[0] || "";
   }
   const taskDraftMateriaId = teacherState.taskDraftMateriaId;
@@ -192,7 +192,7 @@ export async function renderTasks(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+      <button type="button" data-grade-activity="${item.id}" class="tinted-surface group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; --surface-color:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
           <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
@@ -261,7 +261,7 @@ export async function renderTasks(context) {
                           <span class="grid min-w-6 place-items-center px-1 text-xs font-black text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>
                         </div>
                       ` : `
-                        <div class="overflow-hidden rounded-lg border border-slate-200 px-1.5 py-0.5 text-left shadow-sm" style="background:${subject?.color || "#fff"}" title="${escapeHtml(row.materia)}">
+                        <div class="tinted-surface overflow-hidden rounded-lg border border-slate-200 px-1.5 py-0.5 text-left shadow-sm" style="--surface-color:${subject?.color || "#fff"}" title="${escapeHtml(row.materia)}">
                           <span class="block truncate text-[11px] font-black leading-4 text-slate-900">${escapeHtml(subject?.nombre || row.materia || row.materiaId)}</span>
                         </div>
                       `;
@@ -302,7 +302,7 @@ export async function renderTasks(context) {
                               <span class="grid min-w-6 place-items-center px-1 text-xs font-black text-white" style="background:${accent}">${escapeHtml(courseNumber)}</span>
                             </button>
                           ` : `
-                            <button type="button" draggable="true" class="flex w-full cursor-grab touch-none items-stretch overflow-hidden rounded-lg border-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft active:cursor-grabbing" style="border-color:${materialNotice ? "#F7B51B" : (subject?.color || "#e2e8f0")}; background:${materialNotice ? "#fffbeb" : (subject?.color || "#fff")}" data-edit-activity="${activity.id}" title="${escapeHtml(activity.titulo)}">
+                            <button type="button" draggable="true" class="tinted-surface flex w-full cursor-grab touch-none items-stretch overflow-hidden rounded-lg border-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft active:cursor-grabbing" style="border-color:${materialNotice ? "#F7B51B" : (subject?.color || "#e2e8f0")}; --surface-color:${materialNotice ? "#fffbeb" : (subject?.color || "#fff")}" data-edit-activity="${activity.id}" title="${escapeHtml(activity.titulo)}">
                               <span class="flex min-w-0 flex-1 items-center gap-1 truncate px-1.5 py-0.5 text-[11px] font-black leading-4 text-slate-900">
                                 ${materialNotice ? icon("package-open", "h-3 w-3 shrink-0 text-amber-700") : ""}<span class="truncate">${escapeHtml(title)}</span>
                               </span>

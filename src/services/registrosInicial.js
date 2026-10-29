@@ -1,4 +1,4 @@
-import { doc, getDocs, query, where, setDoc, runTransaction, serverTimestamp, Timestamp } from "firebase/firestore";
+import { doc, getDocs, getDocsFromServer, query, where, setDoc, runTransaction, serverTimestamp, Timestamp } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
 import { asegurarRegistroDocente, coleccionGestion, documentoGestion, gestionActual } from "./rutasFirestore.js";
 import { cursoInicial, idRegistroInicial, validarRegistroInicial, validarSeguimientoInicial, validarEdicionBitacoraInicial } from "./modeloInicial.js";
@@ -8,10 +8,10 @@ export const nuevoIdRegistroInicial = (uid) => `${uid}_${doc(coleccionGestion(fi
 function comprobarSesion(context, authClient) {
   if (!context?.uid || authClient.currentUser?.uid !== context.uid || gestionActual() !== context.gestionId) throw new Error("La sesion cambio. Vuelve a abrir el modulo.");
 }
-export async function listarRegistrosInicial(context, courseId, termId, { db = firestore, authClient = auth } = {}) {
+export async function listarRegistrosInicial(context, courseId, termId, { db = firestore, authClient = auth, fresh = false } = {}) {
   comprobarSesion(context, authClient);
   cursoInicial(context, courseId);
-  const snapshot = await getDocs(query(coleccionGestion(db, "registros_inicial"), where("cursoId", "==", courseId), where("trimestreId", "==", termId), where("docenteUid", "==", context.uid)));
+  const snapshot = await (fresh ? getDocsFromServer : getDocs)(query(coleccionGestion(db, "registros_inicial"), where("cursoId", "==", courseId), where("trimestreId", "==", termId), where("docenteUid", "==", context.uid)));
   comprobarSesion(context, authClient);
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 }

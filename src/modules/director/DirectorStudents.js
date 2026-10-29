@@ -26,10 +26,14 @@ const TRIMESTERS = [
 const rememberedCourseId = sessionStorage.getItem("directorCursoEstudiantes") || "";
 let selectedCourseId = COURSES.some((course) => course.id === rememberedCourseId) ? rememberedCourseId : COURSES[0].id;
 let allStudents = [];
-let studentsLoaded = false;
 let studentSearch = "";
-let reportDataPromise = null;
-const reportAttendancePromises = new Map();
+let viewRevision = 0;
+let reportRevision = 0;
+
+export function resetDirectorStudents() {
+  viewRevision++; reportRevision++;
+  allStudents = []; studentSearch = "";
+}
 
 function normalizeText(value) {
   return String(value || "")
@@ -170,43 +174,24 @@ function updateStudentSummary() {
 }
 
 async function refreshStudents() {
+  const request = viewRevision;
   const tbody = document.querySelector("[data-director-students-list]");
-  if (!studentsLoaded && tbody) tbody.innerHTML = `<tr><td colspan="5" class="py-5 text-sm font-medium text-slate-500">Cargando alumnos...</td></tr>`;
-  if (!studentsLoaded) {
-    allStudents = (await listDirectorStudents())
-      .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" }));
-    studentsLoaded = true;
-  }
+  if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="py-5 text-sm font-medium text-slate-500">Cargando alumnos...</td></tr>`;
+  const loaded = await listDirectorStudents();
+  if (request !== viewRevision) return;
+  allStudents = loaded.sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" }));
   updateStudentSummary();
   renderRows();
   refreshDirectorIcons();
 }
 
 async function reportData() {
-  if (!reportDataPromise) {
-    reportDataPromise = Promise.all([
-      listDirectorAllActivities(),
-      listDirectorGrades()
-    ]).then(([activities, grades]) => ({ activities, grades }));
-  }
-  try {
-    return await reportDataPromise;
-  } catch (error) {
-    reportDataPromise = null;
-    throw error;
-  }
+  const [activities, grades] = await Promise.all([listDirectorAllActivities(), listDirectorGrades()]);
+  return { activities, grades };
 }
 
 async function reportAttendance(trimesterId) {
-  if (!reportAttendancePromises.has(trimesterId)) {
-    reportAttendancePromises.set(trimesterId, listDirectorAttendanceByTrimester(trimesterId));
-  }
-  try {
-    return await reportAttendancePromises.get(trimesterId);
-  } catch (error) {
-    reportAttendancePromises.delete(trimesterId);
-    throw error;
-  }
+  return listDirectorAttendanceByTrimester(trimesterId);
 }
 
 function reportTerm(student, data) {
@@ -316,17 +301,21 @@ function reportModal(report) {
 }
 
 async function openStudentReport(studentId) {
+  const request = ++reportRevision, view = viewRevision;
   const modal = document.querySelector("[data-director-student-modal]");
   const student = allStudents.find((item) => item.id === studentId);
   if (!modal || !student) return;
   modal.innerHTML = `<div class="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4"><div class="rounded-lg bg-white px-6 py-5 text-center shadow-2xl"><span class="mx-auto block h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-school-green"></span><p class="mt-3 text-xs text-slate-500">Preparando informe...</p></div></div>`;
   try {
     const data = await reportData();
+    if (request !== reportRevision || view !== viewRevision) return;
     const trimesterId = reportTerm(student, data);
     const attendance = await reportAttendance(trimesterId);
+    if (request !== reportRevision || view !== viewRevision) return;
     modal.innerHTML = reportModal(buildStudentReport(student, { ...data, attendance }));
     refreshDirectorIcons();
   } catch {
+    if (request !== reportRevision || view !== viewRevision) return;
     modal.innerHTML = `<div class="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4" data-close-director-student-report><div class="w-full max-w-sm rounded-lg bg-white p-5 text-center shadow-2xl"><p class="text-sm font-semibold text-red-700">No se pudo cargar el informe.</p><button type="button" data-close-director-student-report-button class="mt-3 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Cerrar</button></div></div>`;
   }
 }
@@ -344,6 +333,7 @@ function selectCourse(courseId, searchInput) {
 }
 
 export function bindDirectorStudents(route) {
+  viewRevision++; reportRevision++;
   if (route !== "/director/estudiantes") return;
   const searchInput = document.querySelector("[data-director-student-search]");
   searchInput?.addEventListener("input", () => {
@@ -382,6 +372,7 @@ export function bindDirectorStudents(route) {
       return;
     }
     if (event.target.matches("[data-close-director-student-report]") || event.target.closest("[data-close-director-student-report-button]")) {
+      reportRevision++;
       modal.innerHTML = "";
     }
   });
@@ -390,7 +381,9 @@ export function bindDirectorStudents(route) {
     selectCourse(event.currentTarget.value, searchInput);
   });
 
+  const request = viewRevision;
   refreshStudents().catch(() => {
+    if (request !== viewRevision) return;
     const tbody = document.querySelector("[data-director-students-list]");
     if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-sm text-red-600">No se pudieron cargar los alumnos.</td></tr>`;
   });

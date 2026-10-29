@@ -1,4 +1,5 @@
 import { icon } from "../../ui/dom.js";
+import { themeToggle } from "../../ui/theme.js";
 
 function publicAsset(path) {
   return `${import.meta.env.BASE_URL || "./"}${path}`;
@@ -70,9 +71,12 @@ function directorSidebar(activeRoute) {
             <p class="text-xs text-white/60">Rol Director</p>
           </div>
         </div>
-        <button class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-white/80 transition hover:bg-white/10 hover:text-white" data-action="logout">
+        <div class="sidebar-toolbar sidebar-toolbar-on-brand">
+        ${themeToggle()}
+        <button class="sidebar-session-button" data-action="logout">
           ${icon("log-out", "h-4 w-4")} Cerrar sesion
         </button>
+        </div>
       </div>
     </div>
   `;
@@ -83,7 +87,7 @@ export function DirectorShell(activeRoute, content, options = {}) {
   const title = options.title || "Buenos dias, Director!";
   const subtitle = options.subtitle || "Resumen general de la Unidad Educativa Nueva Bolivia";
   return `
-    <div class="min-h-screen bg-slate-50 text-slate-900 lg:pl-72">
+    <div class="director-shell min-h-screen bg-slate-50 text-slate-900 lg:pl-72">
       <aside class="fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh w-72 overflow-hidden bg-[#153d24] p-6 text-white lg:block">
         ${directorSidebar(activeRoute)}
       </aside>

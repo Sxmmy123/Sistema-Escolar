@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Restablecimiento de alumno - prueba local</title></head>
+<body><div id="app"></div><script type="module">
+import "/src/styles.css";
+import "/src/modules/admin/AlumnosAdmin.css";
+import { createIcons, icons } from "lucide";
+import { studentPasswordResetMarkup, bindStudentPasswordReset } from "/src/modules/admin/RestablecerClaveAlumno.js";
+import { icon } from "/src/ui/dom.js";
+document.getElementById("app").innerHTML = `<main class="mx-auto max-w-4xl p-6"><h1 class="text-xl font-semibold">Alumnos</h1><p class="mb-5 mt-1 text-sm text-slate-600">Cuarto A</p><table class="w-full border-collapse bg-white text-sm"><thead><tr class="border-b text-left"><th class="p-3">Alumno</th><th class="p-3">Acceso</th></tr></thead><tbody><tr class="border-b"><td class="p-3">ESTUDIANTE DE DEMOSTRACION</td><td class="p-3"><button class="rounded-md border p-2" title="Restablecer contrasena" aria-label="Restablecer contrasena" data-open-reset>${icon("key-round")}</button></td></tr></tbody></table></main>`;
+document.querySelector("[data-open-reset]").addEventListener("click", () => {
+  const dialog = document.createElement("dialog");
+  dialog.className = "students-confirm-dialog students-reset-dialog";
+  dialog.setAttribute("aria-labelledby", "student-password-title");
+  dialog.innerHTML = studentPasswordResetMarkup({ nombre: "ESTUDIANTE DE DEMOSTRACION", ci: "demo", id: "demo", authUid: "demo-uid" }, "Cuarto A");
+  document.body.append(dialog);
+  bindStudentPasswordReset(dialog, { student: { id: "demo", authUid: "demo-uid" }, isSessionActive: () => true, generatePassword: () => "ClaveSoloDePrueba", resetPassword: async () => {}, onClose: () => { dialog.close(); dialog.remove(); } });
+  // Simulacion exclusivamente visual: no llama a Firebase ni modifica cuentas.
+  const simulate = document.createElement("button");
+  simulate.type = "button"; simulate.textContent = "Simular exito sin cambiar cuentas";
+  simulate.className = "mt-4 text-xs text-slate-500";
+  simulate.addEventListener("click", () => {
+    dialog.querySelector("[data-reset-admin-password]").value = "solo-prueba-local";
+    dialog.querySelector("[data-reset-form]").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    simulate.remove();
+  });
+  dialog.append(simulate); dialog.showModal(); createIcons({ icons });
+});
+createIcons({ icons });
+</script></body></html>

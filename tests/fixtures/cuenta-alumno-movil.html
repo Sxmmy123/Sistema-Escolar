@@ -1,0 +1,6 @@
+<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>Cuenta del alumno - movil</title><style>html,body{margin:0;background:#edf2ef}iframe{position:fixed;inset:0;border:0;background:white}</style></head><body><iframe title="Cuenta del alumno" src="/tests/fixtures/cuenta-alumno.html"></iframe><script>
+const params = new URLSearchParams(location.search), frame = document.querySelector("iframe");
+if (params.has("confirmacion")) frame.src = "/tests/fixtures/cuenta-alumno.html?confirmacion=1";
+frame.style.width = `${[320,390,768].includes(Number(params.get("width"))) ? Number(params.get("width")) : 390}px`;
+frame.style.height = `${[520,667,844].includes(Number(params.get("height"))) ? Number(params.get("height")) : 667}px`;
+</script></body></html>

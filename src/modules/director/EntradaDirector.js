@@ -4,7 +4,7 @@ import { DirectorConfig } from "./DirectorConfig.js";
 import { DirectorCoursesSchedules } from "./DirectorCoursesSchedules.js";
 import { DirectorNotes } from "./DirectorNotes.js";
 import { DirectorReports } from "./DirectorReports.js";
-import { DirectorStudents } from "./DirectorStudents.js";
+import { DirectorStudents, resetDirectorStudents } from "./DirectorStudents.js";
 import { DirectorTeachers } from "./DirectorTeachers.js";
 import { bindDirectorPages } from "./DirectorBindings.js";
 import { bindDirectorAlerts } from "./DirectorAlerts.js";
@@ -24,4 +24,4 @@ export const rutas = {
 
 export const vincular = bindDirectorPages;
 export const actualizarIconos = refreshDirectorIcons;
-export const desmontar = () => bindDirectorAlerts("/");
+export const desmontar = () => { resetDirectorStudents(); bindDirectorAlerts("/"); };

@@ -69,7 +69,8 @@ function subjectSheet({
   gradesMap,
   attendanceRows,
   calculateStudentTerm,
-  teacherName
+  teacherName,
+  rowOffset = 0
 }) {
   const subjectActivitiesAll = activities.filter((item) => item.materiaId === subject.id);
   const serCriteriaRaw = subjectActivitiesAll
@@ -88,7 +89,7 @@ function subjectSheet({
   const regularNoteCount = Math.max(1, noteCount - 3);
   const densityClass = noteCount > 34 ? "print-ultra" : noteCount > 27 ? "print-dense" : "";
   const info = courseInfo(course);
-  const baseUrl = import.meta.env.BASE_URL || "/";
+  const baseUrl = import.meta.env?.BASE_URL || "/";
   const logoUrl = `${window.location.origin}${baseUrl}images/logo-nueva-bolivia.png`;
 
   return `
@@ -168,13 +169,13 @@ function subjectSheet({
           ${Array.from({ length: 40 }, (_, rowIndex) => {
             const student = students[rowIndex];
             if (!student) {
-              return `<tr><td>${rowIndex + 1}</td><td class="student-name">&nbsp;</td>${emptyCells(noteCount)}</tr>`;
+              return `<tr><td>${rowOffset + rowIndex + 1}</td><td class="student-name">&nbsp;</td>${emptyCells(noteCount)}</tr>`;
             }
             const serExtraValues = serCriteriaRaw.filter((item) => gradesMap[item.id]?.[student.id]).map((item) => studentActivityGrade(item, student.id, gradesMap));
             const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota : null;
             const calc = calculateStudentTerm(student, gradedActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
             return `<tr>
-              <td>${rowIndex + 1}</td>
+              <td>${rowOffset + rowIndex + 1}</td>
               <td class="student-name">${escapeHtml(student.nombre)}</td>
               ${gradeCell(calc.asistencia100)}
               ${gradeCell(calc.puntualidad100)}
@@ -213,7 +214,7 @@ function subjectSheet({
   `;
 }
 
-function printDocument(payload, subjects) {
+export function printDocument(payload, subjects) {
   const gradesMap = gradeByActivityAndStudent(payload.gradesList || []);
   const html = `
     <!doctype html>
@@ -329,7 +330,9 @@ function printDocument(payload, subjects) {
         </style>
       </head>
       <body>
-        ${subjects.map((subject) => subjectSheet({ ...payload, subject, gradesMap })).join("")}
+        ${subjects.flatMap((subject) => Array.from({ length: Math.max(1, Math.ceil(payload.students.length / 40)) }, (_, page) =>
+          subjectSheet({ ...payload, students: payload.students.slice(page * 40, (page + 1) * 40), rowOffset: page * 40, subject, gradesMap })
+        )).join("")}
         <script>
           window.addEventListener("load", () => {
             setTimeout(() => {
@@ -393,7 +396,7 @@ export function openTeacherNotesPrintModal(payload) {
           `).join("")}
         </div>
       </div>
-      <p class="mt-3 text-xs leading-5 text-slate-500">Se imprimira en hoja carta vertical, una hoja por materia seleccionada.</p>
+      <p class="mt-3 text-xs leading-5 text-slate-500">Se imprimira en hoja carta vertical, con hasta 40 alumnos por pagina.</p>
       <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <button type="button" data-close-notes-print class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancelar</button>
         <button type="button" data-print-selected-notes class="rounded-2xl bg-school-green px-4 py-2 text-sm font-semibold text-white shadow-soft hover:bg-school-navy">Imprimir</button>

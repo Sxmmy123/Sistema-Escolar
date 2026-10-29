@@ -59,7 +59,7 @@ export function courseSubjectsBadges(course) {
   if (!course?.materias?.length) return `<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-500">Sin materias</span>`;
   return course.materias.map((subjectId) => {
     const subject = findSubject(subjectId);
-    return `<span class="rounded-full px-2 py-0.5 text-[11px] font-black text-slate-700" style="background:${subject?.color || "#e2e8f0"}">${escapeHtml(subject?.corto || subjectId)}</span>`;
+    return `<span class="tinted-surface rounded-full px-2 py-0.5 text-[11px] font-black text-slate-700" style="--surface-color:${subject?.color || "#e2e8f0"}">${escapeHtml(subject?.corto || subjectId)}</span>`;
   }).join(" ");
 }
 
@@ -73,7 +73,7 @@ export function scheduleList(rows, emptyMessage) {
       const courseNumber = String(rowCourse.corto || rowCourse.nombre || "").replace(/\D/g, "") || "I";
       const subjectIcon = subjectIconName(row.materiaId, row.materia);
       return `
-        <article class="min-w-0 overflow-hidden rounded-xl border border-amber-900/10 shadow-sm" style="background:${row.color || "#fff"}">
+        <article class="tinted-surface subject-accent min-w-0 overflow-hidden rounded-xl border border-amber-900/10 shadow-sm" style="--surface-color:${row.color || "#fff"}">
           <div class="flex items-stretch">
             <div class="min-w-0 flex-1 px-2 py-1.5">
               <p class="truncate text-[9px] font-black uppercase tracking-[.08em] text-slate-600">Per. ${escapeHtml(row.periodo)} · ${escapeHtml(row.hora)}</p>

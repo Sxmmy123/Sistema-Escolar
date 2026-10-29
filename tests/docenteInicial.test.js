@@ -451,6 +451,38 @@ test("cerrar sesion descarta datos pendientes y bloquea escrituras de la cuenta 
   await assert.rejects(data.guardarRegistro(daily), /sesion cambio/);
 });
 
+test("una lectura iniciada antes del guardado no reemplaza el registro nuevo", async () => {
+  let release, requests = 0;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const saved = { id: "nuevo", ...daily };
+  const old = { id: "anterior", ...daily, descripcion: "Anterior" };
+  const data = crearDatosInicial(context, {
+    listarRegistrosInicial: async () => ++requests === 1 ? pending : [old, saved],
+    guardarRegistroInicial: async () => saved
+  });
+  const loading = data.cargar("records", "inicial", "t1"); await settle();
+  await data.guardarRegistro(daily);
+  release([old]);
+  const result = await loading;
+  assert.deepEqual(result.map((row) => row.id), ["anterior", "nuevo"]);
+  assert.equal(data.leer("records", "inicial", "t1").length, 2);
+  assert.equal(requests, 2);
+});
+
+test("una actualizacion forzada espera la consulta previa y obtiene fuentes del servidor", async () => {
+  let release, requests = 0;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const data = crearDatosInicial(context, { listarRegistrosInicial: async (_, course, term, options) => {
+    requests++;
+    if (requests === 1) return pending;
+    assert.equal(options.fresh, true); return [{ id: "actual" }];
+  } });
+  const first = data.cargar("records", "inicial", "t1"); await settle();
+  const fresh = data.cargar("records", "inicial", "t1", "", true);
+  release([{ id: "viejo" }]); await first;
+  assert.equal((await fresh)[0].id, "actual"); assert.equal(requests, 2);
+});
+
 async function controllerFixture(save, dependencies = {}) {
   const source = await readFile(new URL("../src/modules/docente-inicial/ControladorInicial.js", import.meta.url), "utf8");
   const code = source.slice(source.indexOf("export function crearControladorInicial")).replace("export function", "function");
@@ -489,7 +521,7 @@ async function controllerFixture(save, dependencies = {}) {
   controller.state.registrationStudentSelected = true;
   controller.vincular("/docente/registro");
   const click = (action) => listeners.get("click")({ target: { closest: () => ({ hasAttribute: () => false, disabled: false, dataset: typeof action === "string" ? { initialAction: action } : action }) } });
-  return { controller, click, modal, trigger, control: modalControl,
+  return { controller, click, modal, main, trigger, control: modalControl,
     input: (selector, value) => listeners.get("input")({ target: { value, matches: (candidate) => candidate === selector } }),
     changePrint: (target) => modalListeners.get("change")?.({ target }),
     pickStudent: (id) => modalListeners.get("click")?.({ target: { closest: () => ({ dataset: { initialPickerStudent: id } }) } }),
@@ -622,7 +654,37 @@ test("imprimir informes consulta tres trimestres, selecciona todos y permite un 
   all.checked = false; fixture.changePrint(all); assert.equal(print.disabled, true);
   const ana = fixture.control('[data-initial-print-student="a"]'); ana.checked = true; fixture.changePrint(ana);
   assert.equal(all.indeterminate, true); assert.equal(print.disabled, false);
-  print.click(); assert.equal(printed.length, 1); assert.equal(printed[0].rows.length, 1); assert.equal(printed[0].rows[0].student.id, "a"); assert.equal(printed[0].rows[0].informes.t3, "Ana t3");
+  await print.click(); assert.equal(printed.length, 1); assert.equal(printed[0].rows.length, 1); assert.equal(printed[0].rows[0].student.id, "a"); assert.equal(printed[0].rows[0].informes.t3, "Ana t3");
+  fixture.controller.desmontar();
+});
+
+test("actualizar Seguimiento no cierra el editor ni pierde su texto pendiente", async () => {
+  let release;
+  const record = { id: "docente-inicial_nota", tipo: "bitacora", docenteUid: context.uid, alumnoId: "a", descripcion: "Anterior" };
+  const data = { leer: (type) => type === "students" ? [{ id: "a", nombre: "Ana" }] : [record], cargar: (type) => type === "records" ? new Promise((resolve) => { release = resolve; }) : Promise.resolve([]), desmontar() {} };
+  const fixture = await controllerFixture(async () => {}, { data }); await settle();
+  fixture.controller.vincular("/docente/resumenes");
+  let html = fixture.main.innerHTML;
+  Object.defineProperty(fixture.main, "innerHTML", { get: () => html, set(value) { html = value; fixture.modal.innerHTML = ""; } });
+  fixture.click("load"); await settle();
+  fixture.click({ initialEditJournal: record.id });
+  const text = fixture.control("[data-initial-edit-journal-text]"); text.value = "Borrador pendiente"; text.input();
+  release([]); await settle();
+  assert.match(fixture.modal.innerHTML, /Editar observacion/);
+  assert.equal(text.value, "Borrador pendiente");
+  fixture.escape(); assert.equal(fixture.modal.innerHTML, ""); fixture.controller.desmontar();
+});
+
+test("si las fuentes cambian con el selector de impresion abierto se exige revisar el informe", async () => {
+  const pupils = [{ id: "a", nombre: "Ana" }];
+  let rows = [{ id: "informe", alumnoId: "a", tipo: "informe", aprobado: true, descripcion: "Avanza con autonomia", fuentesFirma: firmaRegistrosInicial([], "a") }], printed = 0;
+  const data = { leer: (type) => type === "students" ? pupils : rows, cargar: async (type) => type === "students" ? pupils : rows, desmontar() {} };
+  const fixture = await controllerFixture(async () => {}, { data, printReports: () => { printed++; } });
+  fixture.controller.vincular("/docente/informe"); await settle();
+  fixture.click("print-course-reports"); await settle();
+  rows = [...rows, { id: "comentario-nuevo", alumnoId: "a", tipo: "bitacora", descripcion: "Nueva observacion" }];
+  await fixture.control("[data-initial-confirm-print]").click();
+  assert.equal(printed, 0); assert.match(fixture.controller.state.message, /cambiaron/);
   fixture.controller.desmontar();
 });
 

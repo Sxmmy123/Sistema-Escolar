@@ -295,7 +295,7 @@ export async function renderDateGrading(context, { actualizar = false } = {}) {
                                   const accent = showCourse ? courseAccent(item.cursoId) : (subject?.color || "#e2e8f0");
                                   const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
                                   return `
-                                    <button type="button" data-grade-activity="${item.id}" class="group flex w-full items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+                                    <button type="button" data-grade-activity="${item.id}" class="tinted-surface group flex w-full items-stretch overflow-hidden rounded-lg border text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; --surface-color:${background}">
                                       <span class="min-w-0 flex-1 px-2 py-1">
                                         <span class="block truncate text-[11px] font-medium leading-tight text-slate-900" title="${escapeHtml(item.titulo || "Sin titulo")}">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
                                         <span class="block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
@@ -327,7 +327,7 @@ export async function renderDateGrading(context, { actualizar = false } = {}) {
                 ${showCourse ? `<span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-school-sky text-sm font-semibold text-school-navy" title="${escapeHtml(activityCourse?.nombre || "Curso")}">${escapeHtml(courseNumber)}</span>` : ""}
                 <div class="min-w-0 flex-1">
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
-                    <span class="rounded px-2 py-0.5 text-slate-900" style="background:${subject?.color || "#e2e8f0"}">${escapeHtml(subject?.nombre || activity.materiaId)}</span>
+                    <span class="tinted-surface rounded px-2 py-0.5 text-slate-900" style="--surface-color:${subject?.color || "#e2e8f0"}">${escapeHtml(subject?.nombre || activity.materiaId)}</span>
                     <span>${activityEvaluationLabel(activity)} · ${activity.maximo || 100} pts</span>
                   </div>
                   <h3 class="mt-1 break-words text-base font-semibold leading-tight text-slate-900" title="${escapeHtml(activity.titulo || "Sin titulo")}">${escapeHtml(activity.titulo || "Sin titulo")}</h3>

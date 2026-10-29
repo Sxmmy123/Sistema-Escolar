@@ -2,6 +2,7 @@ import { createIcons, LogIn } from "lucide";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
 import "./styles.css";
+import "./theme.css";
 import "./firebase/client.js";
 import { auth, firestore } from "./firebase/client.js";
 import { cargarConfiguracion, claveCache, configuracionActual, establecerConfiguracion, gestionActual, observarConfiguracion, VERSION_MODELO } from "./services/rutasFirestore.js";
@@ -13,9 +14,11 @@ import { setView } from "./ui/dom.js";
 import { LoginView, bindLogin } from "./modules/login/LoginView.js";
 import { crearCargaPorRol } from "./modules/cargaPorRol.js";
 import { homeForRole, resolveUserRole, routeRequiredRole } from "./services/authSession.js";
-import { changeOwnPassword, setRecoveryEmail } from "./services/accountSettings.js";
+import { bindAccountSettings } from "./ui/accountSettings.js";
+import { initializeTheme, bindThemeButtons } from "./ui/theme.js";
 import { registerServiceWorker } from "./pwa/registerServiceWorker.js";
 
+initializeTheme();
 registerServiceWorker();
 
 const modulosPorRol = crearCargaPorRol();
@@ -74,6 +77,7 @@ function bindShell() {
   shellBindingsController?.abort();
   shellBindingsController = new AbortController();
   const { signal } = shellBindingsController;
+  bindThemeButtons({ signal });
   bindRegistroDocente(signal);
   const sidebar = document.querySelector("[data-sidebar]");
   const backdrop = document.querySelector("[data-sidebar-backdrop]");
@@ -179,87 +183,7 @@ function bindShell() {
     button.addEventListener("click", doLogout, { signal });
   });
 
-  bindAccountSettings();
-}
-
-function accountStatus(message, type = "info") {
-  const status = document.querySelector("[data-account-status]");
-  if (!status) return;
-  const tone = type === "error"
-    ? "border-red-200 bg-red-50 text-red-700"
-    : "border-green-200 bg-green-50 text-green-700";
-  status.className = `mx-5 mb-5 rounded-2xl border px-4 py-3 text-sm font-bold ${tone}`;
-  status.textContent = message;
-}
-
-function accountErrorMessage(error) {
-  const code = error?.code || "";
-  if (code === "auth/wrong-password" || code === "auth/invalid-credential") return "La contrasena actual no es correcta.";
-  if (code === "auth/requires-recent-login") return "Por seguridad vuelve a ingresar y repite el cambio.";
-  if (code === "auth/email-already-in-use") return "Ese correo ya esta usado por otra cuenta.";
-  if (code === "auth/invalid-email") return "El correo no tiene formato valido.";
-  if (code === "auth/weak-password") return "La nueva contrasena es muy debil.";
-  return error?.message || "No se pudo guardar el cambio.";
-}
-
-function bindAccountSettings() {
-  const modal = document.querySelector("[data-account-modal]");
-  if (!modal) return;
-
-  const open = () => {
-    modal.classList.remove("hidden");
-    modal.classList.add("flex");
-  };
-  const close = () => {
-    modal.classList.add("hidden");
-    modal.classList.remove("flex");
-  };
-
-  document.querySelectorAll("[data-action='open-account-settings']").forEach((button) => button.addEventListener("click", open));
-  document.querySelectorAll("[data-action='close-account-settings']").forEach((button) => button.addEventListener("click", close));
-
-  document.querySelector("[data-account-email-form]")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector("button[type='submit']");
-    const data = new FormData(form);
-    button.disabled = true;
-    accountStatus("Guardando correo...");
-    try {
-      const email = await setRecoveryEmail({
-        email: data.get("email"),
-        currentPassword: data.get("currentPassword")
-      });
-      accountStatus(`Correo guardado: ${email}`);
-      form.reset();
-    } catch (error) {
-      accountStatus(accountErrorMessage(error), "error");
-    } finally {
-      button.disabled = false;
-    }
-  });
-
-  document.querySelector("[data-account-password-form]")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector("button[type='submit']");
-    const data = new FormData(form);
-    button.disabled = true;
-    accountStatus("Cambiando contrasena...");
-    try {
-      await changeOwnPassword({
-        currentPassword: data.get("currentPassword"),
-        newPassword: data.get("newPassword"),
-        confirmPassword: data.get("confirmPassword")
-      });
-      accountStatus("Contrasena actualizada correctamente.");
-      form.reset();
-    } catch (error) {
-      accountStatus(accountErrorMessage(error), "error");
-    } finally {
-      button.disabled = false;
-    }
-  });
+  bindAccountSettings({ signal, beforeOpen: close });
 }
 
 function desmontarRol() {

@@ -377,7 +377,7 @@ function subjectPerformance(courseView) {
           return `
             <div class="group/row block w-full px-3 py-3 transition hover:bg-slate-50 sm:grid sm:grid-cols-[minmax(210px,.9fr)_minmax(300px,2fr)] sm:items-center sm:gap-4 sm:px-4 sm:py-2.5 ${selected ? "bg-green-50 ring-1 ring-inset ring-school-green/30" : "bg-white"}">
               <button type="button" data-director-note-subject="${item.subject.id}" class="flex w-full min-w-0 items-center gap-2.5 rounded-md text-left" aria-label="Ver estudiantes de ${escapeDirectorHtml(item.subject.nombre)}">
-                <span class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-700" style="background-color:${item.subject.color || "#eef2f7"}">${icon(SUBJECT_ICONS[item.subject.id] || "book-open", "h-4 w-4")}</span>
+                <span class="tinted-surface grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-700" style="--surface-color:${item.subject.color || "#eef2f7"}">${icon(SUBJECT_ICONS[item.subject.id] || "book-open", "h-4 w-4")}</span>
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-xs font-semibold text-slate-800">${escapeDirectorHtml(item.subject.nombre)}</span>
                   <span class="mt-0.5 block text-xs font-semibold text-school-green">Ver estudiantes</span>
@@ -414,7 +414,7 @@ function subjectStudentPerformance(courseView, subject) {
     <section class="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-3 py-3.5 sm:px-4">
         <div class="flex min-w-0 items-center gap-3">
-          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-700" style="background-color:${subject.color || "#eef2f7"}">${icon(SUBJECT_ICONS[subject.id] || "book-open", "h-5 w-5")}</span>
+          <span class="tinted-surface grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-700" style="--surface-color:${subject.color || "#eef2f7"}">${icon(SUBJECT_ICONS[subject.id] || "book-open", "h-5 w-5")}</span>
           <div class="min-w-0">
             <p class="text-[10px] font-semibold uppercase tracking-[.12em] text-school-green">Rendimiento por estudiante</p>
             <h2 class="truncate text-base font-semibold text-slate-950">${escapeDirectorHtml(subject.nombre)}</h2>

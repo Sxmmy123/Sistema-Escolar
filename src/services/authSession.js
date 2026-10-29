@@ -5,10 +5,12 @@ import { studentIdFromProfile } from "./identidadAlumno.js";
 
 const validRoles = new Set(["admin", "docente", "director", "alumno"]);
 
-export async function resolveUserRole(user) {
-  const email = String(user?.email || "").toLowerCase();
+export function isMainAdmin(user) {
+  return user?.uid === ADMIN_USER.uid;
+}
 
-  if (user?.uid === ADMIN_USER.uid || email === ADMIN_USER.email) {
+export async function resolveUserRole(user) {
+  if (isMainAdmin(user)) {
     return "admin";
   }
 

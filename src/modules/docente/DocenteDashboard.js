@@ -37,7 +37,7 @@ function summaryCard(label, valueAttr, toneClass, iconName = "") {
 
 export function DocenteDashboard() {
   return appShell("docente", "/docente", `
-    <div class="mx-auto grid w-full max-w-[1120px] gap-2.5 sm:gap-3 lg:h-full lg:grid-rows-[64px_88px_74px_minmax(0,1fr)_92px] lg:overflow-hidden" data-teacher-page>
+    <div class="mx-auto grid w-full max-w-[1120px] gap-2.5 sm:gap-3 lg:h-full lg:grid-rows-[64px_88px_max-content_minmax(0,1fr)_max-content] lg:overflow-hidden" data-teacher-page>
       <section class="rounded-lg border border-school-green/20 bg-white px-2.5 py-2 shadow-soft sm:rounded-xl sm:px-3">
         <div class="flex h-full items-center justify-between gap-2">
           <p class="text-xs font-medium text-slate-600">Seleccionar trimestre</p>
@@ -48,8 +48,8 @@ export function DocenteDashboard() {
       </section>
 
       <section class="relative overflow-hidden rounded-lg border border-amber-900/10 bg-white px-3 py-2.5 shadow-soft sm:rounded-xl sm:px-4 sm:py-3">
-        <div class="absolute inset-y-0 right-0 hidden w-80 bg-gradient-to-l from-school-sky via-school-sky/80 to-transparent lg:block"></div>
-        <img src="${publicAsset("images/logo-nueva-bolivia.png")}" alt="" class="absolute right-20 top-1/2 hidden h-20 -translate-y-1/2 object-contain opacity-20 lg:block">
+        <div class="teacher-dashboard-accent absolute inset-y-0 right-0 hidden w-80 bg-gradient-to-l from-school-sky via-school-sky/80 to-transparent lg:block" aria-hidden="true"></div>
+        <img src="${publicAsset("images/logo-nueva-bolivia.png")}" alt="" class="teacher-dashboard-watermark absolute right-20 top-1/2 hidden h-20 -translate-y-1/2 object-contain opacity-20 lg:block">
         <div class="relative flex h-full items-center justify-between gap-4">
           <div class="teacher-module-heading min-w-0">
             <h1 class="teacher-module-title">Panel docente</h1>

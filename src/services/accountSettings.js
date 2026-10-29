@@ -7,8 +7,8 @@ import {
 import { doc, getDoc, serverTimestamp, writeBatch } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
 
-function currentUser() {
-  const user = auth.currentUser;
+function currentUser(authClient = auth) {
+  const user = authClient.currentUser;
   if (!user) throw new Error("No hay usuario autenticado.");
   return user;
 }
@@ -18,12 +18,14 @@ async function currentProfile(uid) {
   return snap.exists() ? snap.data() : {};
 }
 
-async function reauth(currentPassword) {
-  const user = currentUser();
+async function reauth(currentPassword, { authClient = auth, reauthenticate = reauthenticateWithCredential } = {}) {
+  const user = currentUser(authClient);
   const email = user.email;
   if (!email) throw new Error("La cuenta no tiene correo de autenticacion.");
   const credential = EmailAuthProvider.credential(email, String(currentPassword || ""));
-  await reauthenticateWithCredential(user, credential);
+  if (!String(currentPassword || "")) throw new Error("Escribe tu contrasena actual.");
+  await reauthenticate(user, credential);
+  if (authClient.currentUser?.uid !== user.uid) throw new Error("La sesion cambio. Vuelve a ingresar antes de cambiar tu cuenta.");
   return user;
 }
 
@@ -64,12 +66,12 @@ export async function setRecoveryEmail({ email, currentPassword }) {
   return cleanEmail;
 }
 
-export async function changeOwnPassword({ currentPassword, newPassword, confirmPassword }) {
+export async function changeOwnPassword({ currentPassword, newPassword, confirmPassword }, { authClient = auth, reauthenticate = reauthenticateWithCredential, update = updatePassword } = {}) {
   const cleanNew = String(newPassword || "");
   if (cleanNew.length < 6) throw new Error("La nueva contrasena debe tener al menos 6 caracteres.");
   if (cleanNew !== String(confirmPassword || "")) throw new Error("La confirmacion no coincide.");
 
-  const user = await reauth(currentPassword);
-  await updatePassword(user, cleanNew);
+  const user = await reauth(currentPassword, { authClient, reauthenticate });
+  await update(user, cleanNew);
   return true;
 }

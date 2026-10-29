@@ -59,7 +59,7 @@ test("el orden se conserva entre materias y solo las pendientes prioritarias pas
 });
 test("tablero por materia y lista enumerada comparten colores, orden y eliminacion confirmable", () => {
   const view = state(); const html = ActividadesInicial(view);
-  assert.match(html, /initial-activity-board/); assert.ok(html.includes(`background:${findSubject("artes_plasticas").color}`));
+  assert.match(html, /initial-activity-board/); assert.ok(html.includes(`--surface-color:${findSubject("artes_plasticas").color}`));
   assert.match(html, /data-activity-action="eliminar"/);
   view.activityView = "list"; const list = ActividadesInicial(view);
   assert.match(list, /Subir prioridad/); assert.match(list, /Bajar prioridad/); assert.match(list, /initial-activity-table/);

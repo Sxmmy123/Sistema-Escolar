@@ -1,9 +1,9 @@
 import { createUserWithEmailAndPassword, deleteUser, signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { collection, deleteField, doc, getDoc, getDocs, increment, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
+import { collection, deleteField, doc, getDoc, getDocs, increment, query, runTransaction, serverTimestamp, where, writeBatch } from "firebase/firestore";
 import { auth, creatorAuth, firestore } from "../firebase/client.js";
 import { usernameToAuthEmail } from "./users.js";
 import { studentPasswordForNewAccess, normalizeStudentAccessKey } from "./identidadAlumno.js";
-import { documentoGestion } from "./rutasFirestore.js";
+import { documentoGestion, gestionActual } from "./rutasFirestore.js";
 
 export { normalizeStudentAccessKey } from "./identidadAlumno.js";
 
@@ -14,8 +14,9 @@ export async function createStudentAuthAccess(student, course = null, clients = 
   if (!adminUid) throw new Error("Ingresa como administrador para preparar los accesos.");
   const usuario = normalizeStudentAccessKey(student?.ci || student?.usuario || student?.id);
   if (!student?.id || !/^[a-z0-9._-]+$/i.test(usuario)) throw new Error("El alumno no tiene un usuario valido.");
+  const year = gestionActual();
   const studentRef = doc(clients.firestore, "alumnos", student.id);
-  const matriculaRef = documentoGestion(clients.firestore, "matriculas", student.id);
+  const matriculaRef = documentoGestion(clients.firestore, "matriculas", student.id, year);
   const usernameRef = doc(clients.firestore, "indice_accesos", usuario);
   const [studentSnap, matriculaSnap, usernameSnap] = await Promise.all([getDoc(studentRef), getDoc(matriculaRef), getDoc(usernameRef)]);
   if (!studentSnap.exists()) throw new Error("El alumno ya no esta registrado. Actualiza la lista antes de crear su acceso.");
@@ -31,7 +32,6 @@ export async function createStudentAuthAccess(student, course = null, clients = 
   if (usernameSnap.exists() && existingUid && usernameSnap.data().uid !== existingUid) {
     throw new Error("Ese usuario ya esta vinculado a otra cuenta. No se modifico ningun acceso.");
   }
-  const active = registeredStudent.activo !== false && matriculaSnap.data().estado === "activo";
   let credential = null;
   let created = false;
   let recoveredProfileMissing = false;
@@ -80,17 +80,32 @@ export async function createStudentAuthAccess(student, course = null, clients = 
       uid = credential.user.uid;
     }
 
-    const batch = writeBatch(clients.firestore);
-    batch.set(doc(clients.firestore, "usuarios", uid), {
-      nombre: registeredStudent.nombre || usuario, usuario, authEmail, rol: "alumno",
-      alumnoId: student.id, activo: active,
-      ...(created || recoveredProfileMissing ? { createdAt: serverTimestamp(), createdBy: adminUid, correoRecuperacion: requestedEmail || registeredStudent.correo || null } : {}),
-      updatedAt: serverTimestamp()
-    }, { merge: true });
-    batch.set(studentRef, { authUid: uid, authEmail, password: deleteField(), updatedAt: serverTimestamp() }, { merge: true });
-    batch.set(usernameRef, { uid, authEmail });
-    if (clients.auth.currentUser?.uid !== adminUid) throw new Error("La sesion cambio antes de guardar el acceso. Vuelve a ingresar como administrador.");
-    await batch.commit();
+    const profileRef = doc(clients.firestore, "usuarios", uid);
+    await runTransaction(clients.firestore, async (transaction) => {
+      const [currentStudent, currentEnrollment, currentUsername, currentProfile] = await Promise.all([
+        transaction.get(studentRef), transaction.get(matriculaRef), transaction.get(usernameRef), transaction.get(profileRef)
+      ]);
+      const latest = currentStudent.data();
+      if (!latest || normalizeStudentAccessKey(latest.ci || latest.usuario || student.id) !== usuario || currentEnrollment.data()?.cursoId !== courseId) {
+        throw new Error("Los datos o el curso del alumno cambiaron. Actualiza la lista antes de reintentar.");
+      }
+      if ((latest.authUid && latest.authUid !== uid) || (currentUsername.exists() && currentUsername.data().uid !== uid)) {
+        throw new Error("Otro registro ya vinculo el acceso de este alumno. Actualiza la lista; se conserva esa cuenta.");
+      }
+      if (currentProfile.exists() && (currentProfile.data().rol !== "alumno" || currentProfile.data().alumnoId !== student.id)) {
+        throw new Error("La cuenta ya pertenece a otro perfil. No se modifico esa cuenta.");
+      }
+      if (clients.auth.currentUser?.uid !== adminUid) throw new Error("La sesion cambio antes de guardar el acceso.");
+      if (gestionActual() !== year) throw new Error("La gestion cambio antes de guardar el acceso.");
+      transaction.set(profileRef, {
+        nombre: latest.nombre || usuario, usuario, authEmail, rol: "alumno", alumnoId: student.id,
+        activo: latest.activo !== false && currentEnrollment.data().estado === "activo",
+        ...(created || recoveredProfileMissing ? { createdAt: serverTimestamp(), createdBy: adminUid, correoRecuperacion: requestedEmail || latest.correo || null } : {}),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      transaction.update(studentRef, { authUid: uid, authEmail, password: deleteField(), updatedAt: serverTimestamp() });
+      transaction.set(usernameRef, { uid, authEmail });
+    });
     return { created, usuario, uid, authEmail, alumnoId: student.id, nombre: registeredStudent.nombre || usuario, password: created ? temporary : "" };
   } catch (error) {
     if (created) {

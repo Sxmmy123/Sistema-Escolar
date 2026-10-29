@@ -1,5 +1,6 @@
 import { APP_NAME, APP_VERSION } from "../firebase/config.js";
 import { icon } from "./dom.js";
+import { themeToggle } from "./theme.js";
 import { avisoGestionDocente, etiquetaGestionDocente, fechaCabeceraDocente } from "./gestionDocente.js";
 
 function publicAsset(path) {
@@ -99,12 +100,13 @@ function sidebarNav(items, activeRoute, title, mode = "desktop") {
             <p class="text-[9px] font-semibold text-slate-500">Docente</p>
           </div>
         </div>
-        <div class="teacher-sidebar-actions mt-2 grid ${isMobile ? "grid-cols-2" : "grid-cols-1"} gap-1.5">
-        <button class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-school-green/20 bg-green-50 px-2 py-1.5 text-[11px] font-bold text-school-green transition hover:bg-green-100" data-action="open-account-settings" title="Cuenta">
+        <div class="sidebar-toolbar teacher-sidebar-actions mt-2">
+        ${themeToggle()}
+        <button class="sidebar-session-button" data-action="open-account-settings" title="Cuenta" aria-label="Cuenta">
           ${icon("settings", "h-3.5 w-3.5")} <span class="teacher-sidebar-action-copy">Cuenta</span>
         </button>
-        <button class="flex w-full items-center justify-center gap-1.5 rounded-lg bg-red-600 px-2 py-1.5 text-[11px] font-bold text-white transition hover:bg-red-700" data-action="logout" title="Salir">
-          ${icon("log-out", "h-3.5 w-3.5")} <span class="teacher-sidebar-action-copy">Salir</span>
+        <button class="sidebar-tool-button sidebar-logout" data-action="logout" title="Salir" aria-label="Salir">
+          ${icon("log-out", "h-3.5 w-3.5")}
         </button>
         </div>
       </div>
@@ -154,27 +156,45 @@ function studentSidebarNav(items, activeRoute, mode = "desktop") {
             <p class="text-[9px] font-semibold text-slate-500">Estudiante</p>
           </div>
         </div>
-        <button class="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-red-600 px-2 py-1.5 text-[11px] font-bold text-white transition hover:bg-red-700" data-action="logout">
-          ${icon("log-out", "h-3.5 w-3.5")} Salir
+        <div class="sidebar-toolbar mt-2">
+        ${themeToggle()}
+        <button type="button" class="sidebar-session-button" data-action="open-account-settings" aria-haspopup="dialog" title="Cambiar contrasena" aria-label="Cambiar contrasena">
+          ${icon("key-round", "h-3.5 w-3.5")} Contrasena
         </button>
+        <button class="sidebar-tool-button sidebar-logout" data-action="logout" title="Salir" aria-label="Salir">
+          ${icon("log-out", "h-3.5 w-3.5")}
+        </button>
+        </div>
       </div>
     </div>
   `;
 }
 
-function accountSettingsModal() {
+function accountPasswordField(name, label, autocomplete) {
+  const id = `account-${name}`;
+  return `<label class="mt-3 block text-xs font-semibold text-slate-700" for="${id}">${label}</label>
+    <div class="relative mt-1.5">
+      <input id="${id}" class="min-h-11 w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-3 pr-12 text-sm outline-none focus:border-school-green focus:ring-2 focus:ring-school-green/10" name="${name}" type="password" autocomplete="${autocomplete}" ${autocomplete === "new-password" ? 'minlength="6"' : ""} required>
+      <button type="button" class="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-lg text-slate-500 hover:bg-slate-100" data-account-toggle-password="${id}" aria-controls="${id}" aria-pressed="false" aria-label="Mostrar ${label.toLowerCase()}" title="Mostrar contrasena">
+        <span data-account-eye>${icon("eye", "h-4 w-4")}</span><span data-account-eye-off class="hidden">${icon("eye-off", "h-4 w-4")}</span>
+      </button>
+    </div>`;
+}
+
+function accountSettingsModal(role = "docente") {
+  const student = role === "alumno";
   return `
-    <div class="fixed inset-0 z-[70] hidden items-center justify-center bg-slate-950/50 p-4" data-account-modal>
-      <div class="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+    <div class="fixed inset-0 z-[70] hidden items-start justify-center bg-slate-950/50 p-4 sm:items-center" data-account-modal aria-hidden="true">
+      <section class="max-h-[calc(100dvh-2rem)] w-full ${student ? "max-w-md rounded-lg" : "max-w-2xl rounded-3xl"} overflow-y-auto bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" tabindex="-1">
         <div class="flex items-center justify-between border-b border-slate-100 p-5">
           <div>
-            <p class="text-xs font-black uppercase tracking-[.18em] text-school-green">Cuenta docente</p>
-            <h3 class="text-xl font-black text-slate-900">Seguridad y recuperacion</h3>
+            <p class="text-xs font-semibold text-school-green">${student ? "Cuenta del estudiante" : "Cuenta docente"}</p>
+            <h3 id="account-modal-title" class="mt-1 text-lg font-semibold text-slate-900">${student ? "Cambiar contrasena" : "Seguridad y recuperacion"}</h3>
           </div>
           <button class="grid h-10 w-10 place-items-center rounded-2xl bg-slate-100 text-slate-600" data-action="close-account-settings" aria-label="Cerrar">${icon("x", "h-5 w-5")}</button>
         </div>
-        <div class="grid gap-4 p-5 md:grid-cols-2">
-          <form class="rounded-2xl border border-slate-200 bg-slate-50 p-4" data-account-email-form>
+        <div class="grid gap-4 p-5 ${student ? "" : "md:grid-cols-2"}" data-account-forms>
+          ${student ? "" : `<form class="rounded-2xl border border-slate-200 bg-slate-50 p-4" data-account-email-form>
             <p class="text-sm font-black text-slate-900">Establecer Gmail</p>
             <p class="mt-1 text-xs font-semibold leading-5 text-slate-500">Sirve para entrar con correo real y recuperar la cuenta.</p>
             <label class="mt-4 block text-xs font-black text-slate-700">Gmail o correo personal</label>
@@ -182,22 +202,23 @@ function accountSettingsModal() {
             <label class="mt-3 block text-xs font-black text-slate-700">Contrasena actual</label>
             <input class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="currentPassword" type="password" required>
             <button class="mt-4 w-full rounded-xl bg-school-green px-4 py-2.5 text-sm font-black text-white" type="submit">Guardar correo</button>
-          </form>
+          </form>`}
 
-          <form class="rounded-2xl border border-slate-200 bg-slate-50 p-4" data-account-password-form>
-            <p class="text-sm font-black text-slate-900">Cambiar contrasena</p>
-            <p class="mt-1 text-xs font-semibold leading-5 text-slate-500">Usa una contrasena nueva de al menos 6 caracteres.</p>
-            <label class="mt-4 block text-xs font-black text-slate-700">Contrasena actual</label>
-            <input class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="currentPassword" type="password" required>
-            <label class="mt-3 block text-xs font-black text-slate-700">Nueva contrasena</label>
-            <input class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="newPassword" type="password" minlength="6" required>
-            <label class="mt-3 block text-xs font-black text-slate-700">Confirmar</label>
-            <input class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="confirmPassword" type="password" minlength="6" required>
-            <button class="mt-4 w-full rounded-xl bg-school-navy px-4 py-2.5 text-sm font-black text-white" type="submit">Cambiar contrasena</button>
+          <form class="${student ? "" : "rounded-2xl border border-slate-200 bg-slate-50 p-4"}" data-account-password-form>
+            ${student ? "" : '<p class="text-sm font-semibold text-slate-900">Cambiar contrasena</p>'}
+            <p class="text-xs leading-5 text-slate-500">Minimo 6 caracteres para la nueva contrasena.</p>
+            ${accountPasswordField("currentPassword", "Contrasena actual", "current-password")}
+            ${accountPasswordField("newPassword", "Nueva contrasena", "new-password")}
+            ${accountPasswordField("confirmPassword", "Confirmar contrasena", "new-password")}
+            <button class="mt-5 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-school-green px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-800" type="submit">${icon("key-round", "h-4 w-4")} Cambiar contrasena</button>
           </form>
         </div>
-        <p class="mx-5 mb-5 hidden rounded-2xl border px-4 py-3 text-sm font-bold" data-account-status></p>
-      </div>
+        <div class="hidden px-5 py-10 text-center" data-account-password-success role="status" aria-live="polite" tabindex="-1">
+          <div class="mx-auto mb-4 grid h-20 w-20 place-items-center rounded-full bg-green-50 text-green-600" aria-hidden="true">${icon("circle-check", "h-12 w-12")}</div>
+          <p class="text-base font-semibold text-slate-900">Contrasena actualizada correctamente.</p>
+        </div>
+        <p class="mx-5 mb-5 hidden rounded-lg border px-4 py-3 text-sm" data-account-status role="status" aria-live="polite"></p>
+      </section>
     </div>
   `;
 }
@@ -302,6 +323,7 @@ export function appShell(role, activeRoute, content, options = {}) {
           ${studentSidebarNav(items, activeRoute, "mobile")}
         </aside>
         <div class="fixed inset-0 z-40 hidden bg-slate-950/40 backdrop-blur-[1px] lg:hidden" data-sidebar-backdrop aria-hidden="true"></div>
+        ${accountSettingsModal("alumno")}
 
         <main class="mx-auto max-w-7xl px-2.5 py-2.5 sm:px-4 sm:py-4">${content}</main>
         <footer class="mx-auto max-w-7xl px-2.5 pb-3 text-[10px] font-semibold text-slate-400 sm:px-4">${APP_VERSION}</footer>
@@ -326,6 +348,7 @@ export function appShell(role, activeRoute, content, options = {}) {
           <button class="hidden rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white shadow-soft transition hover:bg-red-700 lg:inline-flex" data-action="logout">
             ${icon("log-out", "mr-2 h-4 w-4")} Salir
           </button>
+          <div class="hidden lg:block">${themeToggle()}</div>
         </div>
       </header>
 
@@ -341,9 +364,11 @@ export function appShell(role, activeRoute, content, options = {}) {
         <nav class="min-h-0 flex-1 overflow-y-auto pb-3 pr-1 grid gap-1">
           ${items.map((item) => navLink(item, activeRoute, true)).join("")}
         </nav>
-        <button class="mt-3 flex shrink-0 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-black text-white" data-action="logout">
+        <div class="sidebar-toolbar mt-3">${themeToggle()}
+        <button class="sidebar-session-button" data-action="logout">
           ${icon("log-out", "h-4 w-4")} Salir
         </button>
+        </div>
       </aside>
       <div class="fixed inset-0 z-40 hidden bg-slate-950/40 lg:hidden" data-sidebar-backdrop></div>
 

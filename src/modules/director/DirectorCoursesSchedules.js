@@ -212,7 +212,7 @@ function subjectCell(courseId, subjectId) {
   const fullNames = names.length ? names.join(" / ") : "Docente sin asignar";
   const background = subject?.color || "#f1f5f9";
   return `
-    <div class="flex min-h-11 min-w-0 items-center gap-2 rounded-md border border-black/5 px-2 py-1.5 text-slate-900" style="background:${background}" title="${escapeDirectorHtml(fullNames)}">
+    <div class="tinted-surface subject-accent flex min-h-11 min-w-0 items-center gap-2 rounded-md border border-black/5 px-2 py-1.5 text-slate-900" style="--surface-color:${background}" title="${escapeDirectorHtml(fullNames)}">
       <span class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-white/75 text-slate-700">${icon(subjectIcon(subjectId), "h-3.5 w-3.5")}</span>
       <span class="min-w-0">
         <span class="block truncate text-[11px] font-semibold leading-tight">${escapeDirectorHtml(subject?.nombre || subjectId)}</span>
@@ -246,7 +246,7 @@ function dailySubjectCell(courseId, period, dayId) {
     tecnica_tecnologica: "Tec"
   }[subjectId] || subject?.corto || subject?.nombre || subjectId;
   return `
-    <div class="grid min-h-12 min-w-0 place-content-center rounded-md border border-black/5 px-1 py-1.5 text-center text-slate-900" style="background:${subject?.color || "#f1f5f9"}" title="${escapeDirectorHtml(`${subject?.nombre || subjectId} · ${period.hora} · ${fullNames}`)}">
+    <div class="tinted-surface subject-accent grid min-h-12 min-w-0 place-content-center rounded-md border border-black/5 px-1 py-1.5 text-center text-slate-900" style="--surface-color:${subject?.color || "#f1f5f9"}" title="${escapeDirectorHtml(`${subject?.nombre || subjectId} · ${period.hora} · ${fullNames}`)}">
       <span class="block truncate text-[8px] font-semibold sm:hidden">${escapeDirectorHtml(mobileName)}</span>
       <span class="hidden truncate text-[10px] font-semibold sm:block lg:text-[11px]">${escapeDirectorHtml(subject?.nombre || subjectId)}</span>
       <span class="mt-0.5 block text-[8px] text-slate-600 sm:text-[9px]">${escapeDirectorHtml(startTime)}</span>

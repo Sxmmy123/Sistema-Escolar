@@ -371,7 +371,7 @@ function renderTeacherConfirmation(form) {
             <p class="text-xs font-semibold text-slate-900">${findCourse(courseId).nombre}</p>
             <div class="mt-2 flex flex-wrap gap-1">${findCourse(courseId).nivel === "inicial" ? `<span class="text-xs text-school-green">Evaluacion cualitativa</span>` : value.materias.map((subjectId) => {
               const subject = findSubject(subjectId);
-              return `<span class="rounded-md px-2 py-1 text-[9px] text-slate-700" style="background:${subject?.color || "#f1f5f9"}">${subject?.nombre || subjectId}</span>`;
+              return `<span class="tinted-surface rounded-md px-2 py-1 text-[9px] text-slate-700" style="--surface-color:${subject?.color || "#f1f5f9"}">${subject?.nombre || subjectId}</span>`;
             }).join("")}</div>
           </article>
         `).join("")}
@@ -629,7 +629,7 @@ function scheduleCellButton(subjectId, periodId, dayId) {
   const textClass = subject ? "text-slate-900" : "text-slate-400";
 
   return `
-    <button type="button" data-schedule-cell data-period-id="${periodId}" data-day-id="${dayId}" class="min-h-10 w-full rounded-md border border-slate-200 px-2 py-1.5 text-center text-[11px] font-medium leading-tight transition hover:border-school-green hover:shadow-sm sm:min-h-11 sm:text-xs ${textClass}" style="background:${color}">
+    <button type="button" data-schedule-cell data-period-id="${periodId}" data-day-id="${dayId}" class="tinted-surface min-h-10 w-full rounded-md border border-slate-200 px-2 py-1.5 text-center text-[11px] font-medium leading-tight transition hover:border-school-green hover:shadow-sm sm:min-h-11 sm:text-xs ${textClass}" style="--surface-color:${color}">
       ${text}
     </button>
   `;
@@ -845,7 +845,7 @@ function renderAuditRows(items) {
       <td class="px-4 py-2.5 text-slate-600">${escapeHtml(item.tipo || "-")}</td>
       <td class="px-4 py-2.5"><span class="rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-medium text-green-700">${escapeHtml(item.accion || "-")}</span></td>
       <td class="px-4 py-2.5 text-slate-700">${escapeHtml(item.detalle || "Movimiento registrado")}</td>
-      <td class="px-4 py-2.5 text-right"><button class="rounded-md border border-school-green px-3 py-1.5 text-[11px] font-medium text-school-green hover:bg-green-50" data-audit-open="${item.id}">Ver</button></td>
+      <td class="px-4 py-2.5 text-right"><button class="rounded-md border border-school-green px-3 py-1.5 text-[11px] font-medium text-school-green hover:bg-green-50" data-audit-open="${escapeHtml(item.id)}">Ver</button></td>
     </tr>
   `).join("");
 

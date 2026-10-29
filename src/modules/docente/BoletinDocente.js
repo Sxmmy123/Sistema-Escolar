@@ -135,6 +135,12 @@ function renderBulletinTable({ course, students, snapshotsByTerm, cacheMetas }) 
   `;
 }
 
+export function bulletinStudents(snapshots) {
+  const byId = new Map();
+  snapshots.forEach((snapshot) => (snapshot?.students || []).forEach((student) => byId.set(student.id, student)));
+  return [...byId.values()].sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" }));
+}
+
 export async function renderBulletin(context) {
   const container = document.querySelector("[data-teacher-bulletin]");
   if (!container) return;
@@ -147,8 +153,7 @@ export async function renderBulletin(context) {
   const snapshots = await Promise.all(TRIMESTERS.map((trimester) => getTeacherNotesSnapshot(context, course, trimester.id)));
   const snapshotsByTerm = Object.fromEntries(TRIMESTERS.map((trimester, index) => [trimester.id, snapshots[index]]));
   const cacheMetas = Object.fromEntries(TRIMESTERS.map((trimester) => [trimester.id, getTeacherDataCacheMeta(context, "notas", course.id, trimester.id)]));
-  const firstSnapshot = snapshots.find(Boolean);
-  const students = firstSnapshot?.students || [];
+  const students = bulletinStudents(snapshots);
   const missing = snapshots.some((snapshot) => !snapshot);
 
   container.innerHTML = `

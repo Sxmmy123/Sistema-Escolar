@@ -122,7 +122,7 @@ test("guardar asistencia toma el nombre del perfil docente y no el correo de ses
   const code = source.slice(source.indexOf("export async function saveAttendance("), source.indexOf("export async function listActivities(")).replace("export ", "");
   const writes = []; let uid = "docente-a", changeSession = false;
   const save = vm.runInNewContext(`${code}; saveAttendance`, { asegurarRegistroDocente() {}, asegurarTrimestreRegistro() {}, validarFechaGestion() {}, gestionActual: () => "2026", currentUid: () => uid, getTeacherContext: async () => { if (changeSession) uid = "otro"; return { profile: { nombre: "Aracely" } }; }, nombreDocenteAsistencia, attendanceDocId: () => "registro-a", firestore: {}, documentoGestion: () => ({}), doc: () => ({}), periodosCurso: () => ({}), serverTimestamp: () => null, guardarConPeriodoCurso: async ({ payload }) => { writes.push(payload); }, sincronizarAsistenciaCalificar() {}, announceAlertDataChange() {}, safeAudit() {}, auth: { currentUser: { email: "cuenta@example.test" } }, Date });
-  const input = { course: { id: "cuarto_a", nombre: "Cuarto A" }, student: { id: "a", cursoId: "cuarto_a", nombre: "Alumno" }, fecha: "2026-03-10", estado: "atraso" };
+  const input = { course: { id: "cuarto_a", nombre: "Cuarto A" }, student: { id: "a", cursoId: "cuarto_a", nombre: "Alumno" }, fecha: "2026-03-10", estado: "atraso", observacion: "" };
   const record = await save(input);
   assert.equal(record.registradoPor, "Aracely"); assert.equal(writes[0].registradoPor, "Aracely");
   changeSession = true;

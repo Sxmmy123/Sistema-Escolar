@@ -1,4 +1,4 @@
-import { createIcons, ArrowRight, Bell, BookOpenText, CalendarDays, CalendarRange, Check, CheckCheck, ChartNoAxesCombined, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Focus, GraduationCap, HandHelping, Inbox, LayoutDashboard, LogOut, Menu, MessageSquarePlus, Minus, NotebookPen, Pencil, Printer, RefreshCw, Save, School, Settings, Sparkles, UserRound, Users, X } from "lucide";
+import { createIcons, ArrowRight, Bell, BookOpenText, CalendarDays, CalendarRange, Check, CheckCheck, ChartNoAxesCombined, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Focus, GraduationCap, HandHelping, Inbox, LayoutDashboard, LogOut, Menu, MessageSquarePlus, Minus, Moon, NotebookPen, Pencil, Printer, RefreshCw, Save, School, Settings, Sparkles, Sun, UserRound, Users, X } from "lucide";
 import { crearControladorInicial } from "./ControladorInicial.js";
 import { PanelInicial } from "./PanelInicial.js";
 import { AsistenciaInicial } from "./AsistenciaInicial.js";
@@ -24,7 +24,7 @@ const views = {
 let controller = null;
 let key = "";
 export let rutas = {};
-export const actualizarIconos = () => createIcons({ icons: { CheckCircle2, Clock3, List, MessageSquare, UserCheck, XCircle, CloudOff, Archive, ArrowDown, ArrowUp, ChevronDown, ClipboardList, Columns3, FileCheck2, FileClock, FileMinus, FilePenLine, ListOrdered, Plus, Search, Star, Trash2, Triangle, Undo2, ArrowRight, Bell, BookOpenText, CalendarDays, CalendarRange, Check, CheckCheck, ChartNoAxesCombined, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Focus, GraduationCap, HandHelping, Inbox, LayoutDashboard, LogOut, Menu, MessageSquarePlus, Minus, NotebookPen, Pencil, Printer, RefreshCw, Save, School, Settings, Sparkles, UserRound, Users, X } });
+export const actualizarIconos = () => createIcons({ icons: { CheckCircle2, Clock3, List, MessageSquare, UserCheck, XCircle, CloudOff, Archive, ArrowDown, ArrowUp, ChevronDown, ClipboardList, Columns3, FileCheck2, FileClock, FileMinus, FilePenLine, ListOrdered, Plus, Search, Star, Trash2, Triangle, Undo2, ArrowRight, Bell, BookOpenText, CalendarDays, CalendarRange, Check, CheckCheck, ChartNoAxesCombined, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Focus, GraduationCap, HandHelping, Inbox, LayoutDashboard, LogOut, Menu, MessageSquarePlus, Minus, Moon, NotebookPen, Pencil, Printer, RefreshCw, Save, School, Settings, Sparkles, Sun, UserRound, Users, X } });
 export function preparar(context, dependencies = {}) {
   const next = JSON.stringify([context.uid, context.gestionId, context.courses.map((course) => course.id), context.trimestres, context.reemplazoDeUid, context.reemplazadoPorUid, context.errorModalidad || ""]);
   if (!controller || next !== key) {

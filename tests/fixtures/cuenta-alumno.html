@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base href="/"><title>Cuenta del alumno - prueba visual</title></head><body><div id="app"></div><script type="module">
+import "/tests/fixtures/alumno.js";
+import { bindAccountSettings } from "/src/ui/accountSettings.js";
+const sidebar = document.querySelector("[data-sidebar]"), backdrop = document.querySelector("[data-sidebar-backdrop]");
+const closeMenu = () => { sidebar.classList.add("-translate-x-full"); sidebar.setAttribute("aria-hidden", "true"); backdrop.classList.add("hidden"); };
+document.querySelector("[data-action='open-menu']").addEventListener("click", () => { sidebar.classList.remove("-translate-x-full"); sidebar.setAttribute("aria-hidden", "false"); backdrop.classList.remove("hidden"); });
+document.querySelector("[data-action='close-menu']").addEventListener("click", closeMenu);
+backdrop.addEventListener("click", closeMenu);
+// Solo inspeccion visual: este formulario no modifica cuentas.
+const successPreview = new URLSearchParams(location.search).has("confirmacion");
+bindAccountSettings({ beforeOpen: closeMenu, authClient: { currentUser: { uid: "prueba-visual" } }, changePassword: async () => { if (!successPreview) throw new Error("Prueba visual sin guardados."); } });
+if (successPreview) {
+  const demo = document.createElement("button");
+  demo.type = "button"; demo.textContent = "Simular confirmacion sin cambiar cuentas";
+  demo.className = "fixed bottom-2 right-2 z-[80] rounded-lg border bg-white px-3 py-2 text-xs";
+  demo.addEventListener("click", () => document.querySelector("[data-account-password-form]").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  document.body.append(demo);
+}
+</script></body></html>

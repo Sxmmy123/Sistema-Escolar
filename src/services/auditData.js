@@ -59,7 +59,7 @@ export async function listAudit({ fecha = todayIso(), tipo = "", buscar = "" } =
 
   const text = String(buscar || "").trim().toLowerCase();
   return snap.docs
-    .map((item) => ({ id: item.id, ...item.data() }))
+    .map((item) => ({ ...item.data(), id: item.id }))
     .filter((item) => !fecha || item.fecha === fecha)
     .filter((item) => !tipo || item.tipo === tipo)
     .filter((item) => {

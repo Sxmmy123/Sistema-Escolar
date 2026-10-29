@@ -7,6 +7,7 @@ import { registrarTablaAlumnos } from "../../services/registroAlumnos.js";
 import { generateStudentPin, initialStudentPassword, normalizeStudentSex } from "../../services/identidadAlumno.js";
 import { MAX_STUDENT_ROWS, STUDENT_TABLE_FIELDS, hasStudentData, newStudentRow, pasteStudentCells, sortStudentsByName, validateStudentRows } from "../../services/tablaAlumnos.js";
 import { openStudentAccessMigration } from "./AccesosAlumnos.js";
+import { openStudentPasswordReset } from "./RestablecerClaveAlumno.js";
 import { safeAudit } from "../../services/auditData.js";
 import { icon } from "../../ui/dom.js";
 import "./AlumnosAdmin.css";
@@ -65,7 +66,7 @@ export function bindAlumnosAdmin() {
   const adminUid = auth.currentUser?.uid;
   const $ = (selector) => root.querySelector(selector);
   const drafts = new Map(), cache = new Map(), errors = new Map(), loading = new Map();
-  let mode = "ci", view = "register", busy = false, showPasswords = true, changingState = false;
+  let mode = "ci", view = "register", busy = false, showPasswords = true, changingState = false, resettingPassword = false;
   const rows = () => {
     if (!drafts.has(selectedCourse)) drafts.set(selectedCourse, Array.from({ length: 6 }, () => newStudentRow(mode)));
     return drafts.get(selectedCourse);
@@ -107,7 +108,7 @@ export function bindAlumnosAdmin() {
       const active = student.activo !== false;
       const sexo = normalizeStudentSex(student.sexo);
       const sexText = SEX_LABELS[sexo] ? `<abbr title="${SEX_LABELS[sexo]}" aria-label="${SEX_LABELS[sexo]}">${sexo}</abbr>` : "-";
-      return `<tr><td class="students-row-number">${index + 1}</td><td class="students-list-name">${escape(student.nombre)}</td><td class="students-list-ci">${escape(student.ci)}</td><td>${sexText}</td><td>${escape(student.correo || "-")}</td><td><span class="students-access-state" data-ready="${Boolean(student.authUid)}">${student.authUid ? "Creado" : "Pendiente"}</span></td><td><label class="students-switch"><input type="checkbox" role="switch" data-students-active="${escape(student.id)}" aria-label="Acceso activo de ${escape(student.nombre)}" ${active ? "checked" : ""} ${busy ? "disabled" : ""}><span class="students-switch-track" aria-hidden="true"></span><span data-students-active-label>${active ? "Activo" : "Inactivo"}</span></label></td></tr>`;
+      return `<tr><td class="students-row-number">${index + 1}</td><td class="students-list-name">${escape(student.nombre)}</td><td class="students-list-ci">${escape(student.ci)}</td><td>${sexText}</td><td>${escape(student.correo || "-")}</td><td><div class="students-access-actions"><span class="students-access-state" data-ready="${Boolean(student.authUid)}">${student.authUid ? "Creado" : "Pendiente"}</span>${student.authUid ? `<button type="button" class="students-cell-button" data-students-reset-password="${escape(student.id)}" aria-label="Restablecer contrasena de ${escape(student.nombre)}" title="Restablecer contrasena" ${busy ? "disabled" : ""}>${icon("key-round")}</button>` : ""}</div></td><td><label class="students-switch"><input type="checkbox" role="switch" data-students-active="${escape(student.id)}" aria-label="Acceso activo de ${escape(student.nombre)}" ${active ? "checked" : ""} ${busy ? "disabled" : ""}><span class="students-switch-track" aria-hidden="true"></span><span data-students-active-label>${active ? "Activo" : "Inactivo"}</span></label></td></tr>`;
     }).join("") : '<tr><td colspan="7" class="students-empty">No hay alumnos para mostrar.</td></tr>';
     $("[data-students-list-count]").textContent = `${filtered.length} de ${students.length} alumnos`;
     createIcons({ icons });
@@ -294,6 +295,20 @@ export function bindAlumnosAdmin() {
   $("[data-students-filter]").addEventListener("change", renderList);
   $("[data-students-refresh]").addEventListener("click", () => loadList(true));
   $("[data-students-complete]").addEventListener("click", () => openStudentAccessMigration(findCourse(selectedCourse), () => loadList(true)));
+  root.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-students-reset-password]");
+    if (!button || busy || resettingPassword || !sessionActive()) return;
+    const courseId = selectedCourse, student = cache.get(courseId)?.find((item) => item.id === button.dataset.studentsResetPassword);
+    if (!student?.authUid) return;
+    resettingPassword = true;
+    try {
+      const done = await openStudentPasswordReset({ student, courseName: findCourse(courseId).nombre, root, isSessionActive: sessionActive, trigger: button });
+      if (done && sessionActive()) {
+        status("Contrasena temporal asignada.");
+        await safeAudit({ tipo: "alumnos", accion: "restablecer_contrasena", detalle: "Asigno una clave temporal a un alumno", datos: { alumnoId: student.id, cursoId } });
+      }
+    } finally { resettingPassword = false; }
+  });
   root.addEventListener("change", async (event) => {
     const input = event.target.closest("[data-students-active]");
     if (!input || !sessionActive()) return;

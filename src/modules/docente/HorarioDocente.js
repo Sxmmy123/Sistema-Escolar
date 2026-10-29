@@ -38,7 +38,7 @@ export async function renderTeacherSchedule(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+      <button type="button" data-grade-activity="${item.id}" class="tinted-surface group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; --surface-color:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
           <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
@@ -95,7 +95,7 @@ export async function renderTeacherSchedule(context) {
             <div class="flex flex-wrap gap-1.5 lg:justify-end">
               ${subjectIds.map((subjectId) => {
                 const subject = findSubject(subjectId);
-                return `<span class="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-black text-slate-700" style="background:${subject?.color || "#f8fafc"}">${escapeHtml(subject?.corto || subject?.nombre || subjectId)}</span>`;
+                return `<span class="tinted-surface rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-black text-slate-700" style="--surface-color:${subject?.color || "#f8fafc"}">${escapeHtml(subject?.corto || subject?.nombre || subjectId)}</span>`;
               }).join("")}
             </div>
           </div>
@@ -127,7 +127,7 @@ export async function renderTeacherSchedule(context) {
                             const courseNumber = String(rowCourse.corto || rowCourse.nombre || "").replace(/\D/g, "") || "I";
                             const subjectIcon = subjectIconName(row.materiaId, row.materia);
                             return showCourseColors ? `
-                              <div class="flex min-h-12 items-center gap-2 overflow-hidden rounded-2xl border border-black/5 px-2 py-2 text-left shadow-sm sm:min-h-14 sm:gap-3 sm:px-3" style="background:${row.color || "#fff"}" title="${escapeHtml(row.materia)} · ${escapeHtml(row.curso)}">
+                              <div class="tinted-surface subject-accent flex min-h-12 items-center gap-2 overflow-hidden rounded-2xl border border-black/5 px-2 py-2 text-left shadow-sm sm:min-h-14 sm:gap-3 sm:px-3" style="--surface-color:${row.color || "#fff"}" title="${escapeHtml(row.materia)} · ${escapeHtml(row.curso)}">
                                 <span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/55 text-school-green sm:h-9 sm:w-9">${icon(subjectIcon, "h-4 w-4 sm:h-5 sm:w-5")}</span>
                                 <span class="min-w-0 flex-1">
                                   <span class="block truncate text-[12px] font-black leading-tight text-school-bark sm:hidden">${escapeHtml(compactSubjectName(row.materiaId, row.materia))}</span>
@@ -136,7 +136,7 @@ export async function renderTeacherSchedule(context) {
                                 <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-lg font-black leading-none text-white shadow-sm sm:h-11 sm:w-11 sm:rounded-2xl sm:text-2xl" style="background:${accent}">${escapeHtml(courseNumber)}</span>
                               </div>
                             ` : `
-                              <div class="flex min-h-12 items-center justify-center gap-2 overflow-hidden rounded-xl border border-slate-200 px-2 py-2 text-center shadow-sm sm:min-h-14 sm:px-3" style="background:${row.color}" title="${escapeHtml(row.materia)}">
+                              <div class="tinted-surface subject-accent flex min-h-12 items-center justify-center gap-2 overflow-hidden rounded-xl border border-slate-200 px-2 py-2 text-center shadow-sm sm:min-h-14 sm:px-3" style="--surface-color:${row.color}" title="${escapeHtml(row.materia)}">
                                 <span class="shrink-0 text-school-green">${icon(subjectIcon, "h-4 w-4")}</span>
                                 <p class="truncate text-xs font-black leading-tight text-slate-900 sm:hidden">${escapeHtml(compactSubjectName(row.materiaId, row.materia))}</p>
                                 <p class="hidden truncate text-sm font-black leading-tight text-slate-900 sm:block">${escapeHtml(row.materia)}</p>

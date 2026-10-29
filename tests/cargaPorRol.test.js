@@ -45,7 +45,7 @@ function aplicacion(importadorEspecial = {}) {
     onSnapshot: (ref, callback) => { snapshots.set(ref.path, callback); return () => snapshots.delete(ref.path); },
     auth, firestore: {}, VERSION_MODELO: 2,
     crearCargaPorRol: () => crearCargaPorRol(importadores),
-    createIcons() {}, LogIn: {}, registerServiceWorker() {}, bindRegistroDocente() {},
+    createIcons() {}, LogIn: {}, registerServiceWorker() {}, bindRegistroDocente() {}, bindAccountSettings() {}, initializeTheme() {}, bindThemeButtons() {},
     setView: (markup) => { html = markup; },
     LoginView: () => "Pantalla login", bindLogin() {},
     homeForRole: (rol) => rol ? `/${rol}` : "/",

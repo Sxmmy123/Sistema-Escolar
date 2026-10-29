@@ -5,10 +5,10 @@
   max-height: calc(100dvh - 32px);
   padding: 0;
   overflow-y: auto;
-  border: 1px solid #dbe3dd;
+  border: 1px solid var(--theme-border,#dbe3dd);
   border-radius: 8px;
-  background: #fff;
-  color: #25322b;
+  background: var(--theme-surface,#fff);
+  color: var(--theme-ink,#25322b);
   box-shadow: 0 20px 70px rgb(0 0 0 / 18%);
   letter-spacing: 0;
 }
@@ -50,7 +50,7 @@ body:has(.admin-registro-dialog[open]) {
 .admin-registro-header p,
 .admin-registro-footer p {
   margin: 0;
-  color: #58675f;
+  color: var(--theme-ink,#58675f);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -64,11 +64,11 @@ body:has(.admin-registro-dialog[open]) {
   height: 36px;
   place-items: center;
   border-radius: 6px;
-  color: #58675f;
+  color: var(--theme-ink,#58675f);
 }
 
 .admin-registro-close:hover {
-  background: #f0f4f1;
+  background: var(--theme-subtle,#f0f4f1);
 }
 
 .admin-registro-pasos {
@@ -129,18 +129,18 @@ body:has(.admin-registro-dialog[open]) {
   width: 20px;
   height: 20px;
   place-items: center;
-  border: 2px solid #fff;
+  border: 2px solid var(--theme-border,#fff);
   border-radius: 50%;
   font-size: 11px;
   font-weight: 600;
-  color: #25322b;
-  background: #edf2ef;
+  color: var(--theme-ink,#25322b);
+  background: var(--theme-subtle,#edf2ef);
 }
 
-.admin-registro-alumnos { background: #effbf4; border-color: #c7ead4; color: #087b2b; }
-.admin-registro-docentes { background: #eff6ff; border-color: #d3e3fa; color: #2563aa; }
+.admin-registro-alumnos { background: #effbf4; border-color: var(--theme-border,#c7ead4); color: #087b2b; }
+.admin-registro-docentes { background: #eff6ff; border-color: var(--theme-border,#d3e3fa); color: #2563aa; }
 .admin-registro-horarios { background: #fff9e9; border-color: #f1e1b8; color: #916200; }
-.admin-registro-director { background: #f6f2fc; border-color: #e1d7f1; color: #755294; }
+.admin-registro-director { background: #f6f2fc; border-color: var(--theme-border,#e1d7f1); color: #755294; }
 
 .admin-registro-paso h3 {
   margin: 0 0 5px;
@@ -151,7 +151,7 @@ body:has(.admin-registro-dialog[open]) {
 
 .admin-registro-paso p {
   margin: 0;
-  color: #58675f;
+  color: var(--theme-ink,#58675f);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -163,8 +163,8 @@ body:has(.admin-registro-dialog[open]) {
   justify-content: space-between;
   gap: 12px;
   padding: 16px 24px;
-  border-top: 1px solid #e6ece8;
-  background: #f8faf9;
+  border-top: 1px solid var(--theme-border,#e6ece8);
+  background: var(--theme-subtle,#f8faf9);
 }
 
 .admin-registro-footer button {

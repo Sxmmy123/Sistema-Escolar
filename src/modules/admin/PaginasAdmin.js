@@ -22,7 +22,7 @@ function subjectsLegend() {
     <div class="space-y-2.5">
       <div class="flex flex-wrap gap-1.5" data-subject-palette>
         <button type="button" data-subject-option="" class="rounded-lg border-2 border-school-green bg-white px-3 py-2 text-xs font-medium text-school-green shadow-sm">Quitar materia</button>
-        ${SUBJECTS.map((subject) => `<button type="button" data-subject-option="${subject.id}" class="rounded-lg border-2 border-transparent px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-school-green/20" style="background:${subject.color}">${subject.nombre}</button>`).join("")}
+        ${SUBJECTS.map((subject) => `<button type="button" data-subject-option="${subject.id}" class="tinted-surface rounded-lg border-2 border-transparent px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-school-green/20" style="--surface-color:${subject.color}">${subject.nombre}</button>`).join("")}
       </div>
       <div class="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
         <span>Materia seleccionada:</span><strong data-selected-subject-label class="font-semibold text-school-green">Quitar materia</strong>

@@ -27,7 +27,7 @@ export async function renderSummary(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+      <button type="button" data-grade-activity="${item.id}" class="tinted-surface group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; --surface-color:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
           <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>
@@ -107,7 +107,7 @@ export async function renderSummary(context) {
     const background = showCourse ? "#ffffff" : (subject?.color || "#f8fafc");
     const active = item.id === teacherState.gradeModalActivityId;
     return `
-      <button type="button" data-grade-activity="${item.id}" class="group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; background:${background}">
+      <button type="button" data-grade-activity="${item.id}" class="tinted-surface group flex min-h-10 ${widthClass} items-stretch overflow-hidden rounded-lg border text-left transition hover:-translate-y-0.5 hover:shadow-soft ${active ? "ring-2 ring-school-green/15" : ""}" style="border-color:${accent}; --surface-color:${background}">
         <span class="min-w-0 flex-1 px-2.5 py-1.5">
           <span class="block truncate text-[12px] font-medium leading-tight text-slate-900">${showCourse ? `${escapeHtml(courseItem.corto || courseItem.nombre || item.cursoId)} · ` : ""}${escapeHtml(item.titulo || "Sin titulo")}</span>
           <span class="mt-0.5 block truncate text-[9px] font-medium uppercase tracking-[.04em] text-slate-500">${escapeHtml(subject?.nombre || item.materiaId)} · ${activityEvaluationLabel(item)} · ${activityPointsLabel(item)}</span>

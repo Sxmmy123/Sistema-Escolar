@@ -1,14 +1,23 @@
 import { initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { generarConGemini, validarAccesoInforme, validarAccesoInicial } from "./informe-core.js";
 import { generarCriteriosGemini, validarAccesoActividad, validarBorradorCriterios } from "./criterios-core.js";
+import { resetStudentPassword, StudentPasswordError } from "./student-password-core.js";
 
 initializeApp();
 const apiKey = defineSecret("GEMINI_API_KEY");
 const model = defineString("GEMINI_MODEL");
 const db = getFirestore();
+export const restablecerClaveAlumno = onCall({ region: "us-central1", timeoutSeconds: 30, maxInstances: 2, concurrency: 5 }, async (request) => {
+  try { return await resetStudentPassword(request, { db, auth: getAuth() }); }
+  catch (error) {
+    if (error instanceof StudentPasswordError) throw new HttpsError(error.code, error.message);
+    throw new HttpsError("unavailable", "No se pudo confirmar el restablecimiento. Revisa la conexion antes de reintentar.");
+  }
+});
 export const generarCriteriosInicial = onCall({ region: "us-central1", secrets: [apiKey], timeoutSeconds: 90, maxInstances: 2, concurrency: 10 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Inicia sesion para generar criterios.");
   const input = request.data, uid = request.auth.uid;

@@ -8,28 +8,45 @@ export function crearDatosInicial(context, dependencies = {}) {
   const services = { getTeacherStudents, listAttendanceForCourseDate, saveAttendance, getSchedule, listarRegistrosInicial, guardarRegistroInicial, editarBitacoraInicial, nuevoIdRegistroInicial, listarActividadesInicial, modificarActividadInicial, moverActividadInicial, guardarAvanceInicial, ...dependencies };
   const cache = new Map();
   const pending = new Map();
+  const versions = new Map();
   let active = true;
   const key = (type, courseId, term = "", date = "") => JSON.stringify([type, courseId, term, date]);
   const check = (courseId) => { if (!active) throw new Error("La sesion cambio."); cursoInicial(context, courseId); };
   async function load(type, courseId, term, date, force = false) {
     check(courseId);
     const id = key(type, courseId, term, date);
-    if (pending.has(id)) return pending.get(id);
+    if (pending.has(id)) {
+      const entry = pending.get(id);
+      if (!force || entry.force) return entry.request;
+      entry.refresh ||= entry.request.catch(() => {}).then(() => load(type, courseId, term, date, true));
+      return entry.refresh;
+    }
     if (!force && cache.has(id)) return cache.get(id);
+    const version = versions.get(id) || 0;
+    const entry = { force };
     const request = Promise.resolve().then(() => {
       check(courseId);
       if (type === "students") return services.getTeacherStudents(courseId);
       if (type === "attendance") return services.listAttendanceForCourseDate(courseId, date, term);
       if (type === "schedule") return services.getSchedule(courseId);
-      if (type === "records") return services.listarRegistrosInicial(context, courseId, term);
+      if (type === "records") return services.listarRegistrosInicial(context, courseId, term, { fresh: force });
       if (type === "activities") return services.listarActividadesInicial(context, courseId, term);
       throw new Error("Carga no disponible.");
-    }).then((result) => { check(courseId); cache.set(id, result); return result; }).finally(() => pending.delete(id));
-    pending.set(id, request);
+    }).then((result) => {
+      check(courseId);
+      if ((versions.get(id) || 0) !== version) {
+        if (pending.get(id) === entry) pending.delete(id);
+        return load(type, courseId, term, date, true);
+      }
+      cache.set(id, result); return result;
+    }).finally(() => { if (pending.get(id) === entry) pending.delete(id); });
+    entry.request = request;
+    pending.set(id, entry);
     return request;
   }
   function merge(type, course, term, rows) {
     const id = key(type, course, term), ids = new Set(rows.map((item) => item.id));
+    versions.set(id, (versions.get(id) || 0) + 1);
     cache.set(id, [...(cache.get(id) || []).filter((item) => !ids.has(item.id)), ...rows]);
   }
   return {
@@ -49,11 +66,12 @@ export function crearDatosInicial(context, dependencies = {}) {
       merge("activities", activity.cursoId, activity.trimestreId, [result.activity]);
       merge("records", activity.cursoId, activity.trimestreId, result.records); return result;
     },
-    async guardarAsistencia(courseId, student, date, term, state, observation = "") {
+    async guardarAsistencia(courseId, student, date, term, state, observation) {
       check(courseId);
       const record = await services.saveAttendance({ course: cursoInicial(context, courseId), student, fecha: date, trimestreId: term, estado: state, observacion: observation });
       check(courseId);
       const id = key("attendance", courseId, term, date);
+      versions.set(id, (versions.get(id) || 0) + 1);
       cache.set(id, { ...(cache.get(id) || {}), [student.id]: record });
       return record;
     },
@@ -61,8 +79,7 @@ export function crearDatosInicial(context, dependencies = {}) {
       check(input.cursoId);
       const result = await services.guardarRegistroInicial(context, input);
       check(input.cursoId);
-      const id = key("records", input.cursoId, input.trimestreId);
-      if (cache.has(id)) cache.set(id, [...cache.get(id).filter((item) => item.id !== result.id), result]);
+      merge("records", input.cursoId, input.trimestreId, [result]);
       return result;
     },
     async editarBitacora(input) {
@@ -72,6 +89,6 @@ export function crearDatosInicial(context, dependencies = {}) {
       merge("records", input.cursoId, input.trimestreId, [result]);
       return result;
     },
-    desmontar() { active = false; cache.clear(); pending.clear(); }
+    desmontar() { active = false; cache.clear(); pending.clear(); versions.clear(); }
   };
 }

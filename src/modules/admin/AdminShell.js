@@ -1,4 +1,5 @@
 import { icon } from "../../ui/dom.js";
+import { themeToggle } from "../../ui/theme.js";
 import { configuracionActual } from "../../services/rutasFirestore.js";
 import { gestionAdministrativaDisponible } from "../../services/registroEscolar.js";
 
@@ -84,9 +85,12 @@ function sidebar(activeRoute, mobile = false) {
             <span class="block text-[10px] text-white/50">Control del sistema</span>
           </span>
         </div>
-        <button type="button" data-action="logout" class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium text-white/70 transition hover:bg-red-500/15 hover:text-white">
+        <div class="sidebar-toolbar sidebar-toolbar-on-brand">
+        ${themeToggle()}
+        <button type="button" data-action="logout" class="sidebar-session-button">
           ${icon("log-out", "h-4 w-4")} Cerrar sesion
         </button>
+        </div>
       </div>
     </div>
   `;

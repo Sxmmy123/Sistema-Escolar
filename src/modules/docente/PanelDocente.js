@@ -30,7 +30,7 @@ function teacherCoursesCards(context) {
       <div class="flex flex-wrap gap-1.5 sm:gap-2">
         ${subjectIds.map((subjectId) => {
           const subject = findSubject(subjectId);
-          return `<span class="rounded-full px-2.5 py-1 text-[10px] font-bold text-slate-700 sm:px-3 sm:py-1.5 sm:text-[11px] sm:font-black" style="background:${subject?.color || "#e2e8f0"}">${escapeHtml(subject?.corto || subject?.nombre || subjectId)}</span>`;
+          return `<span class="tinted-surface rounded-full px-2.5 py-1 text-[10px] font-bold text-slate-700 sm:px-3 sm:py-1.5 sm:text-[11px] sm:font-black" style="--surface-color:${subject?.color || "#e2e8f0"}">${escapeHtml(subject?.corto || subject?.nombre || subjectId)}</span>`;
         }).join("")}
       </div>
     </div>
