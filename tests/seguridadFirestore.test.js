@@ -830,9 +830,9 @@ test("actividades cualitativas son privadas, sin fecha obligatoria y ordenables 
   await denied(updateDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id), { materiaId: "matematica", updatedAt: serverTimestamp() }));
   await denied(updateDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id), { criterios: { ser: {} }, updatedAt: serverTimestamp() }));
 });
-test("habilitar criterios los fija; guardar avances es atomico y permite corregir sin duplicar", async () => {
+test("habilitar criterios permite revisarlos; guardar avances es atomico y permite corregir sin duplicar", async () => {
   qualitativeActivity = await modificarActividadInicial(initialContext, { ...qualitativeActivity, accion: "criterios", criterios: activityCriteria }, initialClients);
-  await assert.rejects(modificarActividadInicial(initialContext, { ...qualitativeActivity, accion: "criterios", criterios: activityCriteria }, initialClients), /habilitados/);
+  assert.deepEqual((await modificarActividadInicial(initialContext, { ...qualitativeActivity, accion: "criterios", criterios: activityCriteria }, initialClients)).criterios, activityCriteria);
   const first = await guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-inicial", { ser: { valoracion: "logrado" }, saber: { valoracion: "en_proceso" }, hacer: { valoracion: "requiere_apoyo", descripcion: "Requiere ayuda al recortar" } }, initialClients);
   assert.equal(first.records.length, 3); assert.equal(first.activity.tieneRegistros, true);
   const createdAt = (await get(initialTeacher, "registros_inicial", first.records[2].id)).data().createdAt;
@@ -841,7 +841,7 @@ test("habilitar criterios los fija; guardar avances es atomico y permite corregi
   assert.equal(corrected.records[0].createdAt.toMillis(), createdAt.toMillis());
   assert.equal((await get(initialTeacher, "registros_inicial", corrected.records[0].id)).data().opinion, activityCriteria.hacer.opciones.logrado);
   await denied(updateDoc(ref(initialTeacher, "registros_inicial", corrected.records[0].id), { opinion: "Nota inventada", updatedAt: serverTimestamp() }));
-  await denied(updateDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id), { criterios: { ...activityCriteria, ser: { ...activityCriteria.ser, criterio: "Cambiar significado" } }, updatedAt: serverTimestamp() }));
+  await denied(updateDoc(ref(initialTeacher, "actividades_inicial", qualitativeActivity.id), { criterios: { ...activityCriteria, ser: { ...activityCriteria.ser, criterio: "x".repeat(201) } }, updatedAt: serverTimestamp() }));
 });
 test("multigrado comparte una actividad sin cambiar la matricula ni mezclar los registros de cada curso", async () => {
   const shared = await guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-preinicial", { ser: { valoracion: "logrado" }, saber: { valoracion: "en_proceso" }, hacer: { valoracion: "logrado" } }, { ...initialClients, cursoAlumnoId: "preinicial" });
@@ -855,6 +855,38 @@ test("multigrado comparte una actividad sin cambiar la matricula ni mezclar los 
   const limited = { ...initialContext, courses: [findCourse("inicial")] };
   await assert.rejects(guardarAvanceInicial(limited, qualitativeActivity, "alumno-preinicial", { ser: { valoracion: "logrado" } }, { ...initialClients, cursoAlumnoId: "preinicial" }));
   await denied(guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-a", { ser: { valoracion: "logrado" } }, { ...initialClients, cursoAlumnoId: "inicial" }));
+});
+
+test("editar criterios conserva valoraciones anteriores y rechaza registrar desde una pestana desactualizada", async () => {
+  const recordId = idAvanceInicial(initialContext.uid, qualitativeActivity.id, "alumno-inicial", "ser");
+  const original = (await get(initialTeacher, "registros_inicial", recordId)).data();
+  const changed = structuredClone(activityCriteria);
+  changed.ser.criterio = "Colabora al compartir los materiales";
+  changed.ser.opciones.logrado = "Comparte los materiales de forma autonoma";
+  const edited = await modificarActividadInicial(initialContext, { ...qualitativeActivity, accion: "criterios", criterios: changed }, initialClients);
+  assert.deepEqual((await get(initialTeacher, "registros_inicial", recordId)).data(), original);
+  await assert.rejects(guardarAvanceInicial(initialContext, qualitativeActivity, "alumno-inicial", { ser: { valoracion: "logrado" } }, initialClients), (error) => error.code === "initial/criteria-changed");
+  assert.deepEqual((await get(initialTeacher, "registros_inicial", recordId)).data(), original);
+  const revised = await guardarAvanceInicial(initialContext, edited, "alumno-inicial", { ser: { valoracion: "logrado" } }, initialClients);
+  assert.equal(revised.records[0].id, recordId);
+  assert.equal(revised.records[0].criterio, changed.ser.criterio);
+  assert.equal(revised.records[0].createdAt.toMillis(), original.createdAt.toMillis());
+  const preId = idAvanceInicial(initialContext.uid, qualitativeActivity.id, "alumno-preinicial", "ser");
+  assert.equal((await get(initialTeacher, "registros_inicial", preId)).data().criterio, activityCriteria.ser.criterio);
+  for (const actor of [anonymous, student, teacherB, director]) await denied(updateDoc(ref(actor, "actividades_inicial", edited.id), { criterios: activityCriteria, updatedAt: serverTimestamp() }));
+  await denied(updateDoc(ref(initialTeacher, "actividades_inicial", edited.id), { criterios: {}, updatedAt: serverTimestamp() }));
+  qualitativeActivity = await modificarActividadInicial(initialContext, { ...edited, accion: "criterios", criterios: activityCriteria }, initialClients);
+});
+
+test("actividades finalizadas permiten editar criterios, pero las eliminadas no", async () => {
+  const created = await modificarActividadInicial(initialContext, { id: "docente-inicial_edicion-finalizada", cursoId: "inicial", trimestreId: "t1", accion: "crear", materiaId: "lenguaje", titulo: "Vocales editables", descripcion: "Identificar vocales", criterios: activityCriteria }, initialClients);
+  const finished = await modificarActividadInicial(initialContext, { ...created, accion: "finalizar" }, initialClients);
+  const changed = structuredClone(activityCriteria); changed.saber.criterio = "Reconoce las vocales en su nombre";
+  const edited = await modificarActividadInicial(initialContext, { ...finished, accion: "criterios", criterios: changed }, initialClients);
+  assert.equal(edited.estado, "finalizada"); assert.equal(edited.criterios.saber.criterio, changed.saber.criterio);
+  const removed = await modificarActividadInicial(initialContext, { ...edited, accion: "eliminar" }, initialClients);
+  await assert.rejects(modificarActividadInicial(initialContext, { ...removed, accion: "criterios", criterios: activityCriteria }, initialClients), /Restaura/);
+  await denied(updateDoc(ref(initialTeacher, "actividades_inicial", removed.id), { criterios: activityCriteria, updatedAt: serverTimestamp() }));
 });
 
 test("avance exige el curso real del alumno y no admite ausencia de criterios ni notas numericas", async () => {

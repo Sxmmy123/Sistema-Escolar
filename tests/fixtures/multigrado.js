@@ -17,6 +17,7 @@ const students = {
 };
 const schedule = { periodos: [{ id: "p1", label: "1", hora: "08:00 - 08:40" }, { id: "p2", label: "2", hora: "08:40 - 09:20" }], clases: Object.fromEntries(["p1", "p2"].map((id) => [id, Object.fromEntries(DAYS.map((day, index) => [day.id, ["matematica", "lenguaje", "ciencias_naturales", "educacion_fisica", "religion"][index]]))])) };
 const activities = [{ id: "actividad-compartida", docenteUid: context.uid, cursoId: "preinicial", trimestreId: "t1", materiaId: "artes_plasticas", titulo: "Construimos un muneco de carton", descripcion: "Compartimos materiales y reconocemos las partes del cuerpo.", estado: "pendiente", prioritaria: true, orden: "1", criterios: criteria }];
+activities.push({ ...activities[0], id: "actividad-sin-prioridad", materiaId: "matematica", titulo: "Reconocemos los numeros", descripcion: "Reconocer los numeros del uno al diez con materiales del aula.", prioritaria: false, orden: "2" });
 const records = Object.entries(students).flatMap(([cursoId, pupils]) => pupils.map((student) => ({ id: `nota_${student.id}`, docenteUid: context.uid, cursoId, trimestreId: "t1", alumnoId: student.id, tipo: "bitacora", descripcion: "Comparte sus materiales y participa de forma espontanea." })));
 const data = crearDatosInicial(context, {
   getTeacherStudents: async (id) => students[id], getSchedule: async () => schedule,
@@ -24,9 +25,15 @@ const data = crearDatosInicial(context, {
   listarRegistrosInicial: async (_, id, term) => records.filter((item) => item.cursoId === id && item.trimestreId === term),
   listAttendanceForCourseDate: async () => ({}), nuevoIdRegistroInicial: () => `${context.uid}_${crypto.randomUUID()}`,
   guardarRegistroInicial: async (_, input) => { records.push(input); return input; },
+  modificarActividadInicial: async (_, input) => {
+    const row = activities.find((item) => item.id === input.id);
+    if (input.accion === "criterios") row.criterios = structuredClone(input.criterios);
+    if (input.accion === "prioridad") row.prioritaria = !row.prioritaria;
+    return { ...row };
+  },
   guardarAvanceInicial: async (_, activity, studentId, entries, options) => ({ activity, records: Object.entries(entries).map(([dimension, entry]) => ({ id: `${activity.id}_${studentId}_${dimension}`, cursoId: options.cursoAlumnoId, trimestreId: "t1", docenteUid: context.uid, alumnoId: studentId, actividadId: activity.id, tipo: "actividad", dimension, ...entry })) })
 });
-teacher.preparar(context, { data, iaAvailable: false, watchCommunications: () => () => {}, saveTerm: async () => {} });
+teacher.preparar(context, { data, iaAvailable: true, generateCriteria: async () => ({ criterios: structuredClone(criteria) }), watchCommunications: () => () => {}, saveTerm: async () => {} });
 function render() {
   const route = location.hash.slice(1) || "/docente/registro";
   document.querySelector("#app").innerHTML = (teacher.rutas[route] || teacher.rutas["/docente"])();

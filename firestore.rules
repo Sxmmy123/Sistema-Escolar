@@ -299,7 +299,8 @@ service cloud.firestore {
         allow create: if validActivity(request.resource.data) && request.resource.data.createdAt == request.time && request.resource.data.estado == "pendiente" && request.resource.data.tieneRegistros == false;
         allow update: if validActivity(request.resource.data) && resource.data.docenteUid == request.auth.uid &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(["prioritaria", "orden", "estado", "criterios", "tieneRegistros", "updatedAt"]) &&
-          (resource.data.criterios.size() == 0 || request.resource.data.criterios == resource.data.criterios) &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["criterios"]) ||
+            (resource.data.estado != "eliminada" && request.resource.data.estado != "eliminada" && request.resource.data.criterios.size() == 3)) &&
           (resource.data.tieneRegistros == false || request.resource.data.tieneRegistros == true);
         allow delete: if isAdmin();
       }

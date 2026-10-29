@@ -94,7 +94,13 @@ export function crearDatosInicial(context, dependencies = {}) {
     async guardarAvance(activity, studentId, entries) {
       check(activity.cursoId);
       const courseId = esMultigradoInicial(context) ? studentCourse(GRUPO_INICIAL, studentId) : activity.cursoId;
-      const result = await services.guardarAvanceInicial(context, activity, studentId, entries, { cursoAlumnoId: courseId }); check(courseId);
+      let result;
+      try { result = await services.guardarAvanceInicial(context, activity, studentId, entries, { cursoAlumnoId: courseId }); }
+      catch (error) {
+        if (error.code === "initial/criteria-changed") await load("activities", activity.cursoId, activity.trimestreId, "", true);
+        throw error;
+      }
+      check(courseId);
       merge("activities", activity.cursoId, activity.trimestreId, [result.activity]);
       merge("records", courseId, activity.trimestreId, result.records); return result;
     },

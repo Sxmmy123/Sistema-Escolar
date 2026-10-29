@@ -27,6 +27,9 @@ export function crearAccionesActividades({ state, data, dialog, draw, run, asser
         if (!current()) return;
         const next = siguientePasoRegistroInicial(data.leer("records", state.courseId, activity.trimestreId) || [], activity.id, alumnosInicial(state), student.id, dimension);
         state.studentId = next.studentId; state.dimension = next.dimension;
+      } catch (error) {
+        if (error.code === "initial/criteria-changed") for (const key of Object.keys(snapshot)) delete draft[key];
+        throw error;
       } finally { state.autoSaving = false; }
     }, "Avance guardado automaticamente.");
   }
@@ -46,11 +49,12 @@ export function crearAccionesActividades({ state, data, dialog, draw, run, asser
       }
       const id = button.dataset.activityId, operation = button.dataset.activityAction, activity = rows().find((item) => item.id === id);
       if (activity && operation) {
+        if (!["criterios", "up", "down", "eliminar", "prioridad", "reabrir", "restaurar"].includes(operation)) return true;
         if (operation === "criterios") { prepare(activity); return true; }
         if (["up", "down"].includes(operation)) {
           const ordered = actividadesDeEstado(state), neighbor = ordered[ordered.findIndex((item) => item.id === id) + (operation === "up" ? -1 : 1)];
           if (neighbor) run(async () => { assertWritable(); await data.moverActividad(activity, neighbor); }, "Orden actualizado.");
-        } else if (["eliminar", "finalizar"].includes(operation)) confirm(operation === "eliminar" ? "Eliminar actividad" : "Finalizar actividad", `${activity.titulo}. ${operation === "eliminar" ? "Se retirara de la lista; los registros de estudiantes se conservaran." : "Se retirara de las actividades por registrar. No se calificara automaticamente a ningun alumno."}`, operation === "eliminar" ? "Eliminar" : "Finalizar", () => data.guardarActividad({ ...base(), id, accion: operation }));
+        } else if (operation === "eliminar") confirm("Eliminar actividad", `${activity.titulo}. Se retirara de la lista; los registros de estudiantes se conservaran.`, "Eliminar", () => data.guardarActividad({ ...base(), id, accion: operation }));
         else run(async () => { assertWritable(); await data.guardarActividad({ ...base(), id, accion: operation }); }, "Actividad actualizada.");
         return true;
       }
@@ -58,7 +62,7 @@ export function crearAccionesActividades({ state, data, dialog, draw, run, asser
       if (action === "new-activity") { prepare(); return true; }
       if (action === "more-activities") { state.activityLimit += 5; draw(); return true; }
       if (action === "retry-advance") { saveSelection(); return true; }
-      if (action === "finish-activity") {
+      if (action === "finish-activity" && state.route === "/docente/registro") {
         const activity = actividadSeleccionada(state); if (activity) confirm("Finalizar actividad", `${activity.titulo}. Los registros guardados se conservaran. No se asignaran valoraciones a alumnos sin observacion.`, "Finalizar", () => data.guardarActividad({ ...base(), id: activity.id, accion: "finalizar" })); return true;
       }
       return false;

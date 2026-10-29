@@ -105,7 +105,6 @@
   :root[data-theme="dark"] .initial-summary-subjects button[aria-pressed="true"] { background:#183b29; color:#8cddb0; }
   :root[data-theme="dark"] :is(.initial-view-modes button.is-active,.initial-summary-student.is-open > .initial-summary-toggle,.initial-summary-categories > button[aria-pressed="true"],.initial-report-student-selector > button,.initial-report-student-grid > button[aria-pressed="true"],.initial-status,.initial-communication-title) { background:#183b29; color:#8cddb0; }
   :root[data-theme="dark"] .teacher-shell [data-teacher-page] .initial-active-term { background:#183b29; color:#8cddb0; }
-  :root[data-theme="dark"] .initial-activity-card [aria-pressed="true"] { background:#443b20; color:#efd18b; }
   :root[data-theme="dark"] :is(.initial-status.is-error,.initial-warning) { background:#47272a; color:#ffaca7; }
   :root[data-theme="dark"] :is(.initial-activity-link,.initial-section-title h2 svg,.initial-section-title a,.initial-shortcuts a,.initial-registration-complete,.initial-dimension-tabs .is-active,.initial-summary-report.is-approved,.initial-summary-note-more,.initial-summary-note-less,.initial-communication > span,.initial-totals .presente) { color:#8cddb0; }
   :root[data-theme="dark"] .initial-summary-report.is-outdated, :root[data-theme="dark"] .initial-totals .atraso { color:#efd18b; }

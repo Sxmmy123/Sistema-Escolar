@@ -11,6 +11,10 @@ export const ordenarActividadesInicial = (rows) => [...rows].sort((a, b) => Stri
 export const prioridadesInicial = (rows) => ordenarActividadesInicial(rows.filter((item) => item.prioritaria && item.estado === "pendiente"));
 export const actividadesRegistrablesInicial = (rows) => ordenarActividadesInicial(rows.filter((item) => item.estado === "pendiente" && dimensionesActividad.every((id) => item.criterios?.[id]?.opciones))).sort((a, b) => Number(b.prioritaria) - Number(a.prioritaria));
 export function registrosDeActividadInicial(records, activityId, studentId) { return records.filter((item) => item.tipo === "actividad" && item.actividadId === activityId && item.alumnoId === studentId); }
+export function valoracionConCriterioActual(record, activity) {
+  const row = activity.criterios?.[record.dimension];
+  return Boolean(row && record.criterio === row.criterio && record.opinion === row.opciones?.[record.valoracion]);
+}
 export function siguientePasoRegistroInicial(records, activityId, students, studentId, dimension) {
   const own = registrosDeActividadInicial(records, activityId, studentId);
   const missing = (id) => !own.some((item) => item.dimension === id);

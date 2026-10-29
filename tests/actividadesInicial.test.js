@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { dimensionesActividad, opcionesActividad, validarCriteriosActividad, generarCriteriosGemini, validarAccesoActividad, validarBorradorCriterios } from "../functions/criterios-core.js";
 import { validarActividadInicial, ordenarActividadesInicial, prioridadesInicial, actividadesRegistrablesInicial, siguientePasoRegistroInicial } from "../src/services/modeloActividadesInicial.js";
 import { fuentesParaGemini, firmaFuentes } from "../functions/informe-core.js";
@@ -21,14 +22,17 @@ function state(rows = activities) {
   establecerConfiguracion({ gestionActivaId: "2026", versionModelo: 2, gestionHabilitada: true });
   return { context, courseId: "inicial", termId: "t1", route: "/docente/actividades", activityLimit: 5, activityView: "board", dimension: "ser", soloContenido: true, iaAvailable: true, criteriaDraft: () => null, advanceDraft: () => ({}), noteDraft: () => ({ descripcion: "" }), data: { leer: (type) => type === "activities" ? rows : type === "students" ? [{ id: "s1", nombre: "Alumno de prueba" }] : [] } };
 }
-function preparationFixture() {
+function preparationFixture({ activity = null, generate = async () => ({ criterios: structuredClone(criteria) }) } = {}) {
+  establecerConfiguracion({ gestionActivaId: "2026", versionModelo: 2, gestionHabilitada: true });
   const body = { innerHTML: "" }, listeners = {}, writes = [], jobs = [];
   let closed = false;
   const draft = { id: "docente_nueva", materiaId: "artes_plasticas", titulo: "Muneco", descripcion: "Construir con carton", prioritaria: true, criterios: structuredClone(criteria), dimension: "ser", step: "criterios" };
   const host = { querySelector: (selector) => selector === ".initial-dialog" ? { classList: { add() {} } } : body, addEventListener: (type, callback) => { listeners[type] = callback; } };
-  abrirPreparacionActividad({ state: { context, courseId: "inicial", termId: "t1", iaAvailable: true }, data: { guardarActividad: async (input) => writes.push(input) }, dialog: () => ({ host, signal: new AbortController().signal, close: () => { closed = true; } }), run: (operation) => jobs.push(operation()), assertWritable() {}, drafts: new Map([[JSON.stringify(["inicial", "t1", "nueva"]), draft]]) });
+  const drafts = new Map(activity ? [] : [[JSON.stringify(["inicial", "t1", "nueva"]), draft]]);
+  abrirPreparacionActividad({ state: { context, courseId: "inicial", termId: "t1", iaAvailable: true }, activity, generate, data: { guardarActividad: async (input) => writes.push(input) }, dialog: () => ({ host, signal: new AbortController().signal, close: () => { closed = true; } }), run: (operation) => jobs.push(operation()), assertWritable() {}, drafts });
   return { body, writes, jobs, closed: () => closed,
     accept: () => listeners.click({ target: { closest: () => ({ disabled: false, dataset: {}, hasAttribute: (name) => name === "data-wizard-accept" }) } }),
+    regenerate: () => listeners.click({ preventDefault() {}, target: { closest: () => ({ disabled: false, dataset: {}, hasAttribute: (name) => name === "data-wizard-regenerate" }) } }),
     edit: (field, value) => listeners.input({ target: { dataset: { wizardCriterion: field }, value } })
   };
 }
@@ -46,6 +50,72 @@ test("quitar los checks no permite aceptar un criterio vacio", () => {
   const fixture = preparationFixture(); fixture.edit("criterio", "   "); fixture.accept();
   assert.equal(fixture.closed(), false); assert.equal(fixture.writes.length, 0);
   assert.match(fixture.body.innerHTML, /role="alert"/);
+});
+
+test("editar criterios existentes no modifica la actividad en memoria antes de guardar", async () => {
+  const activity = { ...activities[0], criterios: structuredClone(criteria), tieneRegistros: true };
+  const fixture = preparationFixture({ activity });
+  assert.match(fixture.body.innerHTML, /Guardar criterios/);
+  assert.match(fixture.body.innerHTML, /Generar nuevos criterios/);
+  assert.doesNotMatch(fixture.body.innerHTML, /data-wizard-criterion="criterio"[^>]*disabled/);
+  fixture.edit("criterio", "Nuevo criterio de convivencia");
+  assert.equal(activity.criterios.ser.criterio, criteria.ser.criterio);
+  assert.equal(fixture.writes.length, 0);
+  fixture.accept(); await Promise.all(fixture.jobs);
+  assert.equal(fixture.writes[0].accion, "criterios");
+  assert.equal(fixture.writes[0].criterios.ser.criterio, "Nuevo criterio de convivencia");
+});
+
+test("regenerar propone criterios para revision sin guardarlos ni enviar alumnos", async () => {
+  let input, count = 0;
+  const generated = structuredClone(criteria); generated.ser.criterio = "Comparte materiales durante la construccion";
+  const fixture = preparationFixture({ activity: activities[0], generate: async (_, payload) => { input = payload; count++; return { criterios: generated }; } });
+  fixture.regenerate(); fixture.regenerate();
+  await new Promise((done) => setImmediate(done));
+  assert.equal(count, 1); assert.equal(fixture.writes.length, 0);
+  assert.equal(input.borrador.titulo, activities[0].titulo);
+  assert.equal(input.alumnoId, undefined);
+  assert.match(fixture.body.innerHTML, /Comparte materiales durante la construccion/);
+  fixture.edit("logrado", "Comparte con autonomia"); fixture.accept(); await Promise.all(fixture.jobs);
+  assert.equal(fixture.writes[0].criterios.ser.opciones.logrado, "Comparte con autonomia");
+});
+
+test("si Gemini falla al regenerar conserva las ediciones previas", async () => {
+  const fixture = preparationFixture({ activity: activities[0], generate: async () => { throw new Error("Gemini temporalmente no disponible"); } });
+  fixture.edit("criterio", "Mi criterio manual"); fixture.regenerate();
+  await new Promise((done) => setImmediate(done));
+  assert.match(fixture.body.innerHTML, /Mi criterio manual/);
+  assert.match(fixture.body.innerHTML, /Gemini temporalmente no disponible/);
+  assert.equal(fixture.writes.length, 0);
+});
+
+test("Actividades no finaliza y la prioridad colorea solo la figura de la estrella", async () => {
+  const view = state();
+  for (const mode of ["board", "list"]) {
+    view.activityView = mode;
+    const html = ActividadesInicial(view);
+    assert.doesNotMatch(html, /data-activity-action="finalizar"|Finalizar actividad/);
+    assert.match(html, /data-activity-action="prioridad"[^>]*aria-pressed="true"/);
+  }
+  view.route = "/docente/registro"; view.activityId = "a0";
+  assert.match(RegistroInicial(view), /data-initial-action="finish-activity"/);
+  const css = await readFile(new URL("../src/modules/docente-inicial/inicial.css", import.meta.url), "utf8");
+  assert.match(css, /\[data-activity-action="prioridad"\] > svg\s*\{[^}]*fill:#fff/);
+  assert.match(css, /\[aria-pressed="true"\] > svg\s*\{[^}]*fill:#facc15/);
+  assert.doesNotMatch(css, /\.initial-activity-card \[aria-pressed="true"\]/);
+  const dark = await readFile(new URL("../src/theme.css", import.meta.url), "utf8");
+  assert.doesNotMatch(dark, /\.initial-activity-card \[aria-pressed="true"\]/);
+});
+
+test("Registro conserva el texto historico sin marcar una opcion cuyo criterio cambio", () => {
+  const view = state(); view.route = "/docente/registro"; view.activityId = "a0"; view.studentId = "s1"; view.registrationStudentSelected = true;
+  const old = { id: "antiguo", tipo: "actividad", actividadId: "a0", alumnoId: "s1", dimension: "ser", criterio: "Criterio anterior", opinion: "Opinion anterior", valoracion: "logrado" };
+  view.data.leer = (type) => type === "activities" ? activities : type === "students" ? [{ id: "s1", nombre: "Ana" }] : [old];
+  const html = RegistroInicial(view);
+  assert.match(html, /Registrado con criterios anteriores/);
+  assert.match(html, /Criterio anterior/); assert.match(html, /Opinion anterior/);
+  assert.doesNotMatch(html, /class="logrado is-selected"/);
+  assert.equal(old.criterio, "Criterio anterior");
 });
 test("actividades no requieren fecha ni nota y validan materia y longitud", () => {
   const value = validarActividadInicial({ titulo: "  Muneco de carton ", descripcion: "Material reciclado", materiaId: "artes_plasticas", fecha: "2026-12-01", nota: 90 });
@@ -326,4 +396,15 @@ test("cache sincroniza prioridad, orden y avances sin recargar los registros", a
   await data.moverActividad(activities[0], activities[1]); assert.equal(ordenarActividadesInicial(data.leer("activities", "inicial", "t1"))[0].id, "a1");
   await data.guardarAvance(activities[0], "s1", { ser: { valoracion: "logrado" } }); await data.guardarAvance(activities[0], "s1", { ser: { valoracion: "logrado" } });
   assert.equal(data.leer("records", "inicial", "t1").length, 1);
+});
+
+test("una pestana con criterios viejos actualiza solo actividades y no altera las valoraciones", async () => {
+  let loads = 0;
+  const changed = structuredClone(criteria); changed.ser.criterio = "Criterio actualizado";
+  const data = crearDatosInicial(context, { listarActividadesInicial: async () => { loads++; return [{ ...activities[0], criterios: loads === 1 ? criteria : changed }]; }, listarRegistrosInicial: async () => [{ id: "registro-original", descripcion: "Conservar" }], guardarAvanceInicial: async () => { const error = new Error("Los criterios cambiaron"); error.code = "initial/criteria-changed"; throw error; } });
+  await data.cargar("activities", "inicial", "t1"); await data.cargar("records", "inicial", "t1");
+  await assert.rejects(data.guardarAvance(activities[0], "s1", { ser: { valoracion: "logrado" } }), /cambiaron/);
+  assert.equal(loads, 2);
+  assert.equal(data.leer("activities", "inicial", "t1")[0].criterios.ser.criterio, "Criterio actualizado");
+  assert.equal(data.leer("records", "inicial", "t1")[0].descripcion, "Conservar");
 });

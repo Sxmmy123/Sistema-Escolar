@@ -38,7 +38,7 @@ export async function modificarActividadInicial(context, input, { db = firestore
       else if (input.accion === "finalizar") { if (previous.estado !== "pendiente") throw new Error("La actividad no esta pendiente."); payload.estado = "finalizada"; payload.prioritaria = false; }
       else if (input.accion === "reabrir") { if (previous.estado !== "finalizada") throw new Error("La actividad no esta finalizada."); payload.estado = "pendiente"; }
       else if (input.accion === "criterios") {
-        if (previous.estado !== "pendiente" || Object.keys(previous.criterios).length || previous.tieneRegistros) throw new Error("Los criterios ya estan habilitados y no pueden sustituirse.");
+        if (previous.estado === "eliminada") throw new Error("Restaura la actividad antes de editar sus criterios.");
         payload.criterios = validarCriteriosActividad(input.criterios);
       } else throw new Error("Operacion no disponible.");
     }
@@ -74,6 +74,11 @@ export async function guardarAvanceInicial(context, activity, studentId, entries
     const current = (await tx.get(ref)).data();
     if (!current || current.docenteUid !== context.uid || current.cursoId !== activity.cursoId || current.trimestreId !== activity.trimestreId || current.estado !== "pendiente") throw new Error("La actividad ya no esta disponible para registrar avances.");
     const criteria = validarCriteriosActividad(current.criterios);
+    if (JSON.stringify(validarCriteriosActividad(activity.criterios)) !== JSON.stringify(criteria)) {
+      const error = new Error("Los criterios cambiaron en otra sesion. La actividad se actualizo; selecciona la valoracion con los criterios actuales.");
+      error.code = "initial/criteria-changed";
+      throw error;
+    }
     const refs = changes.map(([dimension]) => documentoGestion(db, "registros_inicial", idAvanceInicial(context.uid, activity.id, studentId, dimension)));
     const previous = await Promise.all(refs.map((item) => tx.get(item)));
     const rows = changes.map(([dimension, entry], index) => ({
