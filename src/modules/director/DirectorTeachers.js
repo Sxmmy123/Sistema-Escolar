@@ -1,5 +1,5 @@
 import { COURSES, SUBJECTS, listDirectorTeachers } from "../../services/directorData.js";
-import { cancelCommunication, createCommunication, listActiveCommunications, localDateIso } from "../../services/comunicadosDocentes.js";
+import { cancelCommunication, communicationAudience, createCommunication, listActiveCommunications, localDateIso } from "../../services/comunicadosDocentes.js";
 import { icon } from "../../ui/dom.js";
 import { DirectorShell } from "./DirectorShell.js";
 import { escapeDirectorHtml, refreshDirectorIcons } from "./DirectorUtils.js";
@@ -24,6 +24,7 @@ function renderCommunications(items) {
       <div class="min-w-0 flex-1">
         <p class="text-sm font-semibold text-slate-900">${escapeDirectorHtml(item.titulo)}</p>
         <p class="mt-0.5 whitespace-pre-wrap break-words text-xs text-slate-600">${escapeDirectorHtml(item.motivo)}</p>
+        <p class="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-500">${icon(item.destinatarioUid ? "user-round" : "users", "h-3 w-3")}${escapeDirectorHtml(communicationAudience(item))}</p>
         <p class="mt-1 text-[11px] font-medium text-school-green">${escapeDirectorHtml(communicationDate(item))}</p>
       </div>
       <button type="button" data-cancel-communication="${escapeDirectorHtml(item.id)}" class="shrink-0 rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700" title="Cancelar comunicado">Cancelar</button>
@@ -36,13 +37,16 @@ function noticeStatus(message, error = false) {
   const status = document.querySelector("[data-director-communication-status]");
   if (!status) return;
   status.textContent = message;
+  status.hidden = !message;
   status.className = `mt-3 text-xs ${error ? "text-red-700" : "text-school-green"}`;
 }
 
-async function refreshCommunications() {
+async function refreshCommunications(signal, load = listActiveCommunications) {
   try {
-    renderCommunications(await listActiveCommunications());
+    const items = await load();
+    if (!signal?.aborted) renderCommunications(items);
   } catch (error) {
+    if (signal?.aborted) return;
     const holder = document.querySelector("[data-director-communications-list]");
     if (holder) holder.innerHTML = `<p class="py-3 text-xs text-red-700">No se pudieron cargar los comunicados. Revisa los permisos de Firestore.</p>`;
   }
@@ -114,6 +118,7 @@ function teacherCard(teacher) {
             <span class="inline-flex items-center gap-1">${icon("book-open", "h-2.5 w-2.5 text-amber-500 sm:h-3.5 sm:w-3.5")} ${assignedSubjects.length} materia${assignedSubjects.length === 1 ? "" : "s"}</span>
           </div>
         </div>
+        <button type="button" data-message-teacher="${escapeDirectorHtml(teacher.id)}" class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-slate-200 text-school-green hover:bg-green-50" aria-label="Enviar comunicado a ${escapeDirectorHtml(teacher.nombre || "docente")}" title="Enviar comunicado">${icon("mail", "h-4 w-4")}</button>
       </div>
       <div class="border-t border-slate-100 px-2.5 sm:px-3">
         ${compactGroups.length ? compactGroups.map(({ courses, subjects }) => `
@@ -161,7 +166,6 @@ export function DirectorTeachers() {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 class="text-base font-semibold text-slate-950">Comunicados al plantel</h2>
-          <p class="mt-0.5 text-xs text-slate-600">Aparecen primero en la campana de todos los docentes hasta el final del dia indicado.</p>
         </div>
         <button type="button" data-open-communication class="inline-flex items-center gap-2 rounded-md bg-school-green px-3 py-2 text-sm font-medium text-white hover:bg-green-800">${icon("megaphone", "h-4 w-4")} Nuevo comunicado</button>
       </div>
@@ -179,6 +183,17 @@ export function DirectorTeachers() {
           <button type="button" data-close-communication class="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="Cerrar">${icon("x", "h-4 w-4")}</button>
         </div>
         <form data-communication-form class="space-y-4 p-4 sm:p-5">
+          <label class="block text-sm text-slate-700">Enviar a
+            <select name="alcance" class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-school-green">
+              <option value="todos">Todos los docentes</option>
+              <option value="docente">Un docente</option>
+            </select>
+          </label>
+          <label data-communication-recipient class="hidden text-sm text-slate-700">Docente
+            <select name="destinatarioUid" disabled class="mt-1 block w-full min-w-0 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-school-green">
+              <option value="">Cargando docentes...</option>
+            </select>
+          </label>
           <label class="block text-sm text-slate-700">Asunto
             <input name="titulo" maxlength="100" required placeholder="Reunion de docentes" class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-school-green">
           </label>
@@ -193,7 +208,6 @@ export function DirectorTeachers() {
           <label class="block text-sm text-slate-700">Motivo y detalles
             <textarea name="motivo" maxlength="500" rows="4" required placeholder="Temas a tratar y lugar de reunion" class="mt-1 block w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-school-green"></textarea>
           </label>
-          <p class="text-xs text-slate-600">Se enviara a todos los docentes. No se necesita seleccionar destinatarios.</p>
           <p data-director-communication-status class="hidden"></p>
           <div class="flex justify-end gap-2 border-t border-slate-100 pt-3">
             <button type="button" data-close-communication class="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700">Cancelar</button>
@@ -209,7 +223,7 @@ export function DirectorTeachers() {
   });
 }
 
-export async function bindDirectorTeachers(route) {
+export async function bindDirectorTeachers(route, dependencies = {}) {
   teachersBindingsController?.abort();
   if (route !== "/director/docentes") return;
   teachersBindingsController = new AbortController();
@@ -217,9 +231,33 @@ export async function bindDirectorTeachers(route) {
   const list = document.querySelector("[data-director-teachers-list]");
   const modal = document.querySelector("[data-communication-modal]");
   const form = document.querySelector("[data-communication-form]");
-  const openModal = () => {
-    if (!modal) return;
+  const audience = form?.querySelector('[name="alcance"]');
+  const recipient = form?.querySelector('[name="destinatarioUid"]');
+  const recipientField = form?.querySelector("[data-communication-recipient]");
+  const submit = form?.querySelector('[type="submit"]');
+  const loadTeachers = dependencies.listTeachers || listDirectorTeachers;
+  const loadCommunications = dependencies.listCommunications || listActiveCommunications;
+  let availableTeachers = [], teachersReady = false, publishing = false;
+  activeNotices = [];
+  const syncAudience = () => {
+    const single = audience?.value === "docente";
+    recipientField?.classList.toggle("hidden", !single);
+    recipientField?.classList.toggle("block", single);
+    if (recipient) { recipient.disabled = publishing || !single || !teachersReady; recipient.required = single; }
+    if (submit) submit.disabled = publishing || (single && (!teachersReady || !availableTeachers.length));
+  };
+  const setPublishing = (value) => {
+    publishing = value;
+    form?.querySelectorAll("input, textarea, select, button").forEach((element) => { element.disabled = value; });
+    syncAudience();
+  };
+  const openModal = (teacherId = "") => {
+    if (!modal || publishing) return;
     form?.reset();
+    if (teacherId && availableTeachers.some((teacher) => teacher.id === teacherId)) {
+      audience.value = "docente"; recipient.value = teacherId;
+    }
+    syncAudience();
     const date = form?.querySelector('[name="fechaEvento"]');
     if (date) date.min = localDateIso();
     if (date) date.value = localDateIso();
@@ -228,49 +266,68 @@ export async function bindDirectorTeachers(route) {
     modal.classList.add("flex");
     form?.querySelector('[name="titulo"]')?.focus();
   };
-  const closeModal = () => {
+  const hideModal = () => {
     modal?.classList.add("hidden");
     modal?.classList.remove("flex");
   };
-  document.querySelector("[data-open-communication]")?.addEventListener("click", openModal, { signal });
+  const closeModal = () => { if (!publishing) hideModal(); };
+  document.querySelector("[data-open-communication]")?.addEventListener("click", () => openModal(), { signal });
+  list?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-message-teacher]");
+    if (button) openModal(button.dataset.messageTeacher);
+  }, { signal });
+  audience?.addEventListener("change", syncAudience, { signal });
   modal?.querySelectorAll("[data-close-communication]").forEach((button) => button.addEventListener("click", closeModal, { signal }));
   modal?.addEventListener("click", (event) => { if (event.target === modal) closeModal(); }, { signal });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeModal(); }, { signal });
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const button = form.querySelector('[type="submit"]');
+    if (publishing) return;
     const values = new FormData(form);
-    button.disabled = true;
+    setPublishing(true);
     noticeStatus("Publicando...");
     try {
-      await createCommunication(Object.fromEntries(values.entries()));
-      closeModal();
-      await refreshCommunications();
+      await (dependencies.createNotice || createCommunication)(Object.fromEntries(values.entries()));
+      if (signal.aborted) return;
+      hideModal();
+      await refreshCommunications(signal, loadCommunications);
     } catch (error) {
+      if (signal.aborted) return;
       noticeStatus(error?.code === "permission-denied" ? "Sin permiso para publicar. Actualiza las reglas de Firestore." : (error.message || "No se pudo publicar."), true);
     } finally {
-      button.disabled = false;
+      if (!signal.aborted) setPublishing(false);
     }
   }, { signal });
   document.querySelector("[data-director-communications]")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-cancel-communication]");
     if (!button) return;
     const item = activeNotices.find((notice) => notice.id === button.dataset.cancelCommunication);
-    if (!item || !confirm(`Cancelar el comunicado "${item.titulo}" para todos los docentes?`)) return;
+    if (!item || !confirm(`Cancelar el comunicado "${item.titulo}" para ${communicationAudience(item)}?`)) return;
     button.disabled = true;
     try {
-      await cancelCommunication(item);
-      await refreshCommunications();
+      await (dependencies.cancelNotice || cancelCommunication)(item);
+      await refreshCommunications(signal, loadCommunications);
     } catch (error) {
+      if (signal.aborted) return;
       button.disabled = false;
       alert(error?.code === "permission-denied" ? "Sin permiso para cancelar. Actualiza las reglas de Firestore." : (error.message || "No se pudo cancelar."));
     }
   }, { signal });
-  refreshCommunications();
+  syncAudience();
+  refreshCommunications(signal, loadCommunications);
   try {
-    const teachers = await listDirectorTeachers();
+    const teachers = await loadTeachers();
+    if (signal.aborted) return;
+    availableTeachers = teachers;
+    teachersReady = true;
+    if (recipient) recipient.innerHTML = `<option value="">${teachers.length ? "Seleccionar docente" : "No hay docentes activos"}</option>${teachers.map((teacher) => `<option value="${escapeDirectorHtml(teacher.id)}">${escapeDirectorHtml(teacher.nombre || "Sin nombre")}${teacher.username ? ` (${escapeDirectorHtml(teacher.username)})` : ""}</option>`).join("")}`;
+    syncAudience();
     renderTeacherList(teachers);
   } catch (error) {
+    if (signal.aborted) return;
+    teachersReady = true;
+    if (recipient) recipient.innerHTML = '<option value="">No se pudieron cargar los docentes</option>';
+    syncAudience();
     if (list) {
       list.innerHTML = `<div class="col-span-full rounded-lg border border-red-100 bg-red-50 px-4 py-8 text-center text-sm text-red-700">No se pudo cargar la informacion de docentes.</div>`;
     }

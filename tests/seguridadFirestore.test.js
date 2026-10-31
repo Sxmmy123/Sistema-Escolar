@@ -495,6 +495,34 @@ test("se mantienen trimestre, campanita, seguimientos y comunicados", async () =
   await denied(updateDoc(ref(teacher, "usuarios", "docente-a"), { "preferencias.trimestresPorGestion.2027": "t2" }));
 });
 
+test("los comunicados personales solo pueden leerlos su docente, direccion y administracion", async () => {
+  const notice = { destinatariosRol: [], destinatarioUid: "docente-a", destinatarioNombre: "Docente A", titulo: "Coordinacion personal", motivo: "Revisar informe", fechaEvento: "2026-11-02", horaEvento: "15:00", activo: true, creadoPorUid: "director-a", createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
+  await setDoc(ref(director, "comunicados", "personal-a"), notice);
+  for (const actor of [teacher, director, admin]) assert.equal((await get(actor, "comunicados", "personal-a")).exists(), true);
+  for (const actor of [teacherB, student, anonymous]) await denied(get(actor, "comunicados", "personal-a"));
+  const general = await getDocs(query(col(teacher, "comunicados"), where("destinatariosRol", "array-contains", "docente")));
+  assert.ok(general.docs.some((item) => item.id === "reunion"));
+  assert.ok(general.docs.every((item) => item.id !== "personal-a"));
+  assert.equal((await getDocs(query(col(teacher, "comunicados"), where("destinatarioUid", "==", "docente-a")))).size, 1);
+  await denied(getDocs(query(col(teacherB, "comunicados"), where("destinatarioUid", "==", "docente-a"))));
+  await denied(getDocs(col(teacher, "comunicados")));
+  await denied(setDoc(ref(teacher, "comunicados", "no-puede-publicar"), { ...notice, creadoPorUid: "docente-a" }));
+  await denied(updateDoc(ref(director, "comunicados", "personal-a"), { destinatarioUid: "docente-b", destinatarioNombre: "Docente B" }));
+  await updateDoc(ref(director, "comunicados", "personal-a"), { activo: false, updatedAt: serverTimestamp() });
+  assert.equal((await get(teacher, "comunicados", "personal-a")).data().activo, false);
+});
+
+test("los comunicados no mezclan un destinatario personal con alcance global ni aceptan cuentas inactivas", async () => {
+  const notice = { destinatariosRol: [], destinatarioUid: "docente-a", destinatarioNombre: "Docente A", titulo: "Coordinacion", motivo: "Informe", fechaEvento: "2026-11-02", horaEvento: "15:00", activo: true, creadoPorUid: "director-a", createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
+  for (const change of [{ destinatariosRol: ["docente"] }, { destinatarioUid: "alumno-auth-a" }, { destinatarioUid: "no-existe" }, { destinatarioUid: "" }, { destinatarioNombre: "" }]) {
+    await denied(setDoc(ref(director, "comunicados", "destinatario-invalido"), { ...notice, ...change }));
+  }
+  await setDoc(ref(admin, "usuarios", "docente-inactivo-comunicados"), { rol: "docente", activo: false });
+  await denied(setDoc(ref(director, "comunicados", "inactivo"), { ...notice, destinatarioUid: "docente-inactivo-comunicados" }));
+  await setDoc(ref(director, "comunicados", "general-nuevo"), { ...notice, destinatariosRol: ["docente"], destinatarioUid: "", destinatarioNombre: "" });
+  assert.equal((await get(teacherB, "comunicados", "general-nuevo")).exists(), true);
+});
+
 test("director consulta la escuela y envia advertencias sin poder alterar notas o alumnos", async () => {
   assert.equal((await get(director, "alumnos", "alumno-b")).exists(), true);
   assert.equal((await get(director, "calificaciones", "nota-b")).exists(), true);

@@ -158,3 +158,71 @@ test("el snapshot conserva todos los alumnos, no solo los primeros tres", async 
   assert.equal(result.items.length, 8);
   assert.equal(result.items[0].dates.length, 5);
 });
+
+function communicationsService() {
+  const writes = [], streams = [], profiles = new Map();
+  const auth = { currentUser: { uid: "director-a" } };
+  const context = vm.createContext({
+    Date, Map, Error, auth, firestore: {}, fechaEscolarIso: () => "2026-10-31",
+    coleccionGestion: (_, name) => name, documentoGestion: (_, name, id) => ({ name, id }),
+    doc: (_, name, id) => ({ name, id }), getDoc: async ({ id }) => ({ exists: () => profiles.has(id), data: () => profiles.get(id) }),
+    query: (source, ...filters) => ({ source, filters }), where: (field, op, value) => ({ field, op, value }),
+    onSnapshot(request, next, error) { const stream = { request, next, error, stopped: false }; streams.push(stream); return () => { stream.stopped = true; }; },
+    getDocs: async () => ({ docs: [] }), serverTimestamp: () => "server-time", safeAudit: async () => {}, updateDoc: async () => {},
+    addDoc: async (source, data) => { writes.push({ source, data }); return { id: "nuevo-aviso" }; }
+  });
+  const code = readFileSync(new URL("../src/services/comunicadosDocentes.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "[^"]+";\s*/gm, "").replace(/export (async )?function /g, "$1function ");
+  vm.runInContext(`${code}\nthis.service = { createCommunication, watchActiveCommunications, communicationAudience };`, context);
+  const emit = (index, items) => streams[index].next({ docs: items.map(({ id, ...data }) => ({ id, data: () => data })) });
+  return { ...context.service, auth, writes, streams, profiles, emit };
+}
+
+test("el comunicado individual valida al docente activo y guarda su destinatario sin hacerlo global", async () => {
+  const ui = communicationsService();
+  ui.profiles.set("docente-a", { rol: "docente", activo: true, nombre: "Aracely Michme" });
+  const input = { titulo: "Coordinacion", motivo: "Revisar el informe", fechaEvento: "2026-11-02", horaEvento: "15:00", alcance: "docente", destinatarioUid: "docente-a" };
+  await ui.createCommunication(input);
+  const item = ui.writes[0].data;
+  assert.equal(item.destinatarioUid, "docente-a"); assert.equal(item.destinatarioNombre, "Aracely Michme");
+  assert.equal(item.destinatariosRol.length, 0); assert.equal(ui.communicationAudience(item), "Aracely Michme");
+  ui.profiles.set("docente-a", { rol: "docente", activo: false });
+  await assert.rejects(ui.createCommunication(input), /ya no esta activo/);
+  await assert.rejects(ui.createCommunication({ ...input, destinatarioUid: "" }), /Selecciona un docente/);
+  await assert.rejects(ui.createCommunication({ ...input, destinatarioUid: "inexistente" }), /ya no esta activo/);
+  assert.equal(ui.writes.length, 1);
+});
+
+test("el envio general ignora una seleccion individual anterior y los avisos antiguos conservan su alcance", async () => {
+  const ui = communicationsService();
+  await ui.createCommunication({ titulo: "Reunion", motivo: "Plantel docente", fechaEvento: "2026-11-02", horaEvento: "15:00", alcance: "todos", destinatarioUid: "docente-a" });
+  const item = ui.writes[0].data;
+  assert.equal(item.destinatarioUid, ""); assert.equal(item.destinatarioNombre, "");
+  assert.equal(item.destinatariosRol.join(), "docente"); assert.equal(ui.communicationAudience({ destinatariosRol: ["docente"] }), "Todos los docentes");
+});
+
+test("la campana combina solo comunicados generales y propios, sin duplicados ni vencidos", () => {
+  const ui = communicationsService(), delivered = [];
+  ui.auth.currentUser.uid = "docente-a";
+  const stop = ui.watchActiveCommunications((items) => delivered.push(items), assert.fail);
+  assert.equal(ui.streams[0].request.filters[0].field, "destinatariosRol");
+  assert.equal(ui.streams[1].request.filters[0].value, "docente-a");
+  const general = { id: "general", destinatariosRol: ["docente"], fechaEvento: "2026-11-02", horaEvento: "15:00", activo: true };
+  const mine = { id: "personal", destinatariosRol: [], destinatarioUid: "docente-a", fechaEvento: "2026-11-01", horaEvento: "10:00", activo: true };
+  ui.emit(0, [general]); assert.equal(delivered.length, 0);
+  ui.emit(1, [mine, general, { ...mine, id: "otro", destinatarioUid: "docente-b" }, { ...mine, id: "vencido", fechaEvento: "2026-10-30" }]);
+  assert.equal(delivered.length, 1); assert.equal(delivered[0].map((item) => item.id).join(), "personal,general");
+  stop(); assert.ok(ui.streams.every((stream) => stream.stopped));
+  ui.emit(0, []); assert.equal(delivered.length, 1);
+});
+
+test("cambiar de cuenta o fallar una consulta cierra ambas suscripciones de comunicados", () => {
+  const ui = communicationsService(), delivered = [], failures = [];
+  ui.auth.currentUser.uid = "docente-a";
+  ui.watchActiveCommunications((items) => delivered.push(items), (error) => failures.push(error));
+  ui.auth.currentUser.uid = "docente-b"; ui.emit(0, []);
+  assert.ok(ui.streams.every((stream) => stream.stopped)); assert.equal(delivered.length, 0);
+  const other = communicationsService();
+  other.watchActiveCommunications(assert.fail, (error) => failures.push(error));
+  other.streams[1].error(new Error("Sin conexion"));
+  assert.ok(other.streams.every((stream) => stream.stopped)); assert.equal(failures.length, 1);
+});

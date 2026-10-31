@@ -401,11 +401,20 @@ service cloud.firestore {
           teacherSubject(gestion, activity(gestion, resource.data.actividadId).cursoId, activity(gestion, resource.data.actividadId).materiaId));
       }
       match /comunicados/{id} {
-        allow read: if isAdmin() || isDirector() || isDocente();
+        function validAudience(data) {
+          return (data.destinatariosRol == ["docente"] && data.get("destinatarioUid", "") == "" && data.get("destinatarioNombre", "") == "") ||
+            (data.destinatariosRol == [] && data.destinatarioUid is string && data.destinatarioUid.size() > 0 && data.destinatarioUid.size() <= 128 &&
+             data.destinatarioNombre is string && data.destinatarioNombre.size() > 0 && data.destinatarioNombre.size() <= 160 &&
+             exists(/databases/$(database)/documents/usuarios/$(data.destinatarioUid)) &&
+             get(/databases/$(database)/documents/usuarios/$(data.destinatarioUid)).data.rol == "docente" &&
+             get(/databases/$(database)/documents/usuarios/$(data.destinatarioUid)).data.activo == true);
+        }
+        allow read: if isAdmin() || isDirector() || (isDocente() &&
+          ("docente" in resource.data.get("destinatariosRol", []) || resource.data.get("destinatarioUid", "") == request.auth.uid));
         allow create: if (isAdmin() || isDirector()) && request.resource.data.keys().hasOnly([
-          "titulo", "motivo", "fechaEvento", "horaEvento", "activo", "destinatariosRol", "creadoPorUid", "createdAt", "updatedAt"
+          "titulo", "motivo", "fechaEvento", "horaEvento", "activo", "destinatariosRol", "destinatarioUid", "destinatarioNombre", "creadoPorUid", "createdAt", "updatedAt"
         ]) && request.resource.data.creadoPorUid == request.auth.uid && request.resource.data.activo == true &&
-          request.resource.data.destinatariosRol == ["docente"] && request.resource.data.titulo is string &&
+          validAudience(request.resource.data) && request.resource.data.titulo is string &&
           request.resource.data.titulo.size() > 0 && request.resource.data.titulo.size() <= 100 && request.resource.data.motivo is string &&
           request.resource.data.motivo.size() > 0 && request.resource.data.motivo.size() <= 500 && request.resource.data.fechaEvento is string &&
           request.resource.data.fechaEvento.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}") && request.resource.data.horaEvento is string &&
