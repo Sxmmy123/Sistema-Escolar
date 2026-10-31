@@ -115,21 +115,18 @@ test("un alumno sin observaciones conserva las cuatro categorias y nunca recibe 
   assert.match(html, /Sin registros en esta categoria/); assert.doesNotMatch(html, /data-initial-summary-map|data-initial-map-record/);
 });
 
-test("el mapa horizontal es accesible y sus bordes y conexiones conservan el trazo reforzado", async () => {
+test("Seguimiento conserva una region accesible y conexiones decorativas sin controles de desplazamiento", async () => {
   const state = { context, courseId: "inicial", termId: "t1", soloContenido: true, route: "/docente/resumenes", summaryStudentId: "a", summaryCategory: "ser", data: { leer: (type) => type === "students" ? [student] : evidence } };
   const html = ResumenesInicial(state);
-  assert.match(html, /data-initial-map-viewport[^>]*tabindex="0" role="region"/);
-  assert.match(html, /data-initial-map-pan="-1"/); assert.match(html, /data-initial-map-pan="1"/);
-  assert.match(html, /Mapa horizontal de SER/);
+  assert.match(html, /data-initial-map-viewport[^>]*role="region" aria-label="Observaciones de SER"/);
+  assert.match(html, /data-initial-map-connectors aria-hidden="true" focusable="false"/);
+  assert.doesNotMatch(html, /data-initial-map-pan/);
   const css = await readFile(new URL("../src/modules/docente-inicial/inicial.css", import.meta.url), "utf8");
-  assert.match(css, /\.initial-map-viewport\s*\{[^}]*overflow:auto/);
   assert.match(css, /\.initial-map-root\s*\{[^}]*border:2px/);
   assert.match(css, /\.initial-map-branch-label\s*\{[^}]*border:2px/);
   assert.match(css, /\.initial-map-leaves > \.initial-summary-entry\s*\{[^}]*border:2px/);
-  assert.match(css, /\.initial-map-branch::before\s*\{[^}]*height:2px/);
   assert.doesNotMatch(css, /\.initial-map-viewport\s*\{[^}]*(scroll-snap-type|scrollbar-gutter)/);
   assert.doesNotMatch(css, /\.initial-summary-entry:last-child\s*\{[^}]*border-bottom:0/);
-  assert.doesNotMatch(css, /\.initial-map-branch\s*\{[^}]*grid-template-columns:minmax\(0,1fr\)/);
 });
 
 test("editar Bitacora valida autor, curso, alumno, trimestre, texto y conflictos", () => {
