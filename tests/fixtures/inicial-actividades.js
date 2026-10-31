@@ -1,5 +1,7 @@
 import "/src/styles.css";
 import "/src/modules/docente-inicial/inicial.css";
+import "/src/theme.css";
+import { bindThemeButtons, initializeTheme } from "/src/ui/theme.js";
 import { crearControladorInicial } from "/src/modules/docente-inicial/ControladorInicial.js";
 import { actualizarIconos } from "/src/modules/docente-inicial/EntradaInicialDocente.js";
 import { ActividadesInicial } from "/src/modules/docente-inicial/ActividadesInicial.js";
@@ -16,6 +18,7 @@ import { validarCriteriosActividad } from "/src/services/modeloActividadesInicia
 
 // Isolated visual fixture: all mutations stay in memory, with no Firebase writes or AI calls.
 establecerConfiguracion({ gestionActivaId: "2026", versionModelo: 2, gestionHabilitada: true });
+initializeTheme({ storage: null });
 const context = { uid: "prueba-local", gestionId: "2026", courses: [findCourse("inicial")], profile: { nombre: "Docente de prueba", trimestreActivo: "t1" } };
 const criteria = validarCriteriosActividad(Object.fromEntries(["ser", "saber", "hacer"].map((id) => [id, { criterio: { ser: "Comparte materiales y respeta turnos", saber: "Reconoce formas y materiales del muneco", hacer: "Recorta y ensambla piezas de carton" }[id], opciones: { logrado: "Lo realiza con autonomia y seguridad.", en_proceso: "Lo realiza con algunas indicaciones de la docente.", requiere_apoyo: "Requiere acompanamiento para realizar la actividad.", no_observado: "Aun no se observo este aspecto durante la actividad." } }])));
 const titles = ["Muneco de carton", "Las vocales de mi nombre", "Figuras de nuestro entorno", "Los colores de mi comunidad", "Cuidamos las plantas", "Compartimos juguetes", "Sonidos y ritmos"];
@@ -66,6 +69,7 @@ const data = {
 };
 const views = { "/docente/actividades": ActividadesInicial, "/docente/registro": RegistroInicial, "/docente/bitacora": BitacoraInicial, "/docente/asistencia": AsistenciaInicial, "/docente/informe": InformeInicial, "/docente/resumenes": ResumenesInicial, "/docente": ActividadesInicial };
 const controller = crearControladorInicial(context, views, { data, iaAvailable: true, refreshIcons: actualizarIconos, watchCommunications: () => () => {}, generateCriteria: async () => ({ criterios: structuredClone(criteria) }), generateReport: async (_, input) => ({ texto: "Comparte sus materiales, respeta turnos y participa con entusiasmo. Reconoce formas y construye con apoyo de la docente.", fuentesFirma: firmaRegistrosInicial(records.filter((item) => item.trimestreId === input.trimestreId), input.alumnoId) }), printReports: (payload) => { document.querySelector('[data-initial-print-preview]')?.remove(); const frame = document.createElement('iframe'); frame.dataset.initialPrintPreview = ''; frame.title = 'Vista previa de informes del curso'; frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100dvh;z-index:1000;border:0;background:white'; frame.srcdoc = documentoInformesCursoInicial(payload); document.querySelector('#app').append(frame); } });
-function render() { const route = location.hash.slice(1) || "/docente/actividades"; document.querySelector("#app").innerHTML = controller.vista(route); controller.vincular(route); actualizarIconos(); }
+let unbindTheme;
+function render() { unbindTheme?.(); const route = location.hash.slice(1) || "/docente/actividades"; document.querySelector("#app").innerHTML = controller.vista(route); controller.vincular(route); unbindTheme = bindThemeButtons({ storage: null, events: null }); actualizarIconos(); }
 window.addEventListener("hashchange", render); render();
 document.addEventListener("click", (event) => { const link = event.target.closest('a[href*="#/docente"]'); if (link) { event.preventDefault(); location.hash = link.hash; } });

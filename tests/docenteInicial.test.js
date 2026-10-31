@@ -10,7 +10,7 @@ import { crearAccionesActividades } from "../src/modules/docente-inicial/Accione
 import { animarCambioAlumnoInicial, medirSeleccionAlumnoInicial } from "../src/modules/docente-inicial/AnimacionAlumnoInicial.js";
 import { animarSelectorAlumnosInicial } from "../src/modules/docente-inicial/AnimacionSelectorAlumnoInicial.js";
 import { animarSeleccionResumenInicial, aspirarAlumnoSeguimiento } from "../src/modules/docente-inicial/AnimacionResumenInicial.js";
-import { crearNavegacionMapaInicial } from "../src/modules/docente-inicial/NavegacionMapaInicial.js";
+import { conectarNodosMapaInicial, crearNavegacionMapaInicial } from "../src/modules/docente-inicial/NavegacionMapaInicial.js";
 import { ActividadesInicial } from "../src/modules/docente-inicial/ActividadesInicial.js";
 import { RegistroInicial } from "../src/modules/docente-inicial/RegistroInicial.js";
 import { BitacoraInicial } from "../src/modules/docente-inicial/BitacoraInicial.js";
@@ -680,6 +680,19 @@ test("el filtro de materias de Seguimiento solo acepta materias con registros de
   fixture.click({ initialSummaryCategory: "saber" }); assert.equal(fixture.controller.state.summarySubjectId, "all");
   fixture.click({ initialSummarySubject: "lenguaje" }); assert.equal(fixture.controller.state.summarySubjectId, "lenguaje");
   fixture.click({ initialSummaryStudent: "b" }); assert.equal(fixture.controller.state.summarySubjectId, "all"); fixture.controller.desmontar();
+});
+
+test("las conexiones llegan al centro real de cuadros con alturas distintas", () => {
+  const origin = { right: 144, top: 20, height: 126 };
+  const targets = [{ left: 184, top: 20, height: 58 }, { left: 184, top: 312, height: 94 }];
+  const path = conectarNodosMapaInicial(origin, targets);
+  assert.match(path, /M 144 83 H 164/);
+  assert.match(path, /M 164 49 V 359/);
+  assert.match(path, /M 164 49 H 184/);
+  assert.match(path, /M 164 359 H 184/);
+  targets[1].height = 146;
+  assert.match(conectarNodosMapaInicial(origin, targets), /M 164 385 H 184/);
+  assert.equal(conectarNodosMapaInicial(origin, []), "");
 });
 
 test("las flechas recorren el mapa horizontal y se deshabilitan en sus extremos", () => {
