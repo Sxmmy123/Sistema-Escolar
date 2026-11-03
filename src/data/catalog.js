@@ -12,6 +12,14 @@
 export const INITIAL_COURSES = COURSES.filter((course) => course.nivel === "inicial");
 export const PRIMARY_COURSES = COURSES.filter((course) => course.nivel === "primaria");
 export const LEGACY_INITIAL_COURSE_ID = "preinicial_inicial";
+export const SCHEDULE_COURSES = [
+  { ...INITIAL_COURSES[0], nombre: "Inicial y Preinicial", corto: "Inicial y Preinicial" },
+  ...PRIMARY_COURSES
+];
+
+export function scheduleCourseId(courseId) {
+  return courseId === "inicial" ? "preinicial" : courseId;
+}
 
 export function isQualitativeCourse(courseId) {
   return INITIAL_COURSES.some((course) => course.id === courseId);

@@ -43,7 +43,7 @@ export function AdminDashboard() {
     <section class="grid grid-cols-1 gap-3 sm:grid-cols-3">
       ${metricCard("Alumnos", `<span data-admin-count="students">...</span>`, "Registros activos del colegio", "users", "bg-green-50 text-school-green")}
       ${metricCard("Docentes", `<span data-admin-count="teachers">...</span>`, "Usuarios y asignaciones", "presentation", "bg-amber-50 text-amber-700")}
-      ${metricCard("Horarios", `<span data-admin-count="schedules">...</span>`, "Cursos con horario configurado", "calendar-check", "bg-slate-100 text-slate-700")}
+      ${metricCard("Horarios", `<span data-admin-count="schedules">...</span>`, "Horarios configurados", "calendar-check", "bg-slate-100 text-slate-700")}
     </section>
 
     <section class="mt-6">

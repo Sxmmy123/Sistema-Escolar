@@ -12,7 +12,7 @@ import {
   writeBatch
 } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
-import { COURSES, SUBJECTS, periodsForCourse } from "../data/catalog.js";
+import { COURSES, SCHEDULE_COURSES, SUBJECTS, periodsForCourse, scheduleCourseId } from "../data/catalog.js";
 import { claveActividad } from "./identificadoresActividad.js";
 import { coleccionGestion, documentoGestion, gestionActual } from "./rutasFirestore.js";
 import { listarAlumnosMatriculados } from "./matriculas.js";
@@ -127,7 +127,13 @@ export async function getSchedule(courseId) {
     periodos: periodsForCourse(courseId),
     clases: {}
   };
-  const snap = await getDoc(documentoGestion(firestore, "horarios", courseId));
+  const year = gestionActual();
+  const sharedId = scheduleCourseId(courseId);
+  let snap = await getDoc(documentoGestion(firestore, "horarios", sharedId, year));
+  // Older records may exist only under Inicial; both courses now use the same source.
+  if (!snap.exists() && sharedId === "preinicial") {
+    snap = await getDoc(documentoGestion(firestore, "horarios", "inicial", year));
+  }
   if (!snap.exists()) return localShape;
 
   const data = snap.data() || {};
@@ -138,6 +144,21 @@ export async function getSchedule(courseId) {
 }
 
 export async function saveScheduleCell(courseId, periodId, dayId, subjectId) {
+  const sharedId = scheduleCourseId(courseId);
+  if (sharedId === "preinicial") {
+    const year = gestionActual();
+    const ref = documentoGestion(firestore, "horarios", sharedId, year);
+    await runTransaction(firestore, async (transaction) => {
+      const saved = await transaction.get(ref);
+      const source = saved.exists() ? saved : await transaction.get(documentoGestion(firestore, "horarios", "inicial", year));
+      const classes = source.data()?.clases || {};
+      transaction.set(ref, {
+        clases: { ...classes, [periodId]: { ...classes[periodId], [dayId]: subjectId || null } },
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    });
+    return;
+  }
   await setDoc(documentoGestion(firestore, "horarios", courseId), {
     clases: {
       [periodId]: {
@@ -150,12 +171,14 @@ export async function saveScheduleCell(courseId, periodId, dayId, subjectId) {
 
 export async function getAllSchedules() {
   const snap = await getDocs(coleccionGestion(firestore, "horarios"));
+  const saved = new Map(snap.docs.map((item) => [item.id, item]));
   const schedules = {};
   snap.docs.forEach((item) => {
-    const data = item.data() || {};
-    schedules[item.id] = {
-      cursoId: item.id,
-      periodos: periodsForCourse(item.id),
+    const id = scheduleCourseId(item.id);
+    const data = (saved.get(id) || item).data() || {};
+    schedules[id] = {
+      cursoId: id,
+      periodos: periodsForCourse(id),
       clases: data.clases || {}
     };
   });
@@ -163,7 +186,7 @@ export async function getAllSchedules() {
 }
 
 export async function saveFullSchedule(courseId, schedule) {
-  await setDoc(documentoGestion(firestore, "horarios", courseId), {
+  await setDoc(documentoGestion(firestore, "horarios", scheduleCourseId(courseId)), {
     clases: schedule?.clases || {},
     updatedAt: serverTimestamp()
   }, { merge: true });
@@ -191,8 +214,18 @@ export async function importSchedulesPayload(payload) {
     throw new Error("No se encontraron horarios compatibles para importar.");
   }
 
-  await Promise.all(entries.map(([courseId, schedule]) => saveFullSchedule(courseId, schedule)));
-  return entries.length;
+  const shared = new Map();
+  const signature = (classes) => JSON.stringify(Object.entries(classes).sort(([a], [b]) => a.localeCompare(b))
+    .map(([period, days]) => [period, Object.entries(days).sort(([a], [b]) => a.localeCompare(b))]));
+  for (const [courseId, schedule] of entries) {
+    const id = scheduleCourseId(courseId);
+    if (shared.has(id) && signature(shared.get(id).clases) !== signature(schedule.clases)) {
+      throw new Error("Inicial y Preinicial comparten un solo horario. El archivo contiene horarios distintos para ambos cursos; unificalos antes de importar.");
+    }
+    shared.set(id, schedule);
+  }
+  await Promise.all([...shared].map(([courseId, schedule]) => saveFullSchedule(courseId, schedule)));
+  return shared.size;
 }
 
 export async function importHistoricalAttendance({ course, rows, trimestreId }) {
@@ -322,14 +355,14 @@ export async function getAdminCounts() {
     getCountFromServer(query(coleccionGestion(firestore, "matriculas"), where("estado", "==", "activo"))),
     getCountFromServer(query(collection(firestore, "usuarios"), where("rol", "==", "docente"), where("activo", "==", true))),
     getCountFromServer(query(collection(firestore, "usuarios"), where("rol", "==", "director"), where("activo", "==", true))),
-    getCountFromServer(coleccionGestion(firestore, "horarios"))
+    getAllSchedules()
   ]);
 
   return {
     students: students.data().count,
     teachers: teachers.data().count,
     directors: directors.data().count,
-    schedules: schedules.data().count
+    schedules: SCHEDULE_COURSES.filter((course) => schedules[course.id]).length
   };
 }
 

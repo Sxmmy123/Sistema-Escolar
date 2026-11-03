@@ -1,5 +1,5 @@
 import { icon } from "../../ui/dom.js";
-import { COURSES, PRIMARY_COURSES, DAYS, SUBJECTS, periodsForCourse } from "../../data/catalog.js";
+import { COURSES, PRIMARY_COURSES, SCHEDULE_COURSES, DAYS, SUBJECTS, periodsForCourse } from "../../data/catalog.js";
 import { AdminShell } from "./AdminShell.js";
 import { fechaEscolarIso } from "../../services/fechaEscolar.js";
 import { gestionActual } from "../../services/rutasFirestore.js";
@@ -13,8 +13,8 @@ function subjectOptions() {
   return SUBJECTS.map((subject) => `<option value="${subject.id}">${subject.nombre}</option>`).join("");
 }
 
-function courseTabs(action = "select-course") {
-  return `<div class="flex gap-1.5 overflow-x-auto pb-1" data-course-tabs>${COURSES.map((course, index) => `<button type="button" data-action="${action}" data-course-id="${course.id}" class="shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition ${index === 0 ? "border-school-green bg-school-green text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/30 hover:bg-green-50"}">${course.nombre}</button>`).join("")}</div>`;
+function courseTabs(action = "select-course", courses = COURSES) {
+  return `<div class="flex gap-1.5 overflow-x-auto pb-1" data-course-tabs>${courses.map((course, index) => `<button type="button" data-action="${action}" data-course-id="${course.id}" class="shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition ${index === 0 ? "border-school-green bg-school-green text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-school-green/30 hover:bg-green-50"}">${course.nombre}</button>`).join("")}</div>`;
 }
 
 function subjectsLegend() {
@@ -260,7 +260,7 @@ function schedulePanel() {
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">
             <p class="text-[10px] font-semibold uppercase tracking-[.14em] text-school-green">Horario por curso</p>
-            <h2 class="mt-0.5 truncate text-lg font-semibold text-slate-900" data-schedule-title>Preinicial</h2>
+            <h2 class="mt-0.5 text-lg font-semibold text-slate-900" data-schedule-title>Inicial y Preinicial</h2>
           </div>
           <div class="grid grid-cols-2 gap-2 sm:flex">
             <button type="button" class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-school-green transition hover:bg-green-50" data-action="export-schedule-all">${icon("archive", "h-3.5 w-3.5")}Exportar</button>
@@ -269,7 +269,7 @@ function schedulePanel() {
           </div>
         </div>
         <div class="mt-2 text-xs font-medium text-green-700" data-schedule-status></div>
-        <div class="mt-4">${courseTabs("schedule-course")}</div>
+        <div class="mt-4">${courseTabs("schedule-course", SCHEDULE_COURSES)}</div>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <p class="mb-3 text-xs text-slate-500">Selecciona una materia y luego toca una celda del horario.</p>

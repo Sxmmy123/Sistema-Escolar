@@ -1,4 +1,4 @@
-﻿import { COURSES, DAYS, SUBJECTS, findCourse, findSubject, periodsForCourse } from "../../data/catalog.js";
+﻿import { COURSES, SCHEDULE_COURSES, DAYS, SUBJECTS, findCourse, findSubject, periodsForCourse } from "../../data/catalog.js";
 import { getAdminCounts, getAllSchedules, getSchedule, importHistoricalAttendance, importHistoricalGrades, importSchedulesPayload, listStudents, saveScheduleCell } from "../../services/adminData.js";
 import { configuracionActual, gestionActual } from "../../services/rutasFirestore.js";
 import { gestionAdministrativaDisponible, validarFechaGestion } from "../../services/registroEscolar.js";
@@ -14,7 +14,8 @@ import { modalidadDeCursos, validarAsignacionesDocente } from "../../services/mo
 import { normalizarCorreoReal } from "../../services/correoCuenta.js";
 
 const state = {
-  scheduleCourseId: COURSES[0].id,
+  scheduleCourseId: SCHEDULE_COURSES[0].id,
+  scheduleRequest: 0,
   selectedSubjectId: "",
   schedule: null,
   historicalPreview: null,
@@ -585,7 +586,7 @@ function scheduleExportPayload(schedules) {
     tipo: "horarios_ue_nueva_bolivia",
     version: 1,
     exportedAt: new Date().toISOString(),
-    cursos: COURSES,
+    cursos: SCHEDULE_COURSES,
     materias: SUBJECTS,
     horarios: schedules
   };
@@ -647,6 +648,7 @@ async function saveClickedScheduleCell(button) {
   const periodId = button.dataset.periodId;
   const dayId = button.dataset.dayId;
   const subjectId = state.selectedSubjectId;
+  const courseId = state.scheduleCourseId;
 
   setLocalScheduleCell(periodId, dayId, subjectId);
   renderScheduleGrid(state.schedule);
@@ -657,18 +659,20 @@ async function saveClickedScheduleCell(button) {
   }
 
   try {
-    await saveScheduleCell(state.scheduleCourseId, periodId, dayId, subjectId);
+    await saveScheduleCell(courseId, periodId, dayId, subjectId);
     await safeAudit({
       tipo: "horarios",
       accion: subjectId ? "actualizar" : "quitar_materia",
-      detalle: `${subjectId ? "Actualizo" : "Quito"} materia en ${findCourse(state.scheduleCourseId).nombre}`,
-      datos: { cursoId: state.scheduleCourseId, periodo: periodId, dia: dayId, materiaId: subjectId || null }
+      detalle: `${subjectId ? "Actualizo" : "Quito"} materia en ${SCHEDULE_COURSES.find((course) => course.id === courseId).nombre}`,
+      datos: { cursoId: courseId, periodo: periodId, dia: dayId, materiaId: subjectId || null }
     });
+    if (state.scheduleCourseId !== courseId) return;
     if (status) {
       status.className = "text-sm font-black text-green-700";
       status.textContent = subjectId ? "Materia guardada" : "Materia quitada";
     }
   } catch (error) {
+    if (state.scheduleCourseId !== courseId) return;
     if (status) {
       status.className = "text-sm font-black text-red-700";
       status.textContent = error?.code === "permission-denied"
@@ -681,7 +685,7 @@ async function saveClickedScheduleCell(button) {
 function renderScheduleGrid(schedule) {
   const grid = document.querySelector("[data-schedule-grid]");
   const title = document.querySelector("[data-schedule-title]");
-  const course = findCourse(state.scheduleCourseId);
+  const course = SCHEDULE_COURSES.find((item) => item.id === state.scheduleCourseId);
   const periods = periodsForCourse(course.id);
   state.schedule = schedule || { cursoId: course.id, periodos, clases: {} };
   if (title) title.textContent = course.nombre;
@@ -715,11 +719,16 @@ function renderScheduleGrid(schedule) {
 async function refreshSchedule() {
   const grid = document.querySelector("[data-schedule-grid]");
   const status = document.querySelector("[data-schedule-status]");
+  const courseId = state.scheduleCourseId;
+  const request = ++state.scheduleRequest;
   if (grid) grid.innerHTML = `<div class="p-5 font-bold text-slate-500">Cargando horario...</div>`;
   try {
-    renderScheduleGrid(await getSchedule(state.scheduleCourseId));
+    const schedule = await getSchedule(courseId);
+    if (request !== state.scheduleRequest) return;
+    renderScheduleGrid(schedule);
     if (status) status.textContent = "";
   } catch (error) {
+    if (request !== state.scheduleRequest) return;
     renderScheduleGrid({
       cursoId: state.scheduleCourseId,
       periodos: periodsForCourse(state.scheduleCourseId),
@@ -801,6 +810,7 @@ function bindSchedulePage() {
   });
 
   updateSubjectPalette();
+  updateTabs(document.querySelector("[data-course-tabs]"), state.scheduleCourseId);
   refreshSchedule();
 }
 
@@ -810,7 +820,7 @@ async function hydrateAdminDashboard() {
     const counts = await getAdminCounts();
     document.querySelector('[data-admin-count="students"]')?.replaceChildren(String(counts.students));
     document.querySelector('[data-admin-count="teachers"]')?.replaceChildren(String(counts.teachers));
-    document.querySelector('[data-admin-count="schedules"]')?.replaceChildren(`${counts.schedules}/7`);
+    document.querySelector('[data-admin-count="schedules"]')?.replaceChildren(`${counts.schedules}/${SCHEDULE_COURSES.length}`);
   } catch {
     document.querySelectorAll("[data-admin-count]").forEach((node) => { node.textContent = "-"; });
   }

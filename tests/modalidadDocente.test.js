@@ -29,7 +29,7 @@ function modules() {
   } };
 }
 
-test("Inicial y Preinicial son cursos independientes y conservan su propio horario", () => {
+test("Inicial y Preinicial conservan matriculas independientes y los mismos periodos de clase", () => {
   assert.equal(COURSES.length, 8);
   assert.deepEqual(INITIAL_COURSES.map((course) => course.id), ["preinicial", "inicial"]);
   assert.equal(PRIMARY_COURSES.length, 6);

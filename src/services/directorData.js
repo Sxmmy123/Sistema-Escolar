@@ -12,7 +12,8 @@ import {
   writeBatch,
   where
 } from "firebase/firestore";
-import { COURSES, DAYS, SUBJECTS, findCourse, findSubject } from "../data/catalog.js";
+import { COURSES, DAYS, SUBJECTS, findCourse, findSubject, scheduleCourseId } from "../data/catalog.js";
+import { getAllSchedules } from "./adminData.js";
 import { auth, firestore } from "../firebase/client.js";
 import { todayIso } from "./teacherData.js";
 import { calculateCourseTerm, isAttendanceValue, normalizarEstadoAsistencia } from "./calculoAcademico.js";
@@ -63,8 +64,11 @@ export async function listDirectorTeachers() {
 }
 
 export async function listDirectorSchedules() {
-  const snap = await getDocs(coleccionGestion(firestore, "horarios"));
-  return Object.fromEntries(rows(snap).map((item) => [item.id, item]));
+  const schedules = await getAllSchedules();
+  return Object.fromEntries(COURSES.flatMap((course) => {
+    const schedule = schedules[scheduleCourseId(course.id)];
+    return schedule ? [[course.id, { ...schedule, id: course.id, cursoId: course.id }]] : [];
+  }));
 }
 
 export async function listDirectorAttendance({ fecha = todayIso(), trimestreId = "" } = {}) {
