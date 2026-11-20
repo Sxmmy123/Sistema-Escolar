@@ -7,7 +7,7 @@ import {
   calculateCourseGrades,
   listDirectorAllActivities,
   listDirectorAttendanceByTrimester,
-  listDirectorRecentAttendance,
+  listDirectorRecentAttendanceDays,
   listDirectorAudit,
   listDirectorGrades,
   listDirectorSchedules,
@@ -242,7 +242,7 @@ async function buildDashboardSnapshot() {
   const [students, teachers, attendanceRows, auditRows, activities, grades, schedules] = await Promise.all([
     listDirectorStudents(),
     listDirectorTeachers(),
-    listDirectorRecentAttendance(),
+    listDirectorRecentAttendanceDays(),
     listDirectorAudit(8),
     listDirectorAllActivities(),
     listDirectorGrades(),

@@ -49,21 +49,22 @@ export async function createStudentAuthAccess(student, course = null, clients = 
       }
       authEmail = profile.data().authEmail || authEmail;
     } else {
-      temporary = studentPasswordForNewAccess(options.temporaryPassword ?? "");
+      temporary = options.linkExisting === true ? String(options.temporaryPassword ?? "") : studentPasswordForNewAccess(options.temporaryPassword ?? "", usuario);
       try {
-        credential = await createUserWithEmailAndPassword(clients.creatorAuth, authEmail, temporary);
-        created = true;
-      } catch (error) {
-        if (error.code !== "auth/email-already-in-use" || options.linkExisting !== true) throw error;
-        if (authEmail !== usernameToAuthEmail(usuario)) throw new Error("El correo registrado no coincide con el usuario del alumno. Revisa la cuenta antes de vincularla.");
-        try {
+        if (options.linkExisting === true) {
+          if (authEmail !== usernameToAuthEmail(usuario)) throw new Error("El correo registrado no coincide con el usuario del alumno. Revisa la cuenta antes de vincularla.");
           credential = await signInWithEmailAndPassword(clients.creatorAuth, authEmail, temporary);
-        } catch (loginError) {
-          if (["auth/invalid-credential", "auth/wrong-password", "auth/invalid-login-credentials"].includes(loginError.code)) {
-            throw new Error("La cuenta ya existe, pero no acepta la contrasena indicada. No se cambio su clave ni ningun registro. Es necesario recuperar la contrasena de esa cuenta.");
-          }
-          throw loginError;
+        } else {
+          credential = await createUserWithEmailAndPassword(clients.creatorAuth, authEmail, temporary);
+          created = true;
         }
+      } catch (error) {
+        if (options.linkExisting === true && ["auth/invalid-credential", "auth/wrong-password", "auth/invalid-login-credentials"].includes(error.code)) {
+          throw new Error("La cuenta ya existe, pero no acepta la contrasena indicada. No se cambio su clave ni ningun registro. Es necesario recuperar la contrasena de esa cuenta.");
+        }
+        throw error;
+      }
+      if (!created) {
         const existingProfile = await getDoc(doc(clients.firestore, "usuarios", credential.user.uid));
         recoveredProfileMissing = !existingProfile.exists();
         if (existingProfile.exists() && (existingProfile.data().rol !== "alumno" || existingProfile.data().alumnoId !== student.id || existingProfile.data().activo === false)) {

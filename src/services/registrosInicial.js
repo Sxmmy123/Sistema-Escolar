@@ -8,10 +8,13 @@ export const nuevoIdRegistroInicial = (uid) => `${uid}_${doc(coleccionGestion(fi
 function comprobarSesion(context, authClient) {
   if (!context?.uid || authClient.currentUser?.uid !== context.uid || gestionActual() !== context.gestionId) throw new Error("La sesion cambio. Vuelve a abrir el modulo.");
 }
-export async function listarRegistrosInicial(context, courseId, termId, { db = firestore, authClient = auth, fresh = false } = {}) {
+export async function listarRegistrosInicial(context, courseId, termId, { db = firestore, authClient = auth, fresh = false, alumnoId = "" } = {}) {
   comprobarSesion(context, authClient);
   cursoInicial(context, courseId);
-  const snapshot = await (fresh ? getDocsFromServer : getDocs)(query(coleccionGestion(db, "registros_inicial"), where("cursoId", "==", courseId), where("trimestreId", "==", termId), where("docenteUid", "==", context.uid)));
+  if (alumnoId && (typeof alumnoId !== "string" || alumnoId.includes("/"))) throw new Error("Selecciona un estudiante valido.");
+  const filters = [where("cursoId", "==", courseId), where("trimestreId", "==", termId), where("docenteUid", "==", context.uid)];
+  if (alumnoId) filters.push(where("alumnoId", "==", alumnoId));
+  const snapshot = await (fresh ? getDocsFromServer : getDocs)(query(coleccionGestion(db, "registros_inicial"), ...filters));
   comprobarSesion(context, authClient);
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 }

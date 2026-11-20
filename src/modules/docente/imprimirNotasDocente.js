@@ -2,6 +2,7 @@
 import { gradeByActivityAndStudent, isMaterialActivity, isSaberActivity, studentActivityGrade } from "./AcademicoDocente.js";
 import { escapeHtml } from "./UtilidadesDocente.js";
 import { gestionActual } from "../../services/rutasFirestore.js";
+import { formatoCarta } from "../../ui/impresion.js";
 
 const SCHOOL_NAME = "ECOLOGICA NUEVA BOLIVIA";
 const SCHOOL_LEVEL = "PRIMARIA COMUNITARIA VOCACIONAL";
@@ -215,6 +216,7 @@ function subjectSheet({
 }
 
 export function printDocument(payload, subjects) {
+  const page = formatoCarta();
   const gradesMap = gradeByActivityAndStudent(payload.gradesList || []);
   const html = `
     <!doctype html>
@@ -223,13 +225,14 @@ export function printDocument(payload, subjects) {
         <meta charset="UTF-8">
         <title>Registro de evaluacion</title>
         <style>
-          @page { size: letter portrait; margin: 4mm; }
+          ${page.pagina}
           * { box-sizing: border-box; }
           html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: "Arial Narrow", Arial, sans-serif; }
           .print-page {
-            width: 207.9mm;
-            height: 271.4mm;
-            max-height: 271.4mm;
+            width: ${page.ancho}mm;
+            max-width: 100%;
+            height: ${page.alto}mm;
+            max-height: ${page.alto}mm;
             overflow: hidden;
             page-break-after: always;
             break-after: page;
@@ -263,6 +266,7 @@ export function printDocument(payload, subjects) {
           .hacer-group { background: #fbe0cf; }
           .hacer-col { background: #fff; }
           .auto-group, .auto-col { background: #fde7a8; }
+          .auto-group { overflow-wrap: anywhere; }
           .final-group, .final-col { background: #dff2c6; }
           .total-col { background: #f8dfc2; }
           .status-col { background: #e7f2ff; }

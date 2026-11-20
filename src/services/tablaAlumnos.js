@@ -1,11 +1,12 @@
 import Papa from "papaparse";
 import { initialStudentPassword, normalizeStudentAccessKey, normalizeStudentSex } from "./identidadAlumno.js";
+import { validateInitialPassword } from "../../functions/password-policy.js";
 
 export const STUDENT_TABLE_FIELDS = ["nombre", "ci", "password", "correo", "sexo"];
 export const MAX_STUDENT_ROWS = 200;
 let rowSequence = 0;
 
-export function newStudentRow(mode = "ci") {
+export function newStudentRow(mode = "secure") {
   return { key: `alumno-${++rowSequence}`, nombre: "", ci: "", password: initialStudentPassword("", mode), correo: "", sexo: "", autoPassword: true, status: "", saved: false };
 }
 
@@ -16,7 +17,7 @@ export function hasStudentData(row) {
 const headerKey = (text) => String(text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
 const headerFields = { nombre: "nombre", nombrecompleto: "nombre", alumno: "nombre", apellidosynombres: "nombre", ci: "ci", carnet: "ci", carnetdeidentidad: "ci", contrasena: "password", password: "password", correo: "correo", correoopcional: "correo", email: "correo", sexo: "sexo", genero: "sexo" };
 
-export function pasteStudentCells(rows, text, startRow, startColumn, mode = "ci") {
+export function pasteStudentCells(rows, text, startRow, startColumn, mode = "secure") {
   const parsed = Papa.parse(String(text), { delimiter: "\t", dynamicTyping: false, skipEmptyLines: false });
   if (parsed.errors.length) throw new Error("La tabla pegada tiene comillas o celdas incompletas.");
   const matrix = parsed.data;
@@ -38,7 +39,7 @@ export function pasteStudentCells(rows, text, startRow, startColumn, mode = "ci"
       row[field] = field === "sexo" ? normalizeStudentSex(value) : field === "password" ? String(value) : String(value).trim();
       if (field === "password") row.autoPassword = !value;
     }
-    if (row.autoPassword && (mode !== "random" || !row.password)) row.password = initialStudentPassword(row.ci, mode);
+    if (row.autoPassword && !row.password) row.password = initialStudentPassword(row.ci, mode);
     row.status = "";
     row.error = false;
   }
@@ -64,7 +65,7 @@ export function validateStudentRows(rows) {
     if (row.saved) continue;
     if (!nombre) fail(row.key, "Falta el nombre completo.");
     if (!ci || !/^[a-z0-9._-]+$/i.test(ci)) fail(row.key, "Ingresa un CI valido.");
-    if (typeof row.password !== "string" || row.password.length < 6) fail(row.key, "La contrasena debe tener al menos 6 caracteres.");
+    try { validateInitialPassword(row.password, ci); } catch (error) { fail(row.key, error.message); }
     if (correo && (correo.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo))) fail(row.key, "El correo no tiene formato valido.");
     if (sexo && !["M", "F"].includes(sexo)) fail(row.key, "Selecciona Masculino o Femenino en Sexo.");
     if (correo) {

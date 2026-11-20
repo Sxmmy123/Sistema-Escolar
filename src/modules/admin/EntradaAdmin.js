@@ -1,4 +1,4 @@
-import { createIcons, icons } from "lucide";
+import { createIcons, icons } from "../../ui/icons.js";
 import "./InicioRegistroAdmin.css";
 import { AdminDashboard } from "./AdminDashboard.js";
 import { AdminModule } from "./PaginasAdmin.js";

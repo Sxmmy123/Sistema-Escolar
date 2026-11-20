@@ -71,7 +71,7 @@ function friendlyAuthError(error, login) {
   const code = error?.code || "";
   const isUsername = !String(login || "").includes("@");
 
-  if (["auth/invalid-credential", "auth/user-not-found", "auth/wrong-password", "auth/invalid-login-credentials"].includes(code)) {
+  if (["auth/invalid-credential", "auth/user-not-found", "auth/wrong-password", "auth/invalid-login-credentials", "unauthenticated", "functions/unauthenticated"].includes(code)) {
     return isUsername
       ? "No se pudo ingresar. Revisa que el usuario exista y que la contrasena sea correcta."
       : "No se pudo ingresar. Revisa el correo y la contrasena.";
@@ -93,7 +93,7 @@ function friendlyAuthError(error, login) {
     return "Este dominio no esta autorizado en Firebase. Abre con localhost o agrega 127.0.0.1 en Authentication > Configuracion > Dominios autorizados.";
   }
 
-  if (code === "auth/too-many-requests") {
+  if (["auth/too-many-requests", "resource-exhausted", "functions/resource-exhausted"].includes(code)) {
     return "Demasiados intentos. Espera un momento e intenta nuevamente.";
   }
 
@@ -153,7 +153,7 @@ export function bindLogin() {
     let email = "";
     let stage = "usuario";
     try {
-      email = await authEmailForLogin(login);
+      email = await authEmailForLogin(login, { password });
       stage = "autenticacion";
       const credential = await signInWithEmailAndPassword(auth, email, password);
       const user = credential.user;

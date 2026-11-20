@@ -119,7 +119,7 @@ test("Notas conserva la tabla, los alumnos y el calculo usando exclusivamente la
     gradesList: [{ id: "nota-saber", alumnoId: "alumno-prueba", actividadId: "saber", valor: 80, nota: 80, estadoEntrega: "a_tiempo" }, { id: "nota-hacer", alumnoId: "alumno-prueba", actividadId: "hacer", valor: 70, nota: 70, estadoEntrega: "a_tiempo" }, { id: "nota-auto", alumnoId: "alumno-prueba", actividadId: "auto", valor: 5, nota: 100 }],
     attendanceRows: [{ alumnoId: "alumno-prueba", cursoId: "cuarto_a", fecha: base.fecha, trimestreId: "t2", estado: "licencia" }]
   };
-  localStorage.setItem(claveCache("notas", context.uid, "cuarto_a", "t2"), JSON.stringify({ updatedAt: Date.now(), data }));
+  sessionStorage.setItem(claveCache("notas", context.uid, "cuarto_a", "t2"), JSON.stringify({ updatedAt: Date.now(), data }));
   const root = { innerHTML: "", querySelector: () => null, querySelectorAll: () => [] };
   roots.set("[data-teacher-notes]", root);
   const { renderNotes } = await import("../src/modules/docente/NotasDocente.js");
@@ -139,16 +139,251 @@ test("Resumen conserva la copia local y suma Licencia y Permiso en una misma col
   teacherState.trimesterId = "t2";
   const student = { id: "alumno-prueba", nombre: "Alumno de prueba", cursoId: "cuarto_a", activo: true };
   const records = ["licencia", "permiso", " LICENCIA "].map((estado, index) => ({ alumnoId: student.id, cursoId: "cuarto_a", trimestreId: "t2", fecha: `2026-09-${22 + index}`, estado }));
-  localStorage.setItem(claveCache("resumen_asistencia", context.uid, "cuarto_a", "t2"), JSON.stringify({ updatedAt: Date.now(), data: { students: [student], records } }));
+  sessionStorage.setItem(claveCache("resumen_asistencia", context.uid, "cuarto_a", "t2"), JSON.stringify({ updatedAt: Date.now(), data: { students: [student], records } }));
   const root = { innerHTML: "", querySelector: () => null, querySelectorAll: () => [] };
   roots.set("[data-teacher-summary]", root);
   const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
-  await renderSummary(context);
+  await renderSummary(context, { refresh: async () => ({ students: [student], records }) });
   assert.match(root.innerHTML, /3 fecha\(s\) registradas/);
   const row = root.innerHTML.match(/<tr data-teacher-alert-student="alumno-prueba"[^>]*>(.*?)<\/tr>/s)[1];
   assert.equal((row.match(/>L<\/span>/g) || []).length, 3);
   assert.match(row, /<td class="w-7[^>]*>3<\/td>/);
   assert.match(root.innerHTML, /Actualizar resumen/);
+  roots.clear();
+});
+
+function summaryFixture(term = "t1") {
+  const context = { uid: "docente-resumen", courses: [{ id: "cuarto_a", nombre: "Cuarto A", materias: ["matematica"] }] };
+  const listeners = new Map();
+  const button = { addEventListener: (name, callback) => listeners.set(name, callback) };
+  const root = { innerHTML: "", querySelector: (selector) => selector === "[data-refresh-summary-cache]" ? button : null, querySelectorAll: () => [] };
+  roots.set("[data-teacher-summary]", root);
+  teacherState.context = context;
+  teacherState.selectedCourseId = "cuarto_a";
+  teacherState.trimesterId = term;
+  const student = { id: "a", nombre: "Ana", cursoId: "cuarto_a" };
+  const record = (fecha, estado = "presente", trimestreId = term) => ({ alumnoId: student.id, cursoId: "cuarto_a", fecha, estado, trimestreId });
+  return { context, root, listeners, student, record };
+}
+
+function agendaFixture() {
+  const context = { uid: "docente-agenda", courses: [{ id: "cuarto_a", nombre: "Cuarto A", corto: "4to", materias: ["matematica", "lenguaje"] }] };
+  const root = { innerHTML: "", querySelector: () => null, querySelectorAll: () => [] };
+  roots.set("[data-teacher-tasks]", root);
+  Object.assign(teacherState, { context, selectedCourseId: "cuarto_a", trimesterId: "t1", taskMonth: "2026-02", taskModalDate: "2026-02-02", taskDraftCourseId: "cuarto_a", taskDraftMateriaId: "matematica", taskDraftTipo: "tarea", taskEditActivityId: "" });
+  const schedule = context.courses[0].materias.map((materiaId) => ({ cursoId: "cuarto_a", materiaId, diaId: "lunes" }));
+  const loaders = { loadActivities: async () => [], loadSchedule: async () => schedule };
+  return { context, root, loaders };
+}
+
+test("Agenda descarta una carga anterior que termina despues de una nueva", async () => {
+  const { renderTasks } = await import("../src/modules/docente/AgendaDocente.js");
+  const { context, root, loaders } = agendaFixture();
+  let finish;
+  const older = renderTasks(context, { ...loaders, loadActivities: () => new Promise((resolve) => { finish = resolve; }) });
+  const activity = { id: "actual", cursoId: "cuarto_a", materiaId: "lenguaje", fecha: "2026-02-02", titulo: "Actividad actual", tipo: "tarea" };
+  await renderTasks(context, { ...loaders, loadActivities: async () => [activity] });
+  const current = root.innerHTML;
+  finish([{ ...activity, titulo: "Resultado antiguo" }]);
+  await older;
+  assert.equal(root.innerHTML, current);
+  assert.match(current, /Actividad actual/);
+  assert.doesNotMatch(current, /Resultado antiguo/);
+  roots.clear();
+});
+
+test("el modal de Agenda solo se cierra si el clic comienza y termina en el fondo", async () => {
+  const { renderTasks } = await import("../src/modules/docente/AgendaDocente.js");
+  const { context, root, loaders } = agendaFixture();
+  const listeners = new Map();
+  const modal = { addEventListener: (name, callback) => listeners.set(name, callback) };
+  root.querySelector = (selector) => selector === "[data-activity-modal]" ? modal : null;
+  await renderTasks(context, loaders);
+  listeners.get("pointerdown")({ target: {}, button: 0 });
+  listeners.get("click")({ target: modal });
+  assert.equal(teacherState.taskModalDate, "2026-02-02");
+  listeners.get("pointerdown")({ target: modal, button: 0 });
+  listeners.get("pointercancel")();
+  listeners.get("click")({ target: modal });
+  assert.equal(teacherState.taskModalDate, "2026-02-02");
+  listeners.get("pointerdown")({ target: modal, button: 0 });
+  await listeners.get("click")({ target: modal });
+  assert.equal(teacherState.taskModalDate, "");
+  roots.clear();
+});
+
+test("Agenda no modifica una pantalla abandonada ni el trimestre o la sesion nuevos", async () => {
+  const { renderTasks } = await import("../src/modules/docente/AgendaDocente.js");
+  for (const change of [() => roots.clear(), () => { teacherState.trimesterId = "t2"; }, () => { teacherState.context = { uid: "otro-docente" }; }]) {
+    const { context, root, loaders } = agendaFixture();
+    let finish;
+    const loading = renderTasks(context, { ...loaders, loadSchedule: () => new Promise((resolve) => { finish = resolve; }) });
+    await new Promise((resolve) => setImmediate(resolve));
+    root.innerHTML = "Contenido vigente";
+    change();
+    finish([]);
+    await loading;
+    assert.equal(root.innerHTML, "Contenido vigente");
+  }
+  roots.clear();
+});
+
+test("Agenda conserva titulo, puntaje, foco y desplazamiento escritos durante la carga", async () => {
+  const { renderTasks } = await import("../src/modules/docente/AgendaDocente.js");
+  const { context, root, loaders } = agendaFixture();
+  let fields;
+  let form;
+  const makeForm = () => {
+    fields = ["titulo", "maximo"].map((name) => ({ name, type: name === "maximo" ? "number" : "text", value: "", focus() { document.activeElement = this; }, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; } }));
+    form = { addEventListener() {}, parentElement: { scrollTop: 0 }, contains: (node) => fields.includes(node), querySelector: (selector) => fields.find((field) => selector.includes(`name='${field.name}'`)) || null, querySelectorAll: (selector) => selector === "[name]" ? fields : selector === "[data-material-item-row]" ? [] : fields.filter((field) => selector.includes(`name='${field.name}'`)) };
+  };
+  let html = "";
+  Object.defineProperty(root, "innerHTML", { get: () => html, set: (value) => { html = value; makeForm(); } });
+  root.querySelector = (selector) => selector === "[data-activity-form]" ? form : null;
+  await renderTasks(context, loaders);
+  let finish;
+  const pending = renderTasks(context, { ...loaders, loadSchedule: () => new Promise((resolve) => { finish = resolve; }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  fields[0].value = "Las celulas";
+  fields[0].selectionStart = 4;
+  fields[0].selectionEnd = 7;
+  fields[1].value = "35";
+  form.parentElement.scrollTop = 310;
+  document.activeElement = fields[0];
+  finish(await loaders.loadSchedule());
+  await pending;
+  assert.equal(fields[0].value, "Las celulas");
+  assert.equal(fields[1].value, "35");
+  assert.equal(document.activeElement, fields[0]);
+  assert.equal(fields[0].selectionStart, 4);
+  assert.equal(form.parentElement.scrollTop, 310);
+  delete document.activeElement;
+  roots.clear();
+});
+
+test("Resumen carga automaticamente sin copia local y no requiere pulsar Cargar", async () => {
+  const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
+  const fixture = summaryFixture();
+  let calls = 0;
+  await renderSummary(fixture.context, {
+    readCache: async () => null,
+    refresh: async (_context, course, term) => { calls++; assert.equal(course.id, "cuarto_a"); assert.equal(term, "t1"); return { students: [fixture.student], records: [fixture.record("2026-02-02")] }; }
+  });
+  assert.equal(calls, 1);
+  assert.match(fixture.root.innerHTML, /Ana/);
+  assert.match(fixture.root.innerHTML, /1 fecha\(s\) registradas/);
+  assert.match(fixture.root.innerHTML, /1er trimestre/);
+  assert.match(fixture.root.innerHTML, /aria-busy="false"/);
+  assert.doesNotMatch(fixture.root.innerHTML, /Cargar resumen|Cargando resumen/);
+  roots.clear();
+});
+
+test("Resumen muestra la copia mientras carga y luego incorpora los datos nuevos", async () => {
+  const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
+  const fixture = summaryFixture();
+  let finish;
+  const pending = renderSummary(fixture.context, {
+    readCache: async () => ({ students: [fixture.student], records: [fixture.record("2026-02-02")] }),
+    refresh: () => new Promise((resolve) => { finish = resolve; })
+  });
+  await Promise.resolve();
+  assert.match(fixture.root.innerHTML, /Ana/);
+  assert.match(fixture.root.innerHTML, /aria-busy="true"/);
+  assert.match(fixture.root.innerHTML, /data-refresh-summary-cache disabled/);
+  finish({ students: [fixture.student], records: [fixture.record("2026-02-02"), fixture.record("2026-02-03", "atraso")] });
+  await pending;
+  assert.match(fixture.root.innerHTML, /2 fecha\(s\) registradas/);
+  assert.match(fixture.root.innerHTML, /aria-busy="false"/);
+  assert.doesNotMatch(fixture.root.innerHTML, /data-refresh-summary-cache disabled/);
+  roots.clear();
+});
+
+test("un fallo de carga muestra el error y permite reintentar sin quedar bloqueado", async () => {
+  const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
+  const fixture = summaryFixture();
+  let calls = 0;
+  await renderSummary(fixture.context, {
+    readCache: async () => null,
+    refresh: async () => { if (++calls === 1) throw Object.assign(new Error("sin red"), { code: "unavailable" }); return { students: [fixture.student], records: [fixture.record("2026-02-02")] }; }
+  });
+  assert.match(fixture.root.innerHTML, /role="alert"/);
+  assert.match(fixture.root.innerHTML, /No se pudo conectar/);
+  assert.match(fixture.root.innerHTML, /Reintentar/);
+  assert.doesNotMatch(fixture.root.innerHTML, /data-refresh-summary-cache disabled/);
+  await fixture.listeners.get("click")();
+  assert.equal(calls, 2);
+  assert.match(fixture.root.innerHTML, /Ana/);
+  assert.doesNotMatch(fixture.root.innerHTML, /role="alert"/);
+  roots.clear();
+});
+
+test("fallar al actualizar no borra la copia local disponible", async () => {
+  const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
+  const fixture = summaryFixture();
+  await renderSummary(fixture.context, {
+    readCache: async () => ({ students: [fixture.student], records: [fixture.record("2026-02-02", "licencia")] }),
+    refresh: async () => { throw Object.assign(new Error("denegado"), { code: "permission-denied" }); }
+  });
+  assert.match(fixture.root.innerHTML, /Revisa los permisos/);
+  assert.match(fixture.root.innerHTML, /Se mantiene la copia local/);
+  assert.match(fixture.root.innerHTML, />L<\/span>/);
+  roots.clear();
+});
+
+test("una respuesta tardia de primero no aparece bajo la cabecera del segundo trimestre", async () => {
+  const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
+  const fixture = summaryFixture();
+  let finish;
+  const pending = renderSummary(fixture.context, { readCache: async () => null, refresh: () => new Promise((resolve) => { finish = resolve; }) });
+  await Promise.resolve();
+  teacherState.trimesterId = "t2";
+  await renderSummary(fixture.context, { readCache: async () => null, refresh: async () => ({ students: [{ ...fixture.student, nombre: "Segundo" }], records: [fixture.record("2026-05-04", "presente", "t2")] }) });
+  const current = fixture.root.innerHTML;
+  finish({ students: [{ ...fixture.student, nombre: "Primero anterior" }], records: [fixture.record("2026-02-02")] });
+  await pending;
+  assert.equal(fixture.root.innerHTML, current);
+  assert.match(current, /2do trimestre/);
+  assert.doesNotMatch(current, /Primero anterior|febrero/);
+  roots.clear();
+});
+
+test("cerrar el modulo o cambiar de cuenta descarta respuestas pendientes", async () => {
+  const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
+  for (const change of [() => roots.clear(), () => { teacherState.context = { uid: "otra-cuenta" }; }]) {
+    const fixture = summaryFixture();
+    let finish;
+    const pending = renderSummary(fixture.context, { readCache: async () => null, refresh: () => new Promise((resolve) => { finish = resolve; }) });
+    await Promise.resolve();
+    const before = fixture.root.innerHTML;
+    change();
+    finish({ students: [fixture.student], records: [fixture.record("2026-02-02")] });
+    await pending;
+    assert.equal(fixture.root.innerHTML, before);
+    roots.clear();
+  }
+});
+
+test("un alumno sin asistencia registrada no recibe faltas inventadas en el resumen", async () => {
+  const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
+  const fixture = summaryFixture();
+  await renderSummary(fixture.context, { readCache: async () => null, refresh: async () => ({ students: [fixture.student, { id: "b", nombre: "Sin marcas", cursoId: "cuarto_a" }], records: [fixture.record("2026-02-02")] }) });
+  const row = fixture.root.innerHTML.match(/<tr data-teacher-alert-student="b"[^>]*>(.*?)<\/tr>/s)[1];
+  assert.match(row, /title="Sin registro"/);
+  assert.match(row, />-<\/span>/);
+  assert.doesNotMatch(row, />F<\/span>/);
+  assert.equal((row.match(/<td class="w-7[^>]*>0<\/td>/g) || []).length, 4);
+  roots.clear();
+});
+
+test("una copia equivocada no muestra registros de otro curso o trimestre", async () => {
+  const { renderSummary } = await import("../src/modules/docente/ResumenAsistenciaDocente.js");
+  const fixture = summaryFixture();
+  await renderSummary(fixture.context, {
+    readCache: async () => ({ students: [fixture.student], records: [fixture.record("2026-05-04", "falta", "t2"), { ...fixture.record("2026-02-02"), cursoId: "tercero_a" }] }),
+    refresh: async () => { throw new Error("sin conexion"); }
+  });
+  assert.match(fixture.root.innerHTML, /0 fecha\(s\) registradas/);
+  assert.doesNotMatch(fixture.root.innerHTML, />F<\/span>/);
   roots.clear();
 });
 
@@ -263,8 +498,8 @@ test("Regularizacion muestra el total real y todos los segmentos, incluso con ma
     attendanceRows: [{ alumnoId: student.id, fecha: base.fecha, estado: "licencia" }]
   };
   const otherData = { students: [otherStudent], activities: [{ ...base, id: "tarea-tercero", cursoId: "tercero_a", tipo: "tarea" }], gradesList: [], attendanceRows: [] };
-  localStorage.setItem(claveCache("notas", context.uid, "cuarto_a", "t1"), JSON.stringify({ updatedAt: Date.now(), data }));
-  localStorage.setItem(claveCache("notas", context.uid, "tercero_a", "t1"), JSON.stringify({ updatedAt: Date.now(), data: otherData }));
+  sessionStorage.setItem(claveCache("notas", context.uid, "cuarto_a", "t1"), JSON.stringify({ updatedAt: Date.now(), data }));
+  sessionStorage.setItem(claveCache("notas", context.uid, "tercero_a", "t1"), JSON.stringify({ updatedAt: Date.now(), data: otherData }));
   teacherState.context = context;
   teacherState.trimesterId = "t1";
   teacherState.regularizationSearch = "";
@@ -326,7 +561,7 @@ test("Regularizacion identifica materias por color y califica solo al alumno y m
   const data = { students: [student], activities: [math, ...science], gradesList: [], attendanceRows: [math, ...science].map((activity) => ({ alumnoId: student.id, fecha: activity.fecha, estado: "licencia" })) };
   const otherData = { students: [other], activities: [{ ...math, id: "tarea-otro-curso", cursoId: "tercero_a" }], gradesList: [], attendanceRows: [] };
   for (const [index, snapshot] of [data, otherData].entries()) {
-    localStorage.setItem(claveCache("notas", context.uid, courses[index].id, "t1"), JSON.stringify({ updatedAt: Date.now(), data: snapshot }));
+    sessionStorage.setItem(claveCache("notas", context.uid, courses[index].id, "t1"), JSON.stringify({ updatedAt: Date.now(), data: snapshot }));
   }
   teacherState.context = context;
   teacherState.trimesterId = "t1";
@@ -414,7 +649,7 @@ test("Guardar y siguiente en Regularizacion conserva Saber o Hacer, materia y al
   };
   const otherData = { students: [otherStudent], activities: [{ ...base, cursoId: "tercero_a", id: "saber-otro-alumno", tipo: "examen", fecha: "2026-02-08", titulo: "Examen de otro alumno" }], gradesList: [], attendanceRows: [] };
   for (const [index, snapshot] of [data, otherData].entries()) {
-    localStorage.setItem(claveCache("notas", context.uid, courses[index].id, "t1"), JSON.stringify({ updatedAt: Date.now(), data: snapshot }));
+    sessionStorage.setItem(claveCache("notas", context.uid, courses[index].id, "t1"), JSON.stringify({ updatedAt: Date.now(), data: snapshot }));
   }
   teacherState.context = context;
   teacherState.trimesterId = "t1";

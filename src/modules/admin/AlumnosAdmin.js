@@ -1,10 +1,10 @@
-import { createIcons, icons } from "lucide";
+import { createIcons, icons } from "../../ui/icons.js";
 import { auth } from "../../firebase/client.js";
 import { COURSES, findCourse } from "../../data/catalog.js";
 import { importStudents, listStudents } from "../../services/adminData.js";
 import { createStudentAuthAccess, setStudentAccessActive } from "../../services/studentAccess.js";
 import { registrarTablaAlumnos } from "../../services/registroAlumnos.js";
-import { generateStudentPin, initialStudentPassword, normalizeStudentSex } from "../../services/identidadAlumno.js";
+import { generateStudentPassword, initialStudentPassword, normalizeStudentSex } from "../../services/identidadAlumno.js";
 import { MAX_STUDENT_ROWS, STUDENT_TABLE_FIELDS, hasStudentData, newStudentRow, pasteStudentCells, sortStudentsByName, validateStudentRows } from "../../services/tablaAlumnos.js";
 import { openStudentAccessMigration } from "./AccesosAlumnos.js";
 import { openStudentPasswordReset } from "./RestablecerClaveAlumno.js";
@@ -28,9 +28,9 @@ export function AlumnosAdminPanel() {
     </div>
     <section id="students-register-view" role="tabpanel" aria-labelledby="students-register-tab" data-students-register>
       <div class="students-toolbar">
-        <label class="students-password-mode">Contrasena inicial<select data-students-password-mode aria-label="Contrasena inicial"><option value="ci">Mismo CI</option><option value="default">123456</option><option value="random">Aleatoria: 6 digitos</option></select></label>
+        <label class="students-password-mode">Contrasena inicial<select data-students-password-mode aria-label="Contrasena inicial"><option value="secure">Aleatoria segura</option><option value="manual">Personalizada</option></select></label>
         <div class="students-tools">
-          <button type="button" class="students-icon-button" data-students-password-visible aria-label="Ocultar contrasenas" title="Ocultar contrasenas" aria-pressed="true">${icon("eye")}</button>
+          <button type="button" class="students-icon-button" data-students-password-visible aria-label="Mostrar contrasenas" title="Mostrar contrasenas" aria-pressed="false">${icon("eye-off")}</button>
           <button type="button" class="students-icon-button" data-students-download aria-label="Descargar credenciales nuevas" title="Descargar credenciales nuevas" disabled>${icon("download")}</button>
           <button type="button" data-students-add>${icon("plus")} Anadir fila</button>
         </div>
@@ -43,7 +43,7 @@ export function AlumnosAdminPanel() {
         </table>
       </div>
       <div class="students-save-bar"><span data-students-draft-count></span><button type="button" class="students-primary-button" data-students-save>${icon("save")} Guardar alumnos</button></div>
-      <p class="students-security-note">Contrasenas iniciales temporales. El CI y las claves de 6 digitos no son adecuados para datos reales.</p>
+      <p class="students-security-note">Contrasenas temporales privadas.</p>
     </section>
     <section id="students-list-view" role="tabpanel" aria-labelledby="students-list-tab" data-students-registered hidden>
       <div class="students-toolbar">
@@ -66,7 +66,7 @@ export function bindAlumnosAdmin() {
   const adminUid = auth.currentUser?.uid;
   const $ = (selector) => root.querySelector(selector);
   const drafts = new Map(), cache = new Map(), errors = new Map(), loading = new Map();
-  let mode = "ci", view = "register", busy = false, showPasswords = true, changingState = false, resettingPassword = false;
+  let mode = "secure", view = "register", busy = false, showPasswords = false, changingState = false, resettingPassword = false;
   const rows = () => {
     if (!drafts.has(selectedCourse)) drafts.set(selectedCourse, Array.from({ length: 6 }, () => newStudentRow(mode)));
     return drafts.get(selectedCourse);
@@ -89,10 +89,10 @@ export function bindAlumnosAdmin() {
       const label = `${index + 1}`;
       const errorMessage = rowErrors.join(" ") || (row.error ? row.status : "");
       const errorAttrs = errorMessage ? `aria-invalid="true" aria-describedby="students-error-${row.key}"` : "";
-      const cell = (field) => `<input data-sheet-cell="${field}" data-row-key="${row.key}" aria-label="${field === "nombre" ? "Nombre completo" : field === "password" ? "Contrasena" : field === "correo" ? "Correo" : "CI"} fila ${label}" value="${escape(row[field])}" type="${field === "password" && !showPasswords ? "password" : field === "correo" ? "email" : "text"}" autocomplete="off" ${row.saved ? "readonly" : ""} ${busy ? "disabled" : ""} ${errorAttrs} ${field === "password" ? 'minlength="6"' : ""}>`;
+      const cell = (field) => `<input data-sheet-cell="${field}" data-row-key="${row.key}" aria-label="${field === "nombre" ? "Nombre completo" : field === "password" ? "Contrasena" : field === "correo" ? "Correo" : "CI"} fila ${label}" value="${escape(row[field])}" type="${field === "password" && !showPasswords ? "password" : field === "correo" ? "email" : "text"}" autocomplete="off" ${row.saved ? "readonly" : ""} ${busy ? "disabled" : ""} ${errorAttrs} ${field === "password" ? 'minlength="12"' : ""}>`;
       const sexo = normalizeStudentSex(row.sexo);
       const sexCell = `<select data-sheet-cell="sexo" data-row-key="${row.key}" aria-label="Sexo fila ${label}" title="${SEX_LABELS[sexo] || SEX_HELP}" ${busy || row.saved ? "disabled" : ""} ${errorAttrs}><option value="" title="Sin indicar" ${!sexo ? "selected" : ""}>-</option><option value="F" title="Femenino" aria-label="Femenino" ${sexo === "F" ? "selected" : ""}>F</option><option value="M" title="Masculino" aria-label="Masculino" ${sexo === "M" ? "selected" : ""}>M</option>${sexo && !["M", "F"].includes(sexo) ? `<option value="${escape(sexo)}" selected>${escape(sexo)}</option>` : ""}</select>`;
-      return `<tr data-sheet-row="${row.key}" data-saved="${row.saved}" data-error="${Boolean(errorMessage)}"><td class="students-row-number">${label}</td><td>${cell("nombre")}</td><td>${cell("ci")}</td><td><div class="students-password-cell">${cell("password")}${row.saved ? "" : `<button type="button" class="students-cell-button" data-students-random="${row.key}" aria-label="Generar contrasena aleatoria fila ${label}" title="Generar 6 digitos" ${busy ? "disabled" : ""}>${icon("dices")}</button>`}</div></td><td>${cell("correo")}</td><td>${sexCell}</td><td><button type="button" class="students-cell-button" data-students-remove="${row.key}" title="${row.saved ? "Quitar de esta vista" : "Quitar fila"}" aria-label="Quitar fila ${label}" ${busy ? "disabled" : ""}>${icon("x")}</button></td></tr>${errorMessage ? `<tr class="students-row-error" data-sheet-error="${row.key}"><td colspan="7" id="students-error-${row.key}">Fila ${label}: ${escape(errorMessage)}</td></tr>` : ""}`;
+      return `<tr data-sheet-row="${row.key}" data-saved="${row.saved}" data-error="${Boolean(errorMessage)}"><td class="students-row-number">${label}</td><td>${cell("nombre")}</td><td>${cell("ci")}</td><td><div class="students-password-cell">${cell("password")}${row.saved ? "" : `<button type="button" class="students-cell-button" data-students-random="${row.key}" aria-label="Generar contrasena aleatoria fila ${label}" title="Generar clave segura" ${busy ? "disabled" : ""}>${icon("dices")}</button>`}</div></td><td>${cell("correo")}</td><td>${sexCell}</td><td><button type="button" class="students-cell-button" data-students-remove="${row.key}" title="${row.saved ? "Quitar de esta vista" : "Quitar fila"}" aria-label="Quitar fila ${label}" ${busy ? "disabled" : ""}>${icon("x")}</button></td></tr>${errorMessage ? `<tr class="students-row-error" data-sheet-error="${row.key}"><td colspan="7" id="students-error-${row.key}">Fila ${label}: ${escape(errorMessage)}</td></tr>` : ""}`;
     }).join("");
     createIcons({ icons }); updateCount();
     if (focus) $("[data-students-sheet-rows]").querySelector(`[data-row-key="${focus.key}"][data-sheet-cell="${focus.field}"]`)?.focus();
@@ -213,7 +213,7 @@ export function bindAlumnosAdmin() {
     row[field] = input.value; row.status = ""; row.error = false; errors.delete(row.key);
     if (field === "sexo") input.title = SEX_LABELS[input.value] || SEX_HELP;
     if (field === "password") row.autoPassword = false;
-    if (field === "ci" && row.autoPassword && mode !== "random") {
+    if (field === "ci" && row.autoPassword && !row.password) {
       row.password = initialStudentPassword(row.ci, mode);
       $("[data-students-sheet-rows]").querySelector(`[data-row-key="${row.key}"][data-sheet-cell="password"]`).value = row.password;
     }
@@ -251,7 +251,7 @@ export function bindAlumnosAdmin() {
   root.addEventListener("click", (event) => {
     const random = event.target.closest("[data-students-random]"), remove = event.target.closest("[data-students-remove]");
     if (busy) return;
-    if (random) { const row = rows().find((item) => item.key === random.dataset.studentsRandom); row.password = generateStudentPin(); row.autoPassword = false; row.error = false; row.status = ""; errors.delete(row.key); renderSheet({ key: row.key, field: "password" }); }
+    if (random) { const row = rows().find((item) => item.key === random.dataset.studentsRandom); row.password = generateStudentPassword(); row.autoPassword = false; row.error = false; row.status = ""; errors.delete(row.key); renderSheet({ key: row.key, field: "password" }); }
     if (remove) { const index = rows().findIndex((row) => row.key === remove.dataset.studentsRemove); errors.delete(rows()[index].key); rows().splice(index, 1); if (!rows().length) rows().push(newStudentRow(mode)); renderSheet(); }
   });
   $("[data-students-save]").addEventListener("click", async () => {

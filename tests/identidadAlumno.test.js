@@ -28,12 +28,12 @@ test("la contrasena temporal tiene suficiente longitud sin depender de datos del
   assert.notEqual(password, "12345678");
 });
 
-test("las cuentas nuevas usan 123456 por defecto y permiten una clave inicial distinta", () => {
-  assert.equal(studentPasswordForNewAccess("abc123"), "abc123");
+test("las cuentas nuevas usan claves seguras y rechazan el CI y claves debiles", () => {
   assert.equal(studentPasswordForNewAccess(" Clave temporal "), " Clave temporal ");
-  assert.equal(studentPasswordForNewAccess(), "123456");
-  assert.equal(studentPasswordForNewAccess(""), "123456");
-  for (const value of ["12345", 123456, null]) {
-    assert.throws(() => studentPasswordForNewAccess(value), /al menos 6 caracteres/);
+  assert.equal(studentPasswordForNewAccess().length, 16);
+  assert.notEqual(studentPasswordForNewAccess(""), studentPasswordForNewAccess(""));
+  for (const value of ["123456", "abc123", "12345", 123456, null, "123456789012", "a".repeat(12), "password1234"]) {
+    assert.throws(() => studentPasswordForNewAccess(value));
   }
+  assert.throws(() => studentPasswordForNewAccess("ABC123456789", "ABC123456789"), /diferente del CI/);
 });

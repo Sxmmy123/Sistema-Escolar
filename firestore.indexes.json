@@ -7,7 +7,11 @@
         { "fieldPath": "gestionId", "order": "ASCENDING" },
         { "fieldPath": "activa", "order": "ASCENDING" }
       ]
-    }
+    },
+    { "collectionGroup": "auditoria", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "fecha", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "auditoria", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "tipo", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "auditoria", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "fecha", "order": "ASCENDING" }, { "fieldPath": "tipo", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "registros_inicial", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "docenteUid", "order": "ASCENDING" }, { "fieldPath": "cursoId", "order": "ASCENDING" }, { "fieldPath": "trimestreId", "order": "ASCENDING" }, { "fieldPath": "alumnoId", "order": "ASCENDING" }] }
   ],
   "fieldOverrides": []
 }

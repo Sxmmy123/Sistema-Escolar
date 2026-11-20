@@ -1,4 +1,4 @@
-﻿import { createIcons, icons } from "lucide";
+﻿import { createIcons, icons } from "../../ui/icons.js";
 import { DAYS, findSubject } from "../../data/catalog.js";
 import { icon } from "../../ui/dom.js";
 import { todayIso } from "../../services/teacherData.js";

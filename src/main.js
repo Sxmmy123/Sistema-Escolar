@@ -17,8 +17,10 @@ import { homeForRole, resolveUserRole, routeRequiredRole } from "./services/auth
 import { bindAccountSettings } from "./ui/accountSettings.js";
 import { initializeTheme, bindThemeButtons } from "./ui/theme.js";
 import { registerServiceWorker } from "./pwa/registerServiceWorker.js";
+import { limpiarDatosPrivados } from "./services/cachePrivada.js";
 
 initializeTheme();
+try { limpiarDatosPrivados([localStorage]); } catch { /* Almacenamiento bloqueado. */ }
 registerServiceWorker();
 
 const modulosPorRol = crearCargaPorRol();
@@ -58,7 +60,7 @@ function rememberSession(role, user) {
 }
 
 function clearSession() {
-  sessionStorage.clear();
+  limpiarDatosPrivados();
   activeUser = null;
   activeRole = "";
 }
@@ -305,6 +307,7 @@ async function render() {
 }
 
 onAuthStateChanged(auth, async (user) => {
+  if (activeUser?.uid && activeUser.uid !== user?.uid) limpiarDatosPrivados();
   const revision = ++authRevision;
   ++renderRevision;
   desmontarRol();
@@ -339,15 +342,17 @@ onAuthStateChanged(auth, async (user) => {
           if (revision !== authRevision) return;
           if (!snapshot.exists() || snapshot.data().activo === false) doLogout();
         }, (error) => console.warn("No se pudo verificar el acceso docente", error));
-        let previousAssignment = "";
+        let previousAssignment = null;
         const stopAssignment = onSnapshot(doc(firestore, "gestiones", gestionActual(), "asignaciones", user.uid), (snapshot) => {
           if (revision !== authRevision) return;
           const next = JSON.stringify(snapshot.data() || {});
           if (next === previousAssignment) return;
+          const firstSnapshot = previousAssignment === null;
           previousAssignment = next;
           try { sessionStorage.removeItem(claveCache("contexto_modalidad_v2", user.uid)); } catch { /* No hay cache local disponible. */ }
           window.dispatchEvent(new Event("teacher-assignment-changed"));
-          if (authReady) render();
+          // La primera lectura establece la referencia; no es un cambio de asignacion.
+          if (!firstSnapshot && authReady) render();
         }, (error) => console.warn("No se pudo actualizar la asignacion docente", error));
         stopTeacherAccessWatch = () => { stopProfile(); stopAssignment(); };
       }

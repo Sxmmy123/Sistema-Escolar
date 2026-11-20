@@ -180,6 +180,23 @@ export async function listDirectorRecentAttendance(limitCount = 800) {
   return rows(snap);
 }
 
+export async function listDirectorRecentAttendanceDays(dayCount = 7, { db = firestore, read = getDocs } = {}) {
+  const source = coleccionGestion(db, "asistencias");
+  const count = Math.max(1, Math.min(31, Math.floor(Number(dayCount) || 7)));
+  const dates = [];
+  // Primero se localizan los dias; despues se leen completos, sin cortar un curso a mitad.
+  for (let index = 0; index < count; index++) {
+    const filters = dates.length ? [where("fecha", "<", dates.at(-1))] : [];
+    const snapshot = await read(query(source, ...filters, orderBy("fecha", "desc"), limit(1)));
+    if (!snapshot.docs.length) break;
+    const date = snapshot.docs[0].data().fecha;
+    if (!/^20\d{2}-\d{2}-\d{2}$/.test(date || "")) throw new Error("Hay una fecha de asistencia invalida. No se pudo completar la estadistica.");
+    dates.push(date);
+  }
+  if (!dates.length) return [];
+  return rows(await read(query(source, where("fecha", ">=", dates.at(-1)), where("fecha", "<=", dates[0]))));
+}
+
 export async function listDirectorActivities(trimestreId = "") {
   const activities = await listDirectorAllActivities(trimestreId);
   return activities.filter((item) => !item.interno && !["material", "materiales"].includes(String(item.tipo || "").toLowerCase()));

@@ -191,7 +191,7 @@ test("la seleccion de impresion inicia con todos los alumnos y el documento tien
   assert.equal((selector.match(/ checked/g) || []).length, rows.length + 1);
   assert.match(selector, /2\/2 seleccionados/); assert.match(selector, /data-initial-print-all/);
   const document = documentoInformesCursoInicial({ rows: [rows[0]], course: context.courses[0], year: "2026", teacher: "Docente <prueba>" });
-  assert.match(document, /size:letter portrait/); assert.match(document, /1er trimestre/); assert.match(document, /2do trimestre/); assert.match(document, /3er trimestre/);
+  assert.match(document, /size:\s*letter portrait/); assert.match(document, /1er trimestre/); assert.match(document, /2do trimestre/); assert.match(document, /3er trimestre/);
   assert.match(document, /Ana &lt;Prueba&gt;/); assert.match(document, /Docente &lt;prueba&gt;/); assert.doesNotMatch(document, /Bruno|Comparte materiales/);
   assert.match(document, /Progreso t1/); assert.match(document, /Progreso t2/); assert.match(document, /Progreso t3/);
   assert.throws(() => documentoInformesCursoInicial({ rows: [], course: context.courses[0] }));
@@ -202,13 +202,13 @@ test("la impresion usa carta vertical, justifica los informes y reserva margenes
   const text = "Comparte materiales y respeta turnos. Reconoce colores y figuras; recorta con autonomia y requiere apoyo para relacionar cantidades. Participa con interes y expresa sus ideas con seguridad.".padEnd(200, " ");
   assert.equal(text.length, 200);
   const document = documentoInformesCursoInicial({ rows: [{ student, informes: { t1: text, t2: "", t3: "" } }], course: findCourse("preinicial"), year: "2026", teacher: "Docente de prueba" });
-  assert.match(document, /@page\{size:letter portrait;margin:0 20mm\}/);
+  assert.match(document, /@page\s*\{\s*size:\s*letter portrait;\s*margin:\s*0mm 20mm 0mm 25mm;\s*\}/);
   assert.match(document, /\.report-value\{[^}]*text-align:justify;[^}]*text-align-last:left/);
   assert.match(document, /thead\{display:table-header-group\}/);
   assert.match(document, /tfoot\{display:table-footer-group\}/);
   assert.match(document, /thead \.report-heading\{[^}]*padding:20mm/);
   assert.match(document, /tfoot td\{height:20mm/);
-  assert.match(document, /@media screen\{body\{width:215\.9mm;padding:0 20mm/);
+  assert.match(document, /@media screen\{body\{width:215\.9mm;padding:0mm 20mm 0mm 25mm/);
   assert.match(document, /U\.E\. Ecologica Nueva Bolivia/);
   assert.match(document, /Informe trimestral cualitativo/);
   assert.match(document, /Educacion Inicial en Familia Comunitaria/);

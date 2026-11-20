@@ -1,8 +1,9 @@
-import { createIcons, icons } from "lucide";
+import { createIcons, icons } from "../../ui/icons.js";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../../firebase/client.js";
 import { generateTemporaryStudentPassword, resetStudentPasswordAsAdmin } from "../../services/adminStudentPassword.js";
 import { icon } from "../../ui/dom.js";
+import { validateInitialPassword } from "../../../functions/password-policy.js";
 
 const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 
@@ -11,7 +12,7 @@ export function studentPasswordResetMarkup(student, courseName) {
     <p><strong>${escape(student.nombre)}</strong><br>${escape(courseName)} <span class="students-reset-username">Usuario: ${escape(student.ci || student.usuario || "-")}</span></p>
     <form data-reset-form>
       <label for="student-temporary-password">Contrasena temporal</label>
-      <div class="students-reset-field"><input id="student-temporary-password" data-reset-temporary type="password" autocomplete="off" minlength="6" maxlength="128" required>
+      <div class="students-reset-field"><input id="student-temporary-password" data-reset-temporary type="password" autocomplete="off" minlength="12" maxlength="128" required>
         <button type="button" data-reset-toggle title="Mostrar contrasena temporal" aria-label="Mostrar contrasena temporal" aria-pressed="false">${icon("eye")}</button>
         <button type="button" data-reset-generate title="Generar otra clave temporal" aria-label="Generar otra clave temporal">${icon("refresh-cw")}</button></div>
       <label for="student-reset-admin-password">Tu contrasena de administrador</label>
@@ -59,7 +60,7 @@ export function bindStudentPasswordReset(dialog, { student, isSessionActive, res
     event.preventDefault();
     if (pending || done || !current()) return;
     const password = temporary.value;
-    if (password.length < 6 || password.length > 128) { status("La clave temporal debe tener entre 6 y 128 caracteres.", true); return; }
+    try { validateInitialPassword(password, student.ci || student.usuario); } catch (error) { status(error.message, true); return; }
     if (!administrator.value) { status("Confirma tu contrasena de administrador.", true); return; }
     const adminPassword = administrator.value;
     administrator.value = "";

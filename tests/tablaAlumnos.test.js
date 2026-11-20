@@ -1,16 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateStudentPin, initialStudentPassword, normalizeStudentSex } from "../src/services/identidadAlumno.js";
+import { initialStudentPassword, normalizeStudentSex } from "../src/services/identidadAlumno.js";
 import { hasStudentData, newStudentRow, pasteStudentCells, sortStudentsByName, validateStudentRows } from "../src/services/tablaAlumnos.js";
 import { registrarTablaAlumnos } from "../src/services/registroAlumnos.js";
 
-test("la clave inicial sigue el CI y tambien admite 123456 o seis digitos", () => {
-  assert.equal(initialStudentPassword(" 06952974 "), "06952974");
-  assert.equal(initialStudentPassword("6952974", "default"), "123456");
-  assert.equal(initialStudentPassword(""), "123456");
-  assert.match(initialStudentPassword("6952974", "random"), /^\d{6}$/);
-  assert.equal(generateStudentPin({ getRandomValues: (array) => { array[0] = 42; } }), "000042");
-  assert.throws(() => generateStudentPin({}), /aleatorias/);
+test("la clave inicial es segura, independiente del CI y admite ingreso manual", () => {
+  assert.equal(initialStudentPassword(" 06952974 ").length, 16);
+  assert.equal(initialStudentPassword("6952974", "secure").length, 16);
+  assert.notEqual(initialStudentPassword(""), initialStudentPassword(""));
+  assert.equal(initialStudentPassword("6952974", "manual"), "");
   assert.equal(hasStudentData(newStudentRow()), false);
 });
 
@@ -18,17 +16,19 @@ test("pegar nombre y CI completa la contrasena sin perder ceros iniciales", () =
   const source = [newStudentRow()];
   const rows = pasteStudentCells(source, "Alan Quispe\t06952974\r\nBanesa Lorena\t6952975\r\n", 0, 0);
   assert.equal(rows.length, 2);
-  assert.deepEqual(rows.map((row) => [row.nombre, row.ci, row.password]), [["Alan Quispe", "06952974", "06952974"], ["Banesa Lorena", "6952975", "6952975"]]);
+  assert.deepEqual(rows.map((row) => [row.nombre, row.ci]), [["Alan Quispe", "06952974"], ["Banesa Lorena", "6952975"]]);
+  assert.ok(rows.every((row) => row.password.length === 16 && row.password !== row.ci));
+  assert.equal(rows[0].password, source[0].password);
   assert.equal(source[0].nombre, "");
   assert.equal(validateStudentRows(rows).errors.size, 0);
 });
 
 test("las columnas pegadas reconocen encabezados, comillas y correo opcional", () => {
-  const rows = pasteStudentCells([newStudentRow()], 'Nombre completo\tCI\tContrasena\tCorreo\n"Alan ""A"" Quispe"\t6952974\t654321\tALAN@EXAMPLE.COM\nBanesa Lorena\t6952975\t\t', 0, 0);
+  const rows = pasteStudentCells([newStudentRow()], 'Nombre completo\tCI\tContrasena\tCorreo\n"Alan ""A"" Quispe"\t6952974\tClaveSegura2026\tALAN@EXAMPLE.COM\nBanesa Lorena\t6952975\t\t', 0, 0);
   assert.equal(rows[0].nombre, 'Alan "A" Quispe');
-  assert.equal(rows[0].password, "654321");
+  assert.equal(rows[0].password, "ClaveSegura2026");
   assert.equal(rows[0].autoPassword, false);
-  assert.equal(rows[1].password, "6952975");
+  assert.equal(rows[1].password.length, 16);
   assert.equal(validateStudentRows(rows).entries[0].correo, "alan@example.com");
 });
 
@@ -37,7 +37,7 @@ test("pegar desde CI conserva el nombre y no cambia una clave manual", () => {
   const rows = pasteStudentCells([row], "6952974\n6952975", 0, 1);
   assert.equal(rows[0].nombre, "ALAN QUISPE");
   assert.equal(rows[0].password, "abc123");
-  assert.equal(rows[1].password, "6952975");
+  assert.equal(rows[1].password.length, 16);
   assert.ok(validateStudentRows(rows).errors.has(rows[1].key));
 });
 
@@ -57,7 +57,7 @@ test("valida carnets, correos duplicados y claves antes de escribir", () => {
   const result = validateStudentRows(rows);
   assert.equal(result.errors.size, 3);
   assert.match(result.errors.get(rows[0].key).join(" "), /CI repetido.*correo/);
-  assert.match(result.errors.get(rows[2].key).join(" "), /CI valido.*6 caracteres.*correo/);
+  assert.match(result.errors.get(rows[2].key).join(" "), /CI valido.*12 y 128 caracteres.*correo/);
 });
 
 test("la lista alfabetica no modifica los IDs ni numeros de agregacion", () => {
@@ -68,7 +68,7 @@ test("la lista alfabetica no modifica los IDs ni numeros de agregacion", () => {
 });
 
 test("registro tabular envia cada clave a Authentication, nunca al registro academico", async () => {
-  const rows = pasteStudentCells([newStudentRow()], "Alan Quispe\t6952974\t\talan@example.com\tMasculino\nBanesa Lorena\t6952975\t654321\t\tF", 0, 0);
+  const rows = pasteStudentCells([newStudentRow()], "Alan Quispe\t6952974\t\talan@example.com\tMasculino\nBanesa Lorena\t6952975\tClaveSegura2026\t\tF", 0, 0);
   const course = { id: "cuarto_a" }, calls = [];
   const results = await registrarTablaAlumnos(course, rows, {
     importar: async (selected, entries) => {
@@ -79,7 +79,7 @@ test("registro tabular envia cada clave a Authentication, nunca al registro acad
     },
     crearAcceso: async (student, selected, clients, options) => { calls.push(options); return { uid: `uid-${student.id}`, created: true, authEmail: options.email }; }
   });
-  assert.deepEqual(calls.map((options) => options.temporaryPassword), ["6952974", "654321"]);
+  assert.deepEqual(calls.map((options) => options.temporaryPassword), [rows[0].password, "ClaveSegura2026"]);
   assert.equal(calls[0].email, "alan@example.com");
   assert.equal(results[0].success, true);
   assert.equal(results[0].student.authUid, "uid-student-0");
@@ -94,8 +94,8 @@ test("sexo admite selectores y pegado con encabezados sin romper cargas anterior
   assert.equal(validateStudentRows(rows).errors.size, 0);
   assert.deepEqual(rows.map((row) => row.sexo), ["M", "F"]);
   assert.equal(rows[1].correo, "banesa@example.com");
-  assert.equal(rows[0].password, "6952974");
-  const legacy = pasteStudentCells([newStudentRow()], "Alumno\t6952976\t654321\talumno@example.com", 0, 0);
+  assert.equal(rows[0].password.length, 16);
+  const legacy = pasteStudentCells([newStudentRow()], "Alumno\t6952976\tClaveSegura2026\talumno@example.com", 0, 0);
   assert.equal(legacy[0].sexo, "");
   assert.equal(validateStudentRows(legacy).errors.size, 0);
 });

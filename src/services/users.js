@@ -8,6 +8,8 @@ import { coleccionGestion, documentoGestion, gestionActual } from "./rutasFirest
 import { validarAsignacionesDocente } from "./modalidadDocente.js";
 import { normalizarCorreoReal } from "./correoCuenta.js";
 import { planificarRelevo } from "./relevoDocente.js";
+import { validateInitialPassword } from "../../functions/password-policy.js";
+import { solicitarAccesoEscolar } from "./accesoEscolar.js";
 const ROLES = new Set(["docente", "director", "admin"]);
 
 export function normalizeUsername(username) {
@@ -26,21 +28,9 @@ export async function authEmailForLogin(login, options = {}) {
   const value = String(login || "").trim();
   if (value.includes("@")) return value.toLowerCase();
 
-  const key = normalizeUsername(value);
-  if (!key) return usernameToAuthEmail(value);
-
-  try {
-    const snap = await getDoc(doc(firestore, "indice_accesos", key));
-    if (snap.exists()) {
-      const data = snap.data() || {};
-      if (data.authEmail) return String(data.authEmail).toLowerCase();
-    }
-  } catch (error) {
-    if (options.strict) throw error;
-    // Si las reglas todavia no permiten leer el mapa, se conserva el correo interno.
-  }
-
-  return usernameToAuthEmail(value);
+  const result = await (options.solicitar || solicitarAccesoEscolar)({ accion: "ingresar", login: value, password: options.password });
+  if (typeof result?.email !== "string" || !result.email.includes("@")) throw new Error("El servicio de acceso no devolvio una cuenta valida.");
+  return result.email;
 }
 
 export function formatUsername(username) {
@@ -59,7 +49,7 @@ export async function createSystemUser({ nombre, username, emailRecuperacion, pa
   if (!cleanName) throw new Error("Falta el nombre del usuario.");
   if (!publicUsername) throw new Error("Falta el usuario asignado.");
   if (!/^[a-z0-9._-]+$/i.test(publicUsername)) throw new Error("El usuario solo puede tener letras, numeros, punto, guion o guion bajo.");
-  if (cleanPassword.length < 6) throw new Error("La contrasena debe tener al menos 6 caracteres.");
+  validateInitialPassword(cleanPassword, publicUsername);
   if (!ROLES.has(cleanRole)) throw new Error("Rol no valido.");
   const recoveryEmail = normalizarCorreoReal(emailRecuperacion);
   const year = gestionActual();

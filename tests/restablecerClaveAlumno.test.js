@@ -68,6 +68,16 @@ test("solo cambia password en el UID vinculado y no guarda claves en Firestore n
   }
 });
 
+test("el servidor tambien impide usar el CI o una clave numerica como temporal", async () => {
+  for (const password of ["123456789012", "CI123456789012"]) {
+    const fixture = backendFixture();
+    fixture.documents.get("alumnos/alumno-a").ci = "CI123456789012";
+    fixture.request.data.temporaryPassword = password;
+    await assert.rejects(fixture.run, { code: "invalid-argument" });
+    assert.equal(fixture.updates.length, 0);
+  }
+});
+
 test("el error de Firebase se informa sin fingir exito ni exponer el contenido de la solicitud", async () => {
   for (const [code, expected] of [["auth/user-not-found", "failed-precondition"], ["auth/invalid-password", "invalid-argument"], ["auth/insufficient-permission", "unavailable"]]) {
     const fixture = backendFixture(); fixture.dependencies.auth.updateUser = async () => { throw Object.assign(new Error(input.temporaryPassword), { code }); };

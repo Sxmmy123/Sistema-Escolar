@@ -1,5 +1,7 @@
 ﻿import { attendanceShort, normalizarEstadoAsistencia } from "./AcademicoDocente.js";
 
+import { formatoCarta } from "../../ui/impresion.js";
+
 function publicAsset(path) {
   const base = import.meta.env.BASE_URL || "/";
   const assetPath = `${base}${path}`.replace(/\/+/g, "/");
@@ -224,6 +226,7 @@ function sheetHtml({ group, course, trimesterLabel, teacherName, students, byStu
 }
 
 export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherName, students = [], records = [] }) {
+  const page = formatoCarta();
   const groups = monthGroups(records);
   if (!groups.length) {
     alert("No hay meses con asistencia registrada para imprimir.");
@@ -243,7 +246,7 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
         <meta charset="utf-8">
         <title>Resumen asistencia ${escapeHtml(course?.nombre || "")}</title>
         <style>
-          @page { size: letter portrait; margin: 0.18in; }
+          ${page.pagina}
           * { box-sizing: border-box; }
           body {
             margin: 0;
@@ -252,8 +255,9 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
             font-family: "Arial Narrow", Arial, sans-serif;
           }
           .sheet {
-            width: 8.14in;
-            min-height: 10.62in;
+            width: ${page.ancho}mm;
+            max-width: 100%;
+            min-height: ${page.alto}mm;
             margin: 0 auto 18px;
             padding: 0.08in;
             background: #fff;
@@ -263,7 +267,7 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
           .sheet:last-child { break-after: auto; page-break-after: auto; }
           .top-grid {
             display: grid;
-            grid-template-columns: 2.85in 1.25in 2.35in 0.9in;
+            grid-template-columns: minmax(0, 2.85fr) minmax(0, 1.25fr) minmax(0, 2.35fr) minmax(0, .9fr);
             gap: 0.02in;
             align-items: stretch;
             margin-bottom: 0.02in;
@@ -285,19 +289,22 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
             border: 1px solid #111;
             min-height: 22px;
             display: grid;
-            grid-template-columns: auto 1fr;
+            grid-template-columns: auto minmax(0, 1fr);
             align-items: center;
             gap: 4px;
             padding: 1px 5px;
             text-transform: uppercase;
           }
           .field span {
+            overflow-wrap: anywhere;
             text-align: center;
             font-size: 13px;
             font-weight: 500;
           }
           .field-wide { grid-column: span 2; }
-          .field-parallel span { font-size: 31px; line-height: 1; }
+          .field-parallel { gap: 2px; padding-inline: 3px; }
+          .field-parallel b { font-size: 9px; }
+          .field-parallel span { font-size: 24px; line-height: 1; }
           table { border-collapse: collapse; width: 100%; table-layout: fixed; }
           .number-col { width: 0.18in; }
           .student-col { width: 2.26in; }

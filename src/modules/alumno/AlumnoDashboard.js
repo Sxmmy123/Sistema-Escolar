@@ -1,4 +1,4 @@
-﻿import { createIcons, icons } from "lucide";
+﻿import { createIcons, icons } from "../../ui/icons.js";
 import { appShell } from "../../ui/shell.js";
 import { icon } from "../../ui/dom.js";
 import { observarPanelAlumno, subjectName, STUDENT_TRIMESTERS } from "../../services/studentData.js";

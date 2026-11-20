@@ -45,7 +45,7 @@ function aplicacion(importadorEspecial = {}) {
     onSnapshot: (ref, callback) => { snapshots.set(ref.path, callback); return () => snapshots.delete(ref.path); },
     auth, firestore: {}, VERSION_MODELO: 2,
     crearCargaPorRol: () => crearCargaPorRol(importadores),
-    createIcons() {}, LogIn: {}, registerServiceWorker() {}, bindRegistroDocente() {}, bindAccountSettings() {}, initializeTheme() {}, bindThemeButtons() {},
+    createIcons() {}, LogIn: {}, registerServiceWorker() {}, bindRegistroDocente() {}, bindAccountSettings() {}, initializeTheme() {}, bindThemeButtons() {}, limpiarDatosPrivados() {},
     setView: (markup) => { html = markup; },
     LoginView: () => "Pantalla login", bindLogin() {},
     homeForRole: (rol) => rol ? `/${rol}` : "/",
@@ -314,6 +314,18 @@ test("deshabilitar un docente cierra su sesion abierta y retira las suscripcione
   assert.equal(app.snapshots.size, 0);
 });
 
+test("la primera lectura de asignacion no reconstruye la pantalla abierta", async () => {
+  const app = aplicacion();
+  app.fijarRuta("/docente/notas");
+  await app.sesion("docente", "docente-a");
+  await new Promise((resolve) => setImmediate(resolve));
+  const before = app.vinculados.length;
+  app.snapshots.get("gestiones/2026/asignaciones/docente-a")({ data: () => ({ trimestres: ["t1"] }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(app.vinculados.length, before);
+  assert.equal(app.html(), "Pantalla /docente/notas");
+});
+
 test("los cambios de asignacion actualizan la pantalla sin descargar otro rol", async () => {
   const app = aplicacion();
   let preparations = 0;
@@ -322,6 +334,7 @@ test("los cambios de asignacion actualizan la pantalla sin descargar otro rol", 
   await app.sesion("docente", "docente-a");
   const before = preparations;
   const callback = app.snapshots.get("gestiones/2026/asignaciones/docente-a");
+  callback({ data: () => ({ trimestres: ["t1", "t2", "t3"] }) });
   callback({ data: () => ({ trimestres: ["t1"] }) });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(preparations, before + 1);

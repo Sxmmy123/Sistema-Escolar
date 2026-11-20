@@ -1,19 +1,27 @@
-export function crearCacheCalificar({ almacenamiento = () => globalThis.localStorage } = {}) {
+import { alLimpiarCachePrivada, cacheVigente, revisionCachePrivada } from "./cachePrivada.js";
+
+export function crearCacheCalificar({ almacenamiento = () => globalThis.sessionStorage, ahora = Date.now } = {}) {
   const memoria = new Map();
   const cargas = new Map();
   const versiones = new Map();
+  let epoch = 0;
   const prefijo = (ambito) => `escolar_v2_${ambito.gestionId}_${ambito.uid}_calificar_v1_${ambito.trimestreId}_`;
   const clave = (ambito, tipo, id) => `${prefijo(ambito)}${tipo}_${id}`;
 
   function leer(ambito, tipo, id) {
     const key = clave(ambito, tipo, id);
-    if (memoria.has(key)) return memoria.get(key);
+    if (memoria.has(key)) {
+      const value = memoria.get(key);
+      if (cacheVigente(value.updatedAt, ahora())) return value.datos;
+      memoria.delete(key);
+    }
     try {
       const registro = JSON.parse(almacenamiento()?.getItem(key) || "null");
-      if (registro && Object.hasOwn(registro, "datos")) {
-        memoria.set(key, registro.datos);
+      if (registro && Object.hasOwn(registro, "datos") && cacheVigente(registro.updatedAt, ahora())) {
+        memoria.set(key, registro);
         return registro.datos;
       }
+      almacenamiento()?.removeItem(key);
     } catch {
       // La copia en memoria funciona aunque el navegador no permita almacenamiento.
     }
@@ -23,8 +31,9 @@ export function crearCacheCalificar({ almacenamiento = () => globalThis.localSto
   function guardar(ambito, tipo, id, datos) {
     const key = clave(ambito, tipo, id);
     versiones.set(key, (versiones.get(key) || 0) + 1);
-    memoria.set(key, datos);
-    try { almacenamiento()?.setItem(key, JSON.stringify({ datos })); } catch { /* Solo memoria. */ }
+    const registro = { datos, updatedAt: memoria.get(key)?.updatedAt ?? ahora() };
+    memoria.set(key, registro);
+    try { almacenamiento()?.setItem(key, JSON.stringify(registro)); } catch { /* Solo memoria. */ }
     return datos;
   }
 
@@ -47,7 +56,10 @@ export function crearCacheCalificar({ almacenamiento = () => globalThis.localSto
     if (datos !== null) return datos;
     if (cargas.has(key)) return cargas.get(key);
     const version = versiones.get(key) || 0;
+    const revision = revisionCachePrivada();
+    const generation = epoch;
     const promesa = Promise.resolve().then(cargarRemoto).then(async (resultado) => {
+      if (generation !== epoch || revision !== revisionCachePrivada()) throw new Error("La sesion cambio. No se conservaron datos de la carga anterior.");
       // Una consulta anterior no debe pisar una nota guardada mientras estaba en vuelo.
       if ((versiones.get(key) || 0) !== version) {
         cargas.delete(key);
@@ -76,10 +88,19 @@ export function crearCacheCalificar({ almacenamiento = () => globalThis.localSto
     }
   }
 
-  return { leer, guardar, cargar, actualizar, invalidar, limpiar };
+  function limpiarTodo() {
+    epoch++;
+    memoria.clear(); cargas.clear(); versiones.clear();
+    try {
+      const storage = almacenamiento(), keys = Array.from({ length: storage?.length || 0 }, (_, i) => storage.key(i));
+      keys.filter((key) => key?.startsWith("escolar_v2_") && key.includes("_calificar_v1_")).forEach((key) => storage.removeItem(key));
+    } catch { /* Solo memoria. */ }
+  }
+  return { leer, guardar, cargar, actualizar, invalidar, limpiar, limpiarTodo };
 }
 
 export const cacheCalificar = crearCacheCalificar();
+alLimpiarCachePrivada(() => cacheCalificar.limpiarTodo());
 
 export function ambitoCalificar(context, trimestreId) {
   return { uid: context.uid, gestionId: context.gestionId, trimestreId };

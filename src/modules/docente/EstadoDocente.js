@@ -1,6 +1,7 @@
 import { TRIMESTERS, saveTeacherTrimesterPreference, todayIso } from "../../services/teacherData.js";
 import { claveCache } from "../../services/rutasFirestore.js";
 import { exigirTrimestreDocente, puedeRegistrarTrimestre, trimestresDeAsignacion } from "../../services/relevoDocente.js";
+import { alLimpiarCachePrivada } from "../../services/cachePrivada.js";
 
 export const teacherState = {
   context: null,
@@ -48,6 +49,8 @@ export const teacherState = {
   regularizationSubject: { studentId: "", id: "all" },
   notificationFocus: null
 };
+const estadoInicial = structuredClone(teacherState);
+alLimpiarCachePrivada(() => Object.assign(teacherState, structuredClone(estadoInicial), { context: null, activities: [] }));
 
 export function selectedTrimester() {
   return TRIMESTERS.find((item) => item.id === teacherState.trimesterId) || TRIMESTERS[0];

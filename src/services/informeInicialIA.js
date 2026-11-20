@@ -51,7 +51,7 @@ export async function generarInformeConIA(context, input) {
   exigirTrimestreDocente(context, input.trimestreId);
   if (geminiDirecto.apiKey) {
     if (typeof input.alumnoId !== "string" || !input.alumnoId || input.alumnoId.includes("/")) throw new Error("Selecciona un estudiante valido.");
-    const rows = await listarRegistrosInicial(context, input.cursoId, input.trimestreId, { fresh: true });
+    const rows = await listarRegistrosInicial(context, input.cursoId, input.trimestreId, { fresh: true, alumnoId: input.alumnoId });
     if (auth.currentUser?.uid !== context.uid) throw new Error("La sesion cambio.");
     const records = registrosAlumnoInicial(rows, input.alumnoId);
     const result = await generarConGemini({ records, ...geminiDirecto });

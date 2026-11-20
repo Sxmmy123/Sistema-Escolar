@@ -1,9 +1,9 @@
-import { createIcons, icons } from "lucide";
+import { createIcons, icons } from "../../ui/icons.js";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../../firebase/client.js";
 import { listStudents } from "../../services/adminData.js";
 import { createStudentAuthAccess } from "../../services/studentAccess.js";
-import { STUDENT_INITIAL_PASSWORD } from "../../services/identidadAlumno.js";
+import { validateInitialPassword } from "../../../functions/password-policy.js";
 import { safeAudit } from "../../services/auditData.js";
 import { icon } from "../../ui/dom.js";
 
@@ -67,8 +67,8 @@ export async function openStudentAccessMigration(course, afterSave = () => {}) {
       <p class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Descarga las credenciales antes de cerrar. Las cuentas existentes conservan su contrasena.</p>
       <div class="space-y-2 border-b border-slate-200 pb-3">
         <label for="access-initial-password" class="text-sm font-medium">Contrasena inicial para cuentas nuevas</label>
-        <input id="access-initial-password" type="text" data-access-common-password value="${STUDENT_INITIAL_PASSWORD}" required minlength="6" autocomplete="off" aria-describedby="access-password-warning" class="min-h-11 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-        <p id="access-password-warning" class="text-sm text-red-700">La clave predeterminada es solo para demostracion. Las cuentas existentes no se modifican.</p>
+        <input id="access-initial-password" type="password" data-access-common-password value="" minlength="12" autocomplete="off" aria-describedby="access-password-warning" class="min-h-11 w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+        <p id="access-password-warning" class="text-sm text-slate-600">Sin clave comun: contrasena aleatoria individual. Las cuentas existentes no se modifican.</p>
         <label class="flex items-center gap-2 text-sm"><input type="checkbox" data-access-link-existing class="h-4 w-4 accent-school-green"> Vincular cuentas existentes sin perfil</label>
       </div>
       <p data-access-status role="status" class="text-sm text-slate-600">Cargando alumnos...</p>
@@ -125,7 +125,8 @@ export async function openStudentAccessMigration(course, afterSave = () => {}) {
   const commonPassword = dialog.querySelector("[data-access-common-password]");
   const linkExisting = dialog.querySelector("[data-access-link-existing]");
   linkExisting.addEventListener("change", () => {
-    commonPassword.type = linkExisting.checked ? "password" : "text";
+    commonPassword.minLength = linkExisting.checked ? 6 : 12;
+    commonPassword.required = linkExisting.checked;
     dialog.querySelector('label[for="access-initial-password"]').textContent = linkExisting.checked
       ? "Contrasena actual de la cuenta existente"
       : "Contrasena inicial para cuentas nuevas";
@@ -154,8 +155,11 @@ export async function openStudentAccessMigration(course, afterSave = () => {}) {
     const selectedIds = new Set([...dialog.querySelectorAll("[data-access-check]:checked:not(:disabled)")].map((input) => input.value));
     const selected = students.filter((student) => selectedIds.has(student.id));
     const temporaryPassword = commonPassword.value;
-    if (temporaryPassword.length < 6) {
-      status.textContent = "La contrasena temporal debe tener al menos 6 caracteres.";
+    try {
+      if (linkExisting.checked && !temporaryPassword) throw new Error("Escribe la contrasena actual de la cuenta existente.");
+      if (!linkExisting.checked && temporaryPassword) selected.forEach((student) => validateInitialPassword(temporaryPassword, student.ci || student.usuario));
+    } catch (error) {
+      status.textContent = error.message;
       commonPassword.focus();
       return;
     }

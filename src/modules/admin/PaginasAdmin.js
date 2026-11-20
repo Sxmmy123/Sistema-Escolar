@@ -190,7 +190,7 @@ function teacherCreateForm(note) {
             <input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="emailRecuperacion" type="email" autocomplete="email" maxlength="254" placeholder="nombre@correo.com" required>
           </label>
           <label class="text-xs font-medium text-slate-700">Contrasena temporal
-            <input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="password" type="text" minlength="6" placeholder="Minimo 6 caracteres" required>
+            <input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="Minimo 12 caracteres" required>
           </label>
         </div>
         <div class="mt-5 flex justify-end">
@@ -215,7 +215,7 @@ function standardCreateForm(role, note) {
         <label class="text-xs font-medium text-slate-700">Nombre completo<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="nombre" placeholder="Nombre y apellidos" required></label>
         <label class="text-xs font-medium text-slate-700">Usuario asignado<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="username" type="text" placeholder="usuario000" required></label>
         <label class="text-xs font-medium text-slate-700">Correo electronico<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="emailRecuperacion" type="email" autocomplete="email" maxlength="254" placeholder="nombre@correo.com" required></label>
-        <label class="text-xs font-medium text-slate-700">Contrasena temporal<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="password" type="text" minlength="6" placeholder="Minimo 6 caracteres" required></label>
+        <label class="text-xs font-medium text-slate-700">Contrasena temporal<input class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="Minimo 12 caracteres" required></label>
       </div>
       <p class="mt-3 hidden rounded-lg border px-3 py-2.5 text-xs font-medium" data-form-status></p>
       <div class="mt-4 flex justify-end"><button class="flex w-full items-center justify-center gap-2 rounded-lg bg-school-green px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-800 disabled:cursor-wait disabled:opacity-70 sm:w-auto" type="submit">${icon("user-plus", "h-4 w-4")} Crear ${role}</button></div>
@@ -433,6 +433,10 @@ function auditPanel() {
           <thead class="bg-[#123d24] text-white"><tr><th class="px-4 py-2.5 font-medium">Hora</th><th class="px-4 py-2.5 font-medium">Usuario</th><th class="px-4 py-2.5 font-medium">Tipo</th><th class="px-4 py-2.5 font-medium">Accion</th><th class="px-4 py-2.5 font-medium">Detalle</th><th class="px-4 py-2.5"></th></tr></thead>
           <tbody class="divide-y divide-slate-100" data-audit-list><tr><td colspan="6" class="px-4 py-4 text-slate-500">Cargando...</td></tr></tbody>
         </table>
+        </div>
+        <div class="flex items-center justify-between gap-3 border-t border-slate-200 p-3">
+          <span class="text-xs text-slate-500" data-audit-progress></span>
+          <button type="button" data-audit-more hidden class="hidden inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-xs font-medium">${icon("chevron-down", "h-4 w-4")}Cargar mas</button>
         </div>
       </div>
       <div class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/50 p-4" data-audit-modal>

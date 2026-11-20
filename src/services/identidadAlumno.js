@@ -1,3 +1,5 @@
+import { validateInitialPassword } from "../../functions/password-policy.js";
+
 export function normalizeStudentAccessKey(value) {
   return String(value || "").trim().replace(/\s+/g, "").toLowerCase();
 }
@@ -25,26 +27,10 @@ export function generateStudentPassword(random = globalThis.crypto) {
   return [...values].map((value) => alphabet[value % alphabet.length]).join("");
 }
 
-export const STUDENT_INITIAL_PASSWORD = "123456";
-
-export function generateStudentPin(random = globalThis.crypto) {
-  if (!random?.getRandomValues) throw new Error("El navegador no permite generar contrasenas aleatorias.");
-  const values = new Uint32Array(1);
-  const limit = Math.floor(2 ** 32 / 1000000) * 1000000;
-  do { random.getRandomValues(values); } while (values[0] >= limit);
-  return String(values[0] % 1000000).padStart(6, "0");
+export function initialStudentPassword(ci, mode = "secure") {
+  return mode === "manual" ? "" : generateStudentPassword();
 }
 
-export function initialStudentPassword(ci, mode = "ci") {
-  if (mode === "random") return generateStudentPin();
-  if (mode === "default") return STUDENT_INITIAL_PASSWORD;
-  return String(ci || "").trim().replace(/\s+/g, "") || STUDENT_INITIAL_PASSWORD;
-}
-
-export function studentPasswordForNewAccess(password = "") {
-  if (password === "") return STUDENT_INITIAL_PASSWORD;
-  if (typeof password !== "string" || password.length < 6) {
-    throw new Error("La contrasena temporal debe tener al menos 6 caracteres.");
-  }
-  return password;
+export function studentPasswordForNewAccess(password = "", ci = "") {
+  return password === "" ? generateStudentPassword() : validateInitialPassword(password, ci);
 }

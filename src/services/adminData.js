@@ -19,6 +19,8 @@ import { listarAlumnosMatriculados } from "./matriculas.js";
 import { validarFechaGestion } from "./registroEscolar.js";
 import { parseStudentsBulk } from "./parsearAlumnos.js";
 import { normalizeStudentSex } from "./identidadAlumno.js";
+import { guardarImportacionHistorica } from "./importacionHistorica.js";
+import { normalizarEstadoAsistencia } from "./calculoAcademico.js";
 export { parseStudentsBulk } from "./parsearAlumnos.js";
 
 function cleanText(value) {
@@ -228,56 +230,78 @@ export async function importSchedulesPayload(payload) {
   return shared.size;
 }
 
-export async function importHistoricalAttendance({ course, rows, trimestreId }) {
+export async function importHistoricalAttendance({ course, rows, trimestreId, onProgress, isCurrent = () => true }, clients = { auth, firestore, read: getDocs, transact: runTransaction }) {
   if (!course?.id) throw new Error("Selecciona un curso valido.");
   if (!Array.isArray(rows) || !rows.length) throw new Error("No hay asistencias para guardar.");
   if (!["t1", "t2", "t3"].includes(trimestreId)) throw new Error("Selecciona un trimestre valido.");
-  rows.forEach((row) => validarFechaGestion(row.fecha, gestionActual()));
-
-  const chunks = [];
-  for (let index = 0; index < rows.length; index += 450) {
-    chunks.push(rows.slice(index, index + 450));
+  const year = gestionActual(), uid = clients.auth.currentUser?.uid;
+  rows.forEach((row) => validarFechaGestion(row.fecha, year));
+  if (!uid) throw new Error("Ingresa como administrador para importar.");
+  const current = () => clients.auth.currentUser?.uid === uid && gestionActual() === year && isCurrent();
+  const source = await clients.read(query(coleccionGestion(clients.firestore, "asistencias", year), where("cursoId", "==", course.id)));
+  const existing = new Map(source.docs.map((item) => [`asistencias/${item.id}`, item.data()]));
+  const requestedAttendance = new Set(rows.map((row) => JSON.stringify([row.fecha, row.student?.id])));
+  const attendanceIds = new Map();
+  for (const item of source.docs) {
+    const data = item.data(), key = JSON.stringify([data.fecha, data.alumnoId]);
+    if (!requestedAttendance.has(key)) continue;
+    if (attendanceIds.has(key)) throw new Error("Hay asistencias duplicadas para un alumno y dia. Revisalas antes de importar.");
+    attendanceIds.set(key, item.id);
   }
-
-  for (const chunk of chunks) {
-    const batch = writeBatch(firestore);
-    chunk.forEach((row) => {
-      const id = attendanceDocId(course.id, row.fecha, row.student.id);
-      batch.set(documentoGestion(firestore, "asistencias", id), {
+  const entries = new Map();
+  rows.forEach((row) => {
+    if (!row.student?.id || row.student.id.includes("/") || !["presente", "falta", "atraso", "licencia", "permiso"].includes(row.estado)) throw new Error("La asistencia contiene un alumno o estado invalido.");
+    const id = attendanceIds.get(JSON.stringify([row.fecha, row.student.id])) || attendanceDocId(course.id, row.fecha, row.student.id);
+    const data = {
         cursoId: course.id,
         alumnoId: row.student.id,
         fecha: row.fecha,
         trimestreId,
         estado: row.estado,
-        observacion: "",
         origen: "carga_historica",
-        registradoPorUid: auth.currentUser?.uid || "",
-        registradoPor: auth.currentUser?.email || "admin",
+        registradoPorUid: uid,
+        registradoPor: clients.auth.currentUser?.email || "admin",
         updatedAt: serverTimestamp()
-      }, { merge: true });
-    });
-    await batch.commit();
-  }
-
-  return rows.length;
+    };
+    const matches = (saved) => saved.cursoId === course.id && saved.alumnoId === row.student.id && saved.fecha === row.fecha && saved.trimestreId === trimestreId && normalizarEstadoAsistencia(saved.estado) === normalizarEstadoAsistencia(row.estado);
+    if (entries.has(id) && !matches(entries.get(id).data)) throw new Error("La carga contiene asistencias distintas para el mismo alumno y dia.");
+    entries.set(id, { id, collection: "asistencias", data, matches, label: `asistencia del ${row.fecha}` });
+  });
+  const result = await guardarImportacionHistorica({ groups: [...entries.values()].map((item) => [item]), existing, db: clients.firestore, reference: (item) => documentoGestion(clients.firestore, item.collection, item.id, year), current, transact: clients.transact, onProgress });
+  return { total: entries.size, created: result.created, preserved: result.preserved };
 }
 
-export async function importHistoricalGrades({ course, materiaId, rows, activities, trimestreId }) {
+export async function importHistoricalGrades({ course, materiaId, rows, activities, trimestreId, onProgress, isCurrent = () => true }, clients = { auth, firestore, read: getDocs, transact: runTransaction }) {
   if (!course?.id) throw new Error("Selecciona un curso valido.");
   if (!COURSES.some((item) => item.id === course.id && item.nivel === "primaria")) throw new Error("La carga de notas numericas solo corresponde a Primaria.");
   if (!materiaId) throw new Error("Selecciona una materia.");
   if (!["t1", "t2", "t3"].includes(trimestreId)) throw new Error("Selecciona un trimestre valido.");
   if (!Array.isArray(activities) || !activities.length) throw new Error("No hay actividades para guardar.");
   if (!Array.isArray(rows) || !rows.length) throw new Error("No hay notas para guardar.");
-  activities.forEach((activity) => validarFechaGestion(activity.fecha, gestionActual(), { opcional: true }));
-
+  const year = gestionActual(), uid = clients.auth.currentUser?.uid;
+  activities.forEach((activity) => validarFechaGestion(activity.fecha, year, { opcional: true }));
+  if (!uid) throw new Error("Ingresa como administrador para importar.");
+  const current = () => clients.auth.currentUser?.uid === uid && gestionActual() === year && isCurrent();
   const subject = SUBJECTS.find((item) => item.id === materiaId);
-  const existingSnapshot = await getDocs(query(coleccionGestion(firestore, "actividades"), where("cursoId", "==", course.id), where("trimestreId", "==", trimestreId)));
-  const existingIds = new Map(existingSnapshot.docs.map((item) => [claveActividad(item.data()), item.id]));
-  const activityMap = new Map();
-  activities.forEach((activity) => {
+  if (!subject) throw new Error("Selecciona una materia valida.");
+  const [existingSnapshot, gradesSnapshot] = await Promise.all(["actividades", "calificaciones"].map((name) => clients.read(query(coleccionGestion(clients.firestore, name, year), where("cursoId", "==", course.id), where("trimestreId", "==", trimestreId)))));
+  const existing = new Map([...existingSnapshot.docs.map((item) => [`actividades/${item.id}`, item.data()]), ...gradesSnapshot.docs.map((item) => [`calificaciones/${item.id}`, item.data()])]);
+  const existingIds = new Map();
+  const requestedActivities = new Set(activities.map((activity) => claveActividad({ ...activity, cursoId: course.id, materiaId, trimestreId })));
+  for (const item of existingSnapshot.docs) {
+    const key = claveActividad(item.data());
+    if (!requestedActivities.has(key)) continue;
+    if (existingIds.has(key)) throw new Error("Hay actividades duplicadas en el sistema. Revisa sus registros antes de importar.");
+    existingIds.set(key, item.id);
+  }
+  const activityMap = new Map(), activityKeys = new Set();
+  for (const activity of activities) {
+    if (!activity.key || activityMap.has(activity.key) || !String(activity.titulo || "").trim() || !Number.isFinite(Number(activity.maximo)) || Number(activity.maximo) <= 0 || Number(activity.maximo) > 100) throw new Error("La carga contiene una actividad duplicada, sin titulo o con puntaje invalido.");
     const key = claveActividad({ ...activity, cursoId: course.id, materiaId, trimestreId });
-    const id = existingIds.get(key) || doc(coleccionGestion(firestore, "actividades")).id;
+    if (activityKeys.has(key)) throw new Error("La carga repite la misma actividad. Revisa sus columnas antes de importar.");
+    activityKeys.add(key);
+    const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)))].map((value) => value.toString(16).padStart(2, "0")).join("");
+    const id = existingIds.get(key) || `historica_${hash}`;
     existingIds.set(key, id);
     activityMap.set(activity.key, {
       id,
@@ -288,28 +312,35 @@ export async function importHistoricalGrades({ course, materiaId, rows, activiti
       titulo: String(activity.titulo || "").trim(),
       tipo: activity.tipo || "tarea",
       maximo: Number(activity.maximo || 100),
-      creadoPorUid: auth.currentUser?.uid || "",
-      creadoPor: auth.currentUser?.email || "admin",
+      creadoPorUid: uid,
+      creadoPor: clients.auth.currentUser?.email || "admin",
       origen: "carga_historica",
       estadoRevision: "cerrada",
       activo: true,
       updatedAt: serverTimestamp()
     });
-  });
-
-  const writes = [];
-  activityMap.forEach((activity) => {
-    writes.push({ ref: documentoGestion(firestore, "actividades", activity.id), data: activity });
-  });
-
+  }
+  const requestedIds = new Set([...activityMap.values()].map((activity) => activity.id));
+  const requestedStudents = new Set(rows.map((row) => row.student?.id));
+  const gradeIds = new Map();
+  for (const item of gradesSnapshot.docs) {
+    const data = item.data();
+    if (!requestedIds.has(data.actividadId) || !requestedStudents.has(data.alumnoId)) continue;
+    const key = JSON.stringify([data.actividadId, data.alumnoId]);
+    if (gradeIds.has(key)) throw new Error("Hay notas duplicadas para un alumno y actividad. Revisalas antes de importar.");
+    gradeIds.set(key, item.id);
+  }
+  const groups = new Map(), gradeKeys = new Set();
   rows.forEach((row) => {
     const activity = activityMap.get(row.activityKey);
     const normalized = normalizeGrade(row.valor, activity?.maximo);
-    if (!activity || !normalized) return;
+    if (!activity || !row.student?.id || row.student.id.includes("/") || String(row.valor ?? "").trim() === "" || !normalized || Number(row.valor) < 0 || Number(row.valor) > activity.maximo) throw new Error("La carga contiene un alumno, actividad o nota invalida. No se guardo ningun dato.");
+    const pair = JSON.stringify([activity.id, row.student.id]);
+    if (gradeKeys.has(pair)) throw new Error("La carga repite una nota del mismo alumno y actividad.");
+    gradeKeys.add(pair);
     activity.tieneCalificaciones = true;
-    writes.push({
-      ref: documentoGestion(firestore, "calificaciones", gradeDocId(activity.id, row.student.id)),
-      data: {
+    if (!groups.has(activity.id)) groups.set(activity.id, [{ id: activity.id, collection: "actividades", data: activity, label: `actividad ${activity.titulo}`, matches: (saved) => claveActividad(saved) === claveActividad(activity) && Number(saved.maximo) === activity.maximo && saved.activo !== false }]);
+    const data = {
         actividadId: activity.id,
         cursoId: course.id,
         materiaId,
@@ -322,25 +353,14 @@ export async function importHistoricalGrades({ course, materiaId, rows, activiti
         fecha: activity.fecha || "",
         tipo: activity.tipo,
         origen: "carga_historica",
-        calificadoPorUid: auth.currentUser?.uid || "",
-        calificadoPor: auth.currentUser?.email || "admin",
+        calificadoPorUid: uid,
+        calificadoPor: clients.auth.currentUser?.email || "admin",
         updatedAt: serverTimestamp()
-      }
-    });
+    };
+    groups.get(activity.id).push({ id: gradeIds.get(pair) || gradeDocId(activity.id, row.student.id), collection: "calificaciones", data, label: `nota de ${activity.titulo}`, matches: (saved) => saved.actividadId === activity.id && saved.alumnoId === row.student.id && saved.cursoId === course.id && saved.materiaId === materiaId && saved.trimestreId === trimestreId && Number(saved.valor) === data.valor && Number(saved.nota) === data.nota && Number(saved.maximo) === data.maximo });
   });
-
-  const chunks = [];
-  for (let index = 0; index < writes.length; index += 450) {
-    chunks.push(writes.slice(index, index + 450));
-  }
-
-  for (const chunk of chunks) {
-    const batch = writeBatch(firestore);
-    chunk.forEach((item) => batch.set(item.ref, item.data, { merge: true }));
-    await batch.commit();
-  }
-
-  return { activities: activityMap.size, grades: rows.length, subject: subject?.nombre || materiaId };
+  const result = await guardarImportacionHistorica({ groups: [...groups.values()], existing, db: clients.firestore, reference: (item) => documentoGestion(clients.firestore, item.collection, item.id, year), current, transact: clients.transact, onProgress });
+  return { activities: groups.size, grades: rows.length, subject: subject.nombre, created: result.created, preserved: result.preserved };
 }
 
 export async function saveTeacherAssignments(teacherUid, assignments) {

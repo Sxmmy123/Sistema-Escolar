@@ -6,11 +6,20 @@ import { defineSecret, defineString } from "firebase-functions/params";
 import { generarConGemini, validarAccesoInforme, validarAccesoInicial } from "./informe-core.js";
 import { generarCriteriosGemini, validarAccesoActividad, validarBorradorCriterios } from "./criterios-core.js";
 import { resetStudentPassword, StudentPasswordError } from "./student-password-core.js";
+import { schoolAccess, createAccessLimiter, firebasePasswordGateway, SchoolAccessError } from "./access-core.js";
 
 initializeApp();
 const apiKey = defineSecret("GEMINI_API_KEY");
 const model = defineString("GEMINI_MODEL");
 const db = getFirestore();
+const firebaseWebApiKey = defineString("SCHOOL_WEB_API_KEY", { default: "AIzaSyA4O57tFObeRLbl3KSGOO2GdQt5cPpgUgU" });
+export const accesoEscolar = onCall({ region: "us-central1", timeoutSeconds: 30, maxInstances: 2, concurrency: 20 }, async (request) => {
+  try { return await schoolAccess(request.data, { db, ...firebasePasswordGateway(firebaseWebApiKey.value()), takeLimit: createAccessLimiter(db, request.rawRequest.ip) }); }
+  catch (error) {
+    if (error instanceof SchoolAccessError) throw new HttpsError(error.code, error.message);
+    throw new HttpsError("unavailable", "El servicio de acceso no esta disponible. Intenta mas tarde.");
+  }
+});
 export const restablecerClaveAlumno = onCall({ region: "us-central1", timeoutSeconds: 30, maxInstances: 2, concurrency: 5 }, async (request) => {
   try { return await resetStudentPassword(request, { db, auth: getAuth() }); }
   catch (error) {
@@ -52,7 +61,7 @@ export const generarInformeInicial = onCall({ region: "us-central1", secrets: [a
   const year = new Intl.DateTimeFormat("en", { year: "numeric", timeZone: "America/La_Paz" }).format(new Date());
   try { validarAccesoInforme({ uid, input, year, profile: profile.data(), config: { ...system.data(), gestionHabilitada: annual.data()?.ano === Number(input.gestionId) }, assignment: assignment.data(), enrollment: enrollment.data() }); }
   catch (error) { throw new HttpsError(error.message, "No puedes generar informes para esta asignacion."); }
-  const rows = await db.collection(`${yearPath}/registros_inicial`).where("docenteUid", "==", uid).where("cursoId", "==", input.cursoId).where("trimestreId", "==", input.trimestreId).get();
+  const rows = await db.collection(`${yearPath}/registros_inicial`).where("docenteUid", "==", uid).where("cursoId", "==", input.cursoId).where("trimestreId", "==", input.trimestreId).where("alumnoId", "==", input.alumnoId).get();
   const records = rows.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => item.alumnoId === input.alumnoId && item.tipo !== "informe");
   if (!records.length) throw new HttpsError("failed-precondition", "Este estudiante aun no tiene registros en el trimestre.");
   const limit = db.doc(`usuarios/${uid}/limites_ia/informe`);

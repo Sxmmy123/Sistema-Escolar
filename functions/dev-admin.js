@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resetStudentPassword, StudentPasswordError } from "./student-password-core.js";
 
-export function adminDevPlugin(env, firebase) {
+export function createLocalAdminClients(env, firebase) {
   let clients;
   const getClients = async () => {
     if (!clients) {
@@ -22,6 +22,11 @@ export function adminDevPlugin(env, firebase) {
     }
     return clients;
   };
+  return getClients;
+}
+
+export function adminDevPlugin(env, firebase) {
+  const getClients = createLocalAdminClients(env, firebase);
   return { name: "admin-alumnos-local", apply: "serve", configureServer(server) {
     server.middlewares.use("/api/admin/alumnos/restablecer-clave", async (request, response) => {
       const send = (status, body) => { response.statusCode = status; response.setHeader("Content-Type", "application/json"); response.setHeader("Cache-Control", "no-store"); response.end(JSON.stringify(body)); };

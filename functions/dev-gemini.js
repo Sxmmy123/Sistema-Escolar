@@ -61,7 +61,7 @@ export function geminiDevPlugin(env, firebase) {
         if (now - (previous.time || 0) < 30000 || count >= 60) return send(429, { error: "Espera 30 segundos entre solicitudes. Limite diario: 60." });
         limits.set(limitKey, { day, time: now, count: count + 1 });
         if (criteria) return send(200, await generarCriteriosGemini({ activity: targetData, apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL }));
-        const filters = [["docenteUid", uid], ["cursoId", input.cursoId], ["trimestreId", input.trimestreId]].map(([fieldPath, value]) => ({ fieldFilter: { field: { fieldPath }, op: "EQUAL", value: { stringValue: value } } }));
+        const filters = [["docenteUid", uid], ["cursoId", input.cursoId], ["trimestreId", input.trimestreId], ["alumnoId", input.alumnoId]].map(([fieldPath, value]) => ({ fieldFilter: { field: { fieldPath }, op: "EQUAL", value: { stringValue: value } } }));
         const result = await fetch(`${base}/${path}:runQuery`, { method: "POST", headers, signal: AbortSignal.timeout(15000), body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "registros_inicial" }], where: { compositeFilter: { op: "AND", filters } } } }) });
         if (!result.ok) throw new Error("No se pudieron consultar los registros del estudiante.");
         const records = (await result.json()).filter((row) => row.document).map(({ document }) => ({ id: document.name.split("/").at(-1), ...fields(document) })).filter((row) => row.alumnoId === input.alumnoId && row.tipo !== "informe");

@@ -1,3 +1,5 @@
+import { formatoCarta } from "../../ui/impresion.js";
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -36,6 +38,7 @@ function printableDate(date) {
 }
 
 export function printStudentMaterials({ activity, student, course, subject, trimesterLabel }) {
+  const page = formatoCarta({ superior: 14, derecho: 14, inferior: 14 });
   const items = materialItemsForActivity(activity);
   if (!items.length) {
     window.alert("Esta actividad no tiene materiales para imprimir.");
@@ -58,7 +61,7 @@ export function printStudentMaterials({ activity, student, course, subject, trim
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Materiales - ${escapeHtml(subject || "Materia")}</title>
         <style>
-          @page { size: letter portrait; margin: 14mm; }
+          ${page.pagina}
           * { box-sizing: border-box; }
           body { margin: 0; color: #20251f; font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
           .sheet { width: 100%; }

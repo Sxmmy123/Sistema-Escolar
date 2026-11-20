@@ -19,6 +19,7 @@ import { safeAudit } from "./auditData.js";
 import { fechaEscolarIso } from "./fechaEscolar.js";
 import { idAutoevaluacion } from "./identificadoresActividad.js";
 import { asegurarRegistroDocente, claveCache, coleccionGestion, documentoGestion, gestionActual } from "./rutasFirestore.js";
+import { cacheVigente, revisionCachePrivada } from "./cachePrivada.js";
 import { validarFechaGestion } from "./registroEscolar.js";
 import { actualizarActividadProtegida, eliminarActividadProtegida } from "./proteccionActividad.js";
 import { normalizarEstadoAsistencia } from "./calculoAcademico.js";
@@ -58,12 +59,14 @@ function scheduleCacheKey(context = {}) {
 
 function readScheduleCache(context = {}) {
   try {
-    const raw = localStorage.getItem(scheduleCacheKey(context));
+    const raw = sessionStorage.getItem(scheduleCacheKey(context));
     if (!raw) return null;
     const cache = JSON.parse(raw);
     const schedules = cache?.schedules || {};
     const complete = (context.courses || []).every((course) => schedules[course.id]);
-    return complete ? cache : null;
+    if (complete && cacheVigente(cache.updatedAt)) return cache;
+    sessionStorage.removeItem(scheduleCacheKey(context));
+    return null;
   } catch {
     return null;
   }
@@ -71,12 +74,12 @@ function readScheduleCache(context = {}) {
 
 function writeScheduleCache(context = {}, schedules = {}) {
   try {
-    localStorage.setItem(scheduleCacheKey(context), JSON.stringify({
+    sessionStorage.setItem(scheduleCacheKey(context), JSON.stringify({
       updatedAt: Date.now(),
       schedules
     }));
   } catch {
-    // Si el navegador no permite localStorage, el sistema sigue funcionando online.
+    // Si el navegador no permite sessionStorage, el sistema sigue funcionando online.
   }
 }
 
@@ -87,23 +90,25 @@ function teacherDataCacheKey(context = {}, type = "datos", courseId = "", trimes
 
 function readTeacherDataCache(context = {}, type = "datos", courseId = "", trimesterId = "") {
   try {
-    const raw = localStorage.getItem(teacherDataCacheKey(context, type, courseId, trimesterId));
+    const raw = sessionStorage.getItem(teacherDataCacheKey(context, type, courseId, trimesterId));
     if (!raw) return null;
     const cache = JSON.parse(raw);
-    return cache?.data ? cache : null;
+    if (cache?.data && cacheVigente(cache.updatedAt)) return cache;
+    sessionStorage.removeItem(teacherDataCacheKey(context, type, courseId, trimesterId));
+    return null;
   } catch {
     return null;
   }
 }
 
-function writeTeacherDataCache(context = {}, type = "datos", courseId = "", trimesterId = "", data = {}) {
+function writeTeacherDataCache(context = {}, type = "datos", courseId = "", trimesterId = "", data = {}, updatedAt = Date.now()) {
   try {
-    localStorage.setItem(teacherDataCacheKey(context, type, courseId, trimesterId), JSON.stringify({
-      updatedAt: Date.now(),
+    sessionStorage.setItem(teacherDataCacheKey(context, type, courseId, trimesterId), JSON.stringify({
+      updatedAt,
       data
     }));
   } catch {
-    // Si el navegador no permite localStorage, el sistema sigue funcionando online.
+    // Si el navegador no permite sessionStorage, el sistema sigue funcionando online.
   }
 }
 
@@ -125,7 +130,7 @@ function readTeacherContextCache(uid = currentUid()) {
     const raw = sessionStorage.getItem(teacherContextCacheKey(uid));
     if (!raw) return null;
     const context = JSON.parse(raw);
-    if (!context?.uid || !Array.isArray(context.courses) || !Array.isArray(context.subjectIds)) return null;
+    if (context?.uid !== uid || !cacheVigente(context.cachedAt) || !Array.isArray(context.courses) || !Array.isArray(context.subjectIds)) return null;
     return context;
   } catch {
     return null;
@@ -227,6 +232,7 @@ export async function saveTeacherTrimesterPreference(uid = currentUid(), trimest
 
 export async function getTeacherContext(uid = currentUid(), options = {}) {
   if (!uid) return { uid: "", profile: null, courses: [], subjectIds: [] };
+  const revision = revisionCachePrivada();
 
   const cachedContext = options.forceRemote ? null : readTeacherContextCache(uid);
   if (cachedContext) return cachedContext;
@@ -269,6 +275,7 @@ export async function getTeacherContext(uid = currentUid(), options = {}) {
     context.nivelDocente = "pendiente";
     context.modalidadEvaluacion = "pendiente";
   }
+  if (revision !== revisionCachePrivada()) throw new Error("La sesion cambio.");
   writeTeacherContextCache(context);
   return context;
 }
@@ -332,7 +339,9 @@ export function getTeacherScheduleCacheMeta(context) {
 }
 
 export async function refreshTeacherScheduleCache(context) {
+  const revision = revisionCachePrivada();
   const schedules = await loadTeacherSchedulesRemote(context);
+  if (revision !== revisionCachePrivada()) throw new Error("La sesion cambio.");
   writeScheduleCache(context, schedules);
   return getTeacherScheduleCacheMeta(context);
 }
@@ -341,7 +350,9 @@ export async function getTeacherScheduleRows(context, dayId = null, options = {}
   const cache = readScheduleCache(context);
   if (cache) return rowsFromSchedules(context, cache.schedules, dayId);
   if (options.forceRemote) {
+    const revision = revisionCachePrivada();
     const schedules = await loadTeacherSchedulesRemote(context);
+    if (revision !== revisionCachePrivada()) throw new Error("La sesion cambio.");
     writeScheduleCache(context, schedules);
     return rowsFromSchedules(context, schedules, dayId);
   }
@@ -350,6 +361,7 @@ export async function getTeacherScheduleRows(context, dayId = null, options = {}
 
 export async function refreshTeacherNotesSnapshot(context, course, trimesterId = "t1", options = {}) {
   if (!course?.id) return null;
+  const revision = revisionCachePrivada();
   const [students, activities, gradesList, attendanceRows] = await Promise.all([
     Array.isArray(options.students) ? options.students : getTeacherStudents(course.id),
     listActivities(course.id, trimesterId),
@@ -357,6 +369,7 @@ export async function refreshTeacherNotesSnapshot(context, course, trimesterId =
     listAttendanceForCourse(course.id, trimesterId)
   ]);
   const data = { students, activities, gradesList, attendanceRows };
+  if (revision !== revisionCachePrivada()) throw new Error("La sesion cambio.");
   writeTeacherDataCache(context, "notas", course.id, trimesterId, data);
   return data;
 }
@@ -384,7 +397,7 @@ function updateTeacherNotesSnapshotCache(context, activity, updater) {
   const cache = readTeacherDataCache(context, "notas", activity.cursoId, trimesterId);
   if (!cache?.data) return;
   const nextData = updater(cache.data) || cache.data;
-  writeTeacherDataCache(context, "notas", activity.cursoId, trimesterId, nextData);
+  writeTeacherDataCache(context, "notas", activity.cursoId, trimesterId, nextData, cache.updatedAt);
 }
 
 export function upsertTeacherNotesSnapshotActivity(context, activity) {
@@ -431,16 +444,18 @@ export function upsertTeacherNotesSnapshotGrade(context, activity, grade) {
     ...cache.data,
     activities,
     gradesList
-  });
+  }, cache.updatedAt);
 }
 
 export async function refreshTeacherSummarySnapshot(context, course, trimesterId = "t1") {
   if (!course?.id) return null;
+  const revision = revisionCachePrivada();
   const [students, records] = await Promise.all([
     getTeacherStudents(course.id),
     listAttendanceForCourse(course.id, trimesterId)
   ]);
   const data = { students, records };
+  if (revision !== revisionCachePrivada()) throw new Error("La sesion cambio.");
   writeTeacherDataCache(context, "resumen_asistencia", course.id, trimesterId, data);
   return data;
 }

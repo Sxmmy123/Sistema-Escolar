@@ -1,4 +1,4 @@
-import { createIcons, icons } from "lucide";
+import { createIcons, icons } from "../../ui/icons.js";
 import { AlumnoDashboard, bindAlumnoPage, desmontarAlumno } from "./AlumnoDashboard.js";
 import "./alumno.css";
 

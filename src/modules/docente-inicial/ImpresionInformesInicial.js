@@ -1,5 +1,6 @@
 import { firmaRegistrosInicial, trimestresInicial } from "../../services/modeloInicial.js";
 import { e, icon } from "./ComponentesInicial.js";
+import { formatoCarta } from "../../ui/impresion.js";
 
 export function recopilarInformesCursoInicial(students, recordsByTerm) {
   return [...students].sort((a, b) => a.nombre.localeCompare(b.nombre, "es")).map((student) => ({
@@ -22,10 +23,11 @@ function nombreEnLineas(nombre) {
 }
 
 export function documentoInformesCursoInicial({ rows, course, year, teacher }) {
+  const page = formatoCarta({ superior: 0, derecho: 20, inferior: 0 });
   if (!rows?.length) throw new Error("Selecciona al menos un alumno para imprimir.");
   if (rows.some((row) => trimestresInicial.some((term) => String(row.informes[term.id] || "").length > 200))) throw new Error("Los informes no pueden superar 200 caracteres.");
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Informes trimestrales - ${e(course.nombre)}</title><style>
-@page{size:letter portrait;margin:0 20mm}
+${page.pagina}
 *{box-sizing:border-box}
 body{font-family:Arial,sans-serif;color:#172d21;margin:0;font-size:10pt;line-height:1.5}
 header{text-align:center;margin-bottom:14px}
@@ -45,13 +47,14 @@ tbody th{font-weight:400;text-align:left}
 .report-student{font-size:9.5pt;line-height:1.4;vertical-align:middle}
 .report-student span{display:block}
 tr{break-inside:avoid;page-break-inside:avoid}
+tbody tr:nth-last-child(2){break-after:avoid;page-break-after:avoid}
 .report-value{white-space:pre-wrap;text-align:justify;text-align-last:left;hyphens:auto}
 .pending{color:#7d877f}
 .report-number{text-align:center;vertical-align:middle;padding-inline:4px}
 .signature-cell{border:0;padding:0}
 footer{margin-top:36px;text-align:center;break-inside:avoid}
 footer span{display:inline-block;border-top:1px solid #617167;padding:7px 36px}
-@media screen{body{width:215.9mm;padding:0 20mm;margin:auto}}
+@media screen{body{width:215.9mm;padding:${page.margen};margin:auto}}
 </style></head><body><table><colgroup><col class="number"><col class="student">${trimestresInicial.map(() => '<col class="term">').join("")}</colgroup><thead><tr><td class="report-heading" colspan="5"><header><p>U.E. Ecologica Nueva Bolivia</p><h1>Informe trimestral cualitativo</h1><p>Educacion Inicial en Familia Comunitaria</p></header><div class="context"><span>Curso: ${e(course.nombre)}</span><span>Gestion: ${e(year)}</span></div></td></tr><tr><th scope="col">N</th><th scope="col">Apellidos y nombres</th>${trimestresInicial.map((term) => `<th scope="col">${e(term.label)}</th>`).join("")}</tr></thead><tbody>${rows.map(({ student, informes }, index) => `<tr><td class="report-number">${index + 1}</td><th scope="row" class="report-student" aria-label="${e(student.nombre)}">${nombreEnLineas(student.nombre)}</th>${trimestresInicial.map((term) => `<td class="report-value${informes[term.id] ? "" : " pending"}">${e(informes[term.id] || "Pendiente")}</td>`).join("")}</tr>`).join("")}<tr><td class="signature-cell" colspan="5"><footer><span>${e(teacher)}<br>Docente</span></footer></td></tr></tbody><tfoot><tr><td colspan="5" aria-hidden="true"></td></tr></tfoot></table></body></html>`;
 }
 

@@ -27,7 +27,7 @@ test("el correo del personal es obligatorio, se normaliza y rechaza los alias in
 
 test("crear cualquier cuenta del personal sin correo falla antes de consultar o escribir datos", async () => {
   for (const rol of ["docente", "director", "admin"]) {
-    await assert.rejects(createSystemUser({ nombre: "Prueba", username: "prueba", password: "Temporal123", rol }, { auth: { currentUser: { uid: "admin" } } }), /correo electronico es obligatorio/);
+    await assert.rejects(createSystemUser({ nombre: "Prueba", username: "prueba", password: "Temporal123456", rol }, { auth: { currentUser: { uid: "admin" } } }), /correo electronico es obligatorio/);
   }
 });
 

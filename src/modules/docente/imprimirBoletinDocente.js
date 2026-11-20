@@ -2,6 +2,7 @@ import { SUBJECTS } from "../../data/catalog.js";
 import { icon } from "../../ui/dom.js";
 import { TRIMESTERS } from "../../services/teacherData.js";
 import { gestionActual } from "../../services/rutasFirestore.js";
+import { formatoCarta } from "../../ui/impresion.js";
 import {
   activityHasGrades,
   calculateStudentTerm,
@@ -170,12 +171,13 @@ function bulletinSheet(payload, trimesterIds) {
 }
 
 function printDocument(payload, trimesterIds) {
+  const page = formatoCarta();
   const html = `<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>Boletín centralizador - ${escapeHtml(payload.course?.nombre || "Curso")}</title>
     <style>
-      @page { size: letter portrait; margin: 4mm; }
+      ${page.pagina}
       * { box-sizing: border-box; }
       html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: "Arial Narrow", Arial, sans-serif; }
-      .bulletin-print-page { width: 207.9mm; height: 271.4mm; max-height: 271.4mm; overflow: hidden; display: flex; flex-direction: column; break-after: page; page-break-after: always; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .bulletin-print-page { width: ${page.ancho}mm; max-width: 100%; height: ${page.alto}mm; max-height: ${page.alto}mm; overflow: hidden; display: flex; flex-direction: column; break-after: page; page-break-after: always; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .document-header { display: grid; grid-template-columns: 30% 70%; min-height: 27mm; border: 1.4px solid #111; border-bottom: 0; }
       .school-brand { display: flex; align-items: center; gap: 2mm; padding: 1.5mm 2mm; border-right: 1.4px solid #111; }
       .school-brand img { width: 13mm; height: 13mm; object-fit: contain; }
@@ -200,7 +202,8 @@ function printDocument(payload, trimesterIds) {
       .note-column { width: calc((100% - 3% - var(--name-width) - 4.8%) / var(--note-columns)); }
       .number-head, .name-head { background: #fff; font-size: 6.2pt; }
       .trimester-head { height: 5.6mm !important; font-size: 6.4pt !important; }
-      .subject-head, .term-average { height: 5.6mm !important; font-size: 4.8pt !important; white-space: nowrap; overflow: hidden; }
+      .subject-head, th.term-average { height: 5.6mm !important; font-size: 4.8pt !important; white-space: nowrap; overflow: hidden; }
+      .terms-3 th.term-average { font-size: 3.4pt !important; }
       .term-t1 { background: #fff; }
       .term-t2 { background: #f7f7f7; }
       .term-t3 { background: #f2f7f2; }
@@ -211,14 +214,14 @@ function printDocument(payload, trimesterIds) {
       .summary-cell { background: #e8f2ff; font-weight: 600 !important; }
       .student-name { padding-left: .8mm !important; text-align: left !important; white-space: nowrap; overflow: hidden; text-overflow: clip; font-size: 6pt !important; }
       .terms-1 .bulletin-table td { font-size: 6.2pt; }
-      .terms-1 .subject-head, .terms-1 .term-average { font-size: 5.4pt !important; }
+      .terms-1 .subject-head, .terms-1 th.term-average { font-size: 5.4pt !important; }
       .terms-2 .bulletin-table td { font-size: 5.8pt; }
       .low-grade { color: #d71920; }
       .signatures { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 15mm; padding: 10mm 10mm 1mm; text-align: center; }
       .signatures span { display: block; width: 55mm; max-width: 100%; margin: 0 auto 1mm; border-top: 1px solid #111; }
       .signatures strong { display: block; font-size: 6pt; }
       .signatures small { display: block; margin-top: .7mm; font-size: 5pt; }
-      @media print { body { width: 207.9mm; } .bulletin-print-page:last-child { break-after: auto; page-break-after: auto; } }
+      @media print { body { width: ${page.ancho}mm; } .bulletin-print-page:last-child { break-after: auto; page-break-after: auto; } }
     </style></head><body>${bulletinSheet(payload, trimesterIds)}<script>window.addEventListener("load",()=>{setTimeout(()=>{window.focus();window.print();},250);});</script></body></html>`;
   const printWindow = window.open("", "_blank", "width=900,height=1200");
   if (!printWindow) {

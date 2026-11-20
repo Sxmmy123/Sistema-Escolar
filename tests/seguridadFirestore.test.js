@@ -7,7 +7,7 @@ import { createStudentAuthAccess, setStudentAccessActive } from "../src/services
 import { getStudentContext, getStudentDashboardData, observarPanelAlumno } from "../src/services/studentData.js";
 import { crearGuardadoConPeriodo, periodosCurso } from "../src/services/periodosCurso.js";
 import { coleccionGestion, documentoGestion, documentoSeguimiento, establecerConfiguracion, observarConfiguracion } from "../src/services/rutasFirestore.js";
-import { importStudents } from "../src/services/adminData.js";
+import { importStudents, importHistoricalAttendance, importHistoricalGrades } from "../src/services/adminData.js";
 import { registrarTablaAlumnos } from "../src/services/registroAlumnos.js";
 import { newStudentRow, pasteStudentCells } from "../src/services/tablaAlumnos.js";
 import { createSystemUser, setTeacherActive } from "../src/services/users.js";
@@ -23,6 +23,8 @@ import { idAvanceInicial } from "../src/services/modeloActividadesInicial.js";
 import { findCourse } from "../src/data/catalog.js";
 import { ADMIN_USER } from "../src/firebase/config.js";
 import { changeOwnPassword } from "../src/services/accountSettings.js";
+import { schoolAccess } from "../functions/access-core.js";
+import { listAudit } from "../src/services/auditData.js";
 
 const projectId = "demo-sistema-seguridad";
 const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST || "";
@@ -125,7 +127,9 @@ after(async () => {
 
 test("sin autenticacion no se leen contrasenas, alumnos, asistencias, actividades ni notas", async () => {
   for (const [group, id] of [["accesos_alumnos", "acceso-antiguo"], ["alumnos", "alumno-a"], ["asistencias", "asistencia-a"], ["actividades", "tarea-a"], ["calificaciones", "nota-a"]]) await denied(get(anonymous, group, id));
-  assert.equal((await get(anonymous, "indice_accesos", "docente-a")).data().authEmail, "docente-a@demo.test");
+  await denied(get(anonymous, "indice_accesos", "docente-a"));
+  await denied(get(student, "indice_accesos", "docente-a"));
+  assert.equal((await get(teacher, "indice_accesos", "docente-a")).data().authEmail, "docente-a@demo.test");
   await denied(getDocs(col(anonymous, "indice_accesos")));
 });
 
@@ -322,11 +326,55 @@ test("un correo reservado con otro UID no obtiene permisos administrativos", asy
 });
 
 test("auditoria solo acepta su esquema y autor reales, y conserva contenido como texto", async () => {
-  const data = { gestionId: "2026", tipo: "asistencia", accion: "registrar", detalle: '<img src=x onerror="alert(1)">', datos: {}, usuarioUid: "docente-a", usuario: "Docente A", rol: "docente", fecha: "2026-10-26", hora: "10:00:00", createdAt: serverTimestamp() };
+  const data = { gestionId: "2026", tipo: "asistencia", accion: "registrar", detalle: '<img src=x onerror="alert(1)">', datos: {}, usuarioUid: "docente-a", usuario: "-", rol: "docente", origen: "cliente", fecha: "2026-10-26", hora: "10:00:00", createdAt: serverTimestamp() };
   await setDoc(ref(teacher, "auditoria", "auditoria-valida"), data);
   assert.equal((await get(admin, "auditoria", "auditoria-valida")).data().detalle, data.detalle);
-  for (const changes of [{ id: '\" onmouseover=\"alert(1)' }, { usuarioUid: "admin-prueba" }, { datos: [] }, { extra: true }]) {
+  const longEmail = `${"p".repeat(40)}@${"a".repeat(50)}.${"b".repeat(50)}.${"c".repeat(50)}.test`;
+  const teacherWithEmail = client("auditoria-correo-largo", "docente-a", longEmail);
+  await setDoc(ref(teacherWithEmail, "auditoria", "correo-largo-valido"), { ...data, usuario: longEmail });
+  const page = await listAudit({ fecha: data.fecha, pageSize: 1 }, { db: admin.firestore, read: getDocs });
+  assert.equal(page.hasMore, true);
+  const next = await listAudit({ fecha: data.fecha, pageSize: 1, cursor: page.cursor }, { db: admin.firestore, read: getDocs });
+  assert.equal(next.hasMore, false);
+  assert.equal(new Set([...page.items, ...next.items].map((item) => item.id)).size, 2);
+  for (const changes of [{ id: '\" onmouseover=\"alert(1)' }, { usuarioUid: "admin-prueba" }, { rol: "admin" }, { usuario: "Administrador" }, { origen: "servidor" }, { datos: [] }, { extra: true }]) {
     await denied(setDoc(ref(teacher, "auditoria", "auditoria-invalida"), { ...data, ...changes }));
+  }
+  await denied(setDoc(ref(anonymous, "auditoria", "sin-sesion"), data));
+  const outsider = client("auditoria-sin-perfil", "sin-perfil");
+  await denied(setDoc(ref(outsider, "auditoria", "sin-perfil"), { ...data, usuarioUid: "sin-perfil" }));
+  const inactive = client("auditoria-inactivo", "inactivo");
+  await setDoc(ref(admin, "usuarios", "inactivo"), { rol: "docente", activo: false });
+  await denied(setDoc(ref(inactive, "auditoria", "inactivo"), { ...data, usuarioUid: "inactivo" }));
+});
+
+test("la importacion historica real conserva observaciones y no reemplaza notas existentes", async () => {
+  const pupil = { id: "historico-seguro", nombre: "Alumno historico", ci: "91000210", cursoId: "cuarto_a" };
+  await registrarAlumno(pupil);
+  const clients = { auth: { currentUser: { uid: "admin-prueba" } }, firestore: admin.firestore, read: getDocs, transact: runTransaction };
+  const row = { student: pupil, fecha: "2026-03-10", estado: "atraso" };
+  const previous = { ...attendance({ alumnoId: pupil.id, fecha: row.fecha, estado: row.estado, trimestreId: "t1" }), observacion: "Llego a las 9" };
+  await setDoc(ref(admin, "asistencias", "historico-anterior"), previous);
+  assert.deepEqual(await importHistoricalAttendance({ course: { id: "cuarto_a" }, rows: [row], trimestreId: "t1" }, clients), { total: 1, created: 0, preserved: 1 });
+  assert.deepEqual((await get(admin, "asistencias", "historico-anterior")).data(), previous);
+  const input = { course: { id: "cuarto_a" }, materiaId: "matematica", trimestreId: "t1", activities: [{ key: "historica", titulo: "Actividad historica segura", fecha: "2026-03-10", tipo: "tarea", maximo: 100 }], rows: [{ student: pupil, activityKey: "historica", valor: 80 }] };
+  const created = await importHistoricalGrades(input, clients);
+  assert.equal(created.created, 2);
+  const repeated = await importHistoricalGrades(input, clients);
+  assert.equal(repeated.created, 0); assert.equal(repeated.preserved, 2);
+  await assert.rejects(importHistoricalGrades({ ...input, rows: [{ ...input.rows[0], valor: 90 }] }, clients), /registro diferente/);
+  const notes = await getDocs(query(col(admin, "calificaciones"), where("alumnoId", "==", pupil.id)));
+  assert.equal(notes.size, 1); assert.equal(notes.docs[0].data().nota, 80);
+});
+
+test("altas nuevas rechazan claves debiles sin crear cuentas ni vinculos", async () => {
+  const pupil = { id: "alta-clave-debil", nombre: "Clave debil", ci: "CI123456789012", cursoId: "cuarto_a" };
+  await registrarAlumno(pupil);
+  const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
+  for (const temporaryPassword of ["123456", "123456789012", pupil.ci]) {
+    await assert.rejects(createStudentAuthAccess(pupil, { id: "cuarto_a" }, clients, { temporaryPassword }));
+    assert.equal((await get(admin, "alumnos", pupil.id)).data().authUid, undefined);
+    assert.equal((await get(admin, "indice_accesos", pupil.ci.toLowerCase())).exists(), false);
   }
 });
 
@@ -549,7 +597,7 @@ test("crear acceso usa un solo perfil y un indice minimo, sin alterar datos acad
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
   const result = await createStudentAuthAccess(pupil, { id: "cuarto_a" }, clients);
   assert.equal(result.created, true);
-  assert.equal(result.password, "123456");
+  assert.equal(result.password.length, 16);
   assert.equal(creator.auth.currentUser, null);
   const access = (await get(admin, "indice_accesos", pupil.ci)).data();
   assert.equal("password" in (await get(admin, "alumnos", pupil.id)).data(), false);
@@ -583,12 +631,12 @@ test("el alumno cambia su clave con la actual y vuelve a ingresar conservando UI
   const access = await createStudentAuthAccess(pupil, { id: "cuarto_a" }, { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore });
   await setDoc(ref(admin, "calificaciones", "nota-cambio-clave"), grade({ alumnoId: pupil.id }));
   const learner = authClient("cambio-clave-alumno");
-  await signInWithEmailAndPassword(learner.auth, access.authEmail, "123456");
+  await signInWithEmailAndPassword(learner.auth, access.authEmail, access.password);
   const input = { currentPassword: "incorrecta", newPassword: "ClaveNueva2026", confirmPassword: "ClaveNueva2026" };
   await assert.rejects(changeOwnPassword(input, { authClient: learner.auth }), (error) => ["auth/invalid-credential", "auth/wrong-password", "auth/invalid-login-credentials"].includes(error.code));
-  await changeOwnPassword({ ...input, currentPassword: "123456" }, { authClient: learner.auth });
+  await changeOwnPassword({ ...input, currentPassword: access.password }, { authClient: learner.auth });
   await signOut(learner.auth);
-  await assert.rejects(signInWithEmailAndPassword(learner.auth, access.authEmail, "123456"), (error) => ["auth/invalid-credential", "auth/wrong-password"].includes(error.code));
+  await assert.rejects(signInWithEmailAndPassword(learner.auth, access.authEmail, access.password), (error) => ["auth/invalid-credential", "auth/wrong-password"].includes(error.code));
   const credential = await signInWithEmailAndPassword(learner.auth, access.authEmail, "ClaveNueva2026");
   assert.equal(credential.user.uid, access.uid);
   assert.equal((await getStudentContext({ auth: learner.auth, firestore: learner.firestore })).student.id, pupil.id);
@@ -605,7 +653,7 @@ test("dos altas concurrentes con correos distintos dejan un solo acceso vinculad
   const emails = ["alta.paralela.a@example.test", "alta.paralela.b@example.test"];
   const results = await Promise.allSettled(creators.map((actor, index) => createStudentAuthAccess(pupil, { id: "cuarto_a" }, {
     auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: actor.auth, firestore: admin.firestore
-  }, { email: emails[index], temporaryPassword: "123456" })));
+  }, { email: emails[index], temporaryPassword: "ClaveTemporal2026" })));
   const saved = (await get(admin, "alumnos", pupil.id)).data();
   const profiles = await getDocs(query(col(admin, "usuarios"), where("alumnoId", "==", pupil.id)));
   assert.equal(profiles.size, 1);
@@ -614,7 +662,7 @@ test("dos altas concurrentes con correos distintos dejan un solo acceso vinculad
   assert.ok(results.some((item) => item.status === "fulfilled"));
   for (const [index, item] of results.entries()) {
     if (item.status === "fulfilled") assert.equal(item.value.uid, saved.authUid);
-    else await assert.rejects(signInWithEmailAndPassword(creators[index].auth, emails[index], "123456"), (error) => ["auth/user-not-found", "auth/invalid-credential"].includes(error.code));
+    else await assert.rejects(signInWithEmailAndPassword(creators[index].auth, emails[index], "ClaveTemporal2026"), (error) => ["auth/user-not-found", "auth/invalid-credential"].includes(error.code));
     await signOut(creators[index].auth);
   }
 });
@@ -646,10 +694,10 @@ test("un alumno nuevo puede ingresar y cargar su panel sin accesos antiguos ni c
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
   const result = await createStudentAuthAccess(pupil, { id: "cuarto_a" }, clients);
   assert.equal(result.created, true);
-  assert.equal(result.password, "123456");
+  assert.equal(result.password.length, 16);
   await setDoc(ref(admin, "calificaciones", "nota-alumno-nuevo"), grade({ alumnoId: pupil.id }));
   await setDoc(ref(admin, "asistencias", "asistencia-alumno-nuevo"), attendance({ alumnoId: pupil.id }));
-  const access = (await get(anonymous, "indice_accesos", pupil.ci)).data();
+  const access = (await get(admin, "indice_accesos", pupil.ci)).data();
   assert.deepEqual(Object.keys(access).sort(), ["authEmail", "uid"]);
   await signInWithEmailAndPassword(migratedStudent.auth, access.authEmail, result.password);
   const data = await getStudentDashboardData({ auth: migratedStudent.auth, firestore: migratedStudent.firestore });
@@ -666,9 +714,9 @@ test("un alumno nuevo puede ingresar y cargar su panel sin accesos antiguos ni c
   await denied(get(migratedStudent, "accesos_alumnos", pupil.ci));
 });
 
-test("la tabla crea acceso con CI como clave, o con correo real y clave manual, y permite ingresar", async () => {
+test("la tabla crea acceso seguro, o con correo real y clave manual, y permite ingresar", async () => {
   const course = { id: "cuarto_a" };
-  const rows = pasteStudentCells([newStudentRow()], "ALUMNO TABLA CI\t88000551\t\t\tM\nALUMNO TABLA CORREO\t88000552\t192837\talumno-tabla@demo.test\tFemenino", 0, 0);
+  const rows = pasteStudentCells([newStudentRow()], "ALUMNO TABLA CI\t88000551\t\t\tM\nALUMNO TABLA CORREO\t88000552\tClaveManual2026\talumno-tabla@demo.test\tFemenino", 0, 0);
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
   const results = await registrarTablaAlumnos(course, rows, {
     importar: (selected, entries) => importStudents(selected, entries, admin.firestore),
@@ -677,10 +725,10 @@ test("la tabla crea acceso con CI como clave, o con correo real y clave manual, 
   assert.ok(results.every((result) => result.success && result.created));
   const login = authClient("acceso-tabla");
   for (const [index, result] of results.entries()) {
-    const access = (await get(anonymous, "indice_accesos", result.student.ci)).data();
+    const access = (await get(admin, "indice_accesos", result.student.ci)).data();
     assert.equal(access.uid, result.student.authUid);
     assert.equal(access.authEmail, index === 0 ? usernameToAuthEmail("88000551") : "alumno-tabla@demo.test");
-    await signInWithEmailAndPassword(login.auth, access.authEmail, index === 0 ? "88000551" : "192837");
+    await signInWithEmailAndPassword(login.auth, access.authEmail, rows[index].password);
     const context = await getStudentContext({ auth: login.auth, firestore: login.firestore });
     assert.equal(context.student.id, result.student.id);
     await denied(get(login, "alumnos", results[1 - index].student.id));
@@ -693,12 +741,12 @@ test("la tabla crea acceso con CI como clave, o con correo real y clave manual, 
     await signOut(login.auth);
   }
   await setStudentAccessActive(results[0].student, false, clients);
-  const access = (await get(anonymous, "indice_accesos", "88000551")).data();
-  await signInWithEmailAndPassword(login.auth, access.authEmail, "88000551");
+  const access = (await get(admin, "indice_accesos", "88000551")).data();
+  await signInWithEmailAndPassword(login.auth, access.authEmail, rows[0].password);
   await assert.rejects(getStudentContext({ auth: login.auth, firestore: login.firestore }), /activo|retirado|deshabilitado/i);
   await signOut(login.auth);
   await setStudentAccessActive(results[0].student, true, clients);
-  await signInWithEmailAndPassword(login.auth, access.authEmail, "88000551");
+  await signInWithEmailAndPassword(login.auth, access.authEmail, rows[0].password);
   assert.equal((await getStudentContext({ auth: login.auth, firestore: login.firestore })).student.id, results[0].student.id);
   await signOut(login.auth);
 });
@@ -743,21 +791,27 @@ test("la importacion genera IDs estables, conserva orden y no duplica alumnos", 
 
 test("crear docente guarda perfil, indice y asignaciones juntos sin copias por rol", async () => {
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
-  const creado = await createSystemUser({ nombre: "Docente prueba", username: "estructura001", emailRecuperacion: "docente.prueba@example.test", password: "Temporal123", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients);
+  const creado = await createSystemUser({ nombre: "Docente prueba", username: "estructura001", emailRecuperacion: "docente.prueba@example.test", password: "Temporal123456", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients);
   assert.equal((await get(admin, "usuarios", creado.id)).data().nombre, "Docente prueba");
   assert.deepEqual((await get(admin, "asignaciones", creado.id)).data().cursos, { cuarto_a: { materias: ["matematica"] } });
-  assert.deepEqual(Object.keys((await get(anonymous, "indice_accesos", "estructura001")).data()).sort(), ["authEmail", "uid"]);
+  assert.deepEqual(Object.keys((await get(admin, "indice_accesos", "estructura001")).data()).sort(), ["authEmail", "uid"]);
   await denied(get(admin, "docentes", creado.id));
   assert.equal(creator.auth.currentUser, null);
   assert.equal(creado.authEmail, "docente.prueba@example.test");
-  assert.equal((await get(anonymous, "indice_accesos", "estructura001")).data().authEmail, creado.authEmail);
-  const login = await signInWithEmailAndPassword(creator.auth, creado.authEmail, "Temporal123");
+  assert.equal((await get(admin, "indice_accesos", "estructura001")).data().authEmail, creado.authEmail);
+  const resolved = await schoolAccess({ accion: "ingresar", login: "estructura001", password: "Temporal123456" }, {
+    db: { doc: (path) => ({ get: () => getDocFromServer(doc(admin.firestore, path)) }) },
+    verifyPassword: async (email, password) => { const credential = await signInWithEmailAndPassword(creator.auth, email, password); const result = { uid: credential.user.uid, email: credential.user.email }; await signOut(creator.auth); return result; },
+    sendReset: async () => assert.fail("Ingresar no envia correos"), takeLimit: async () => {}
+  });
+  assert.deepEqual(resolved, { email: creado.authEmail });
+  const login = await signInWithEmailAndPassword(creator.auth, creado.authEmail, "Temporal123456");
   assert.equal(login.user.uid, creado.id);
   await signOut(creator.auth);
 });
 
 test("el enlace de recuperacion restablece la clave conservando UID, usuario y asignaciones", async () => {
-  const index = (await get(anonymous, "indice_accesos", "estructura001")).data();
+  const index = (await get(admin, "indice_accesos", "estructura001")).data();
   const before = (await get(admin, "asignaciones", index.uid)).data();
   await solicitarRecuperacion("estructura001", { auth: creator.auth, resolver: async () => index.authEmail, enviar: sendPasswordResetEmail });
   const response = await fetch(`http://${authHost}/emulator/v1/projects/${projectId}/oobCodes`);
@@ -769,7 +823,7 @@ test("el enlace de recuperacion restablece la clave conservando UID, usuario y a
   await assert.rejects(confirmarRestablecimiento({ auth: creator.auth, code: code.oobCode, password: "NuevaTemporal456", confirmation: "Distinta456" }), /no coinciden/);
   assert.equal(await verificarEnlaceRestablecimiento(creator.auth, code.oobCode), index.authEmail);
   await confirmarRestablecimiento({ auth: creator.auth, code: code.oobCode, password: "NuevaTemporal456", confirmation: "NuevaTemporal456" });
-  await assert.rejects(signInWithEmailAndPassword(creator.auth, index.authEmail, "Temporal123"));
+  await assert.rejects(signInWithEmailAndPassword(creator.auth, index.authEmail, "Temporal123456"));
   const login = await signInWithEmailAndPassword(creator.auth, index.authEmail, "NuevaTemporal456");
   assert.equal(login.user.uid, index.uid);
   await signOut(creator.auth);
@@ -783,11 +837,11 @@ test("director y administrador nuevos tambien usan su correo real y no necesitan
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
   for (const rol of ["director", "admin"]) {
     const email = `${rol}.registro@example.test`;
-    const creado = await createSystemUser({ nombre: `Prueba ${rol}`, username: `${rol}correo001`, emailRecuperacion: email, password: "Temporal123", rol }, clients);
+    const creado = await createSystemUser({ nombre: `Prueba ${rol}`, username: `${rol}correo001`, emailRecuperacion: email, password: "Temporal123456", rol }, clients);
     assert.equal(creado.authEmail, email);
     assert.equal(creado.correoRecuperacion, email);
     assert.equal((await get(admin, "asignaciones", creado.id)).exists(), false);
-    const login = await signInWithEmailAndPassword(creator.auth, email, "Temporal123");
+    const login = await signInWithEmailAndPassword(creator.auth, email, "Temporal123456");
     assert.equal(login.user.uid, creado.id);
     await signOut(creator.auth);
   }
@@ -795,7 +849,7 @@ test("director y administrador nuevos tambien usan su correo real y no necesitan
 
 test("un correo ocupado no crea otra cuenta, perfil ni indice de acceso", async () => {
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
-  await assert.rejects(createSystemUser({ nombre: "Duplicado", username: "correorepetido001", emailRecuperacion: "docente.prueba@example.test", password: "Temporal123", rol: "director" }, clients), /correo ya pertenece/);
+  await assert.rejects(createSystemUser({ nombre: "Duplicado", username: "correorepetido001", emailRecuperacion: "docente.prueba@example.test", password: "Temporal123456", rol: "director" }, clients), /correo ya pertenece/);
   assert.equal((await get(admin, "indice_accesos", "correorepetido001")).exists(), false);
   assert.equal(creator.auth.currentUser, null);
 });
@@ -1019,7 +1073,7 @@ test("sin habilitacion anual y con matricula retirada no se registran nuevas obs
 
 test("crear un docente cualitativo guarda el nivel y no requiere materias de Primaria", async () => {
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
-  const creado = await createSystemUser({ nombre: "Docente cualitativo", username: "inicial001", emailRecuperacion: "inicial.prueba@example.test", password: "Temporal123", rol: "docente", asignaciones: { inicial: { materias: [] } } }, clients);
+  const creado = await createSystemUser({ nombre: "Docente cualitativo", username: "inicial001", emailRecuperacion: "inicial.prueba@example.test", password: "Temporal123456", rol: "docente", asignaciones: { inicial: { materias: [] } } }, clients);
   const perfil = (await get(admin, "usuarios", creado.id)).data();
   const asignacion = (await get(admin, "asignaciones", creado.id)).data();
   assert.equal(perfil.nivelDocente, "inicial");
@@ -1043,20 +1097,20 @@ test("cargas simultaneas del mismo alumno no duplican identidad ni numero", asyn
 test("si falla el alta del perfil del docente tambien se revierte Authentication", async () => {
   let lecturas = 0;
   const clients = { auth: { get currentUser() { return ++lecturas === 1 ? { uid: "admin-prueba" } : null; } }, creatorAuth: creator.auth, firestore: admin.firestore };
-  await assert.rejects(createSystemUser({ nombre: "No debe quedar", username: "rollback001", emailRecuperacion: "rollback.prueba@example.test", password: "Temporal123", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients), /sesion cambio/);
+  await assert.rejects(createSystemUser({ nombre: "No debe quedar", username: "rollback001", emailRecuperacion: "rollback.prueba@example.test", password: "Temporal123456", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients), /sesion cambio/);
   assert.equal((await get(admin, "indice_accesos", "rollback001")).exists(), false);
   assert.equal(creator.auth.currentUser, null);
-  await assert.rejects(signInWithEmailAndPassword(creator.auth, "rollback.prueba@example.test", "Temporal123"), (error) => ["auth/user-not-found", "auth/invalid-credential"].includes(error.code));
+  await assert.rejects(signInWithEmailAndPassword(creator.auth, "rollback.prueba@example.test", "Temporal123456"), (error) => ["auth/user-not-found", "auth/invalid-credential"].includes(error.code));
 });
 
 test("reemplazar crea acceso y reparte trimestres atomicamente sin borrar ni desactivar al anterior", async () => {
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
-  const oldTeacher = await createSystemUser({ nombre: "Docente anterior", username: "relevoanterior", emailRecuperacion: "relevo.anterior@example.test", password: "Temporal123", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients);
+  const oldTeacher = await createSystemUser({ nombre: "Docente anterior", username: "relevoanterior", emailRecuperacion: "relevo.anterior@example.test", password: "Temporal123456", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients);
   const source = client("relevo-origen", oldTeacher.id);
   await setDoc(ref(source, "actividades", "relevo-historico"), activity({ trimestreId: "t1", creadoPorUid: oldTeacher.id }));
   await guardarNota(source, "relevo-nota-historica", grade({ actividadId: "relevo-historico", trimestreId: "t1", calificadoPorUid: oldTeacher.id }));
   const before = (await get(admin, "calificaciones", "relevo-nota-historica")).data();
-  const replacement = await createSystemUser({ nombre: "Docente nuevo", username: "relevonuevo", emailRecuperacion: "relevo.nuevo@example.test", password: "Temporal123", rol: "docente", reemplazo: { docenteUid: oldTeacher.id, trimestreInicio: "t2" } }, clients);
+  const replacement = await createSystemUser({ nombre: "Docente nuevo", username: "relevonuevo", emailRecuperacion: "relevo.nuevo@example.test", password: "Temporal123456", rol: "docente", reemplazo: { docenteUid: oldTeacher.id, trimestreInicio: "t2" } }, clients);
   const target = client("relevo-destino", replacement.id);
   const oldAssignment = (await get(admin, "asignaciones", oldTeacher.id)).data();
   const newAssignment = (await get(admin, "asignaciones", replacement.id)).data();
@@ -1085,7 +1139,7 @@ test("reemplazar crea acceso y reparte trimestres atomicamente sin borrar ni des
   assert.equal((await get(target, "calificaciones", "relevo-nota-historica")).data().nota, 85);
   await setTeacherActive(oldTeacher.id, true, clients);
   assert.equal((await get(source, "actividades", "relevo-historico")).exists(), true);
-  await assert.rejects(createSystemUser({ nombre: "Duplicado", username: "relevoduplicado", emailRecuperacion: "relevo.duplicado@example.test", password: "Temporal123", rol: "docente", reemplazo: { docenteUid: oldTeacher.id, trimestreInicio: "t2" } }, clients), /ya tiene un reemplazo/);
+  await assert.rejects(createSystemUser({ nombre: "Duplicado", username: "relevoduplicado", emailRecuperacion: "relevo.duplicado@example.test", password: "Temporal123456", rol: "docente", reemplazo: { docenteUid: oldTeacher.id, trimestreInicio: "t2" } }, clients), /ya tiene un reemplazo/);
   assert.equal((await get(admin, "indice_accesos", "relevoduplicado")).exists(), false);
   await denied(setTeacherActive(oldTeacher.id, false, { auth: { currentUser: { uid: "docente-a" } }, firestore: teacher.firestore }));
 });

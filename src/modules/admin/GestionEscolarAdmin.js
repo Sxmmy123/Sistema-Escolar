@@ -1,4 +1,4 @@
-import { createIcons, icons } from "lucide";
+import { createIcons, icons } from "../../ui/icons.js";
 import { icon } from "../../ui/dom.js";
 import { configuracionActual, VERSION_MODELO } from "../../services/rutasFirestore.js";
 import { gestionDelCalendario } from "../../services/fechaEscolar.js";

@@ -27,9 +27,9 @@ test("auditoria conserva el ID real y escapa IDs que contienen HTML", async () =
   const service = await source("src/services/auditData.js");
   const list = vm.runInNewContext(service.slice(service.indexOf("export async function listAudit")).replace("export ", "") + "; listAudit", {
     todayIso: () => "2026-10-26", getDocs: async () => ({ docs: [{ id: "id-real", data: () => ({ id: 'falso\"><img src=x>', fecha: "2026-10-26" }) }] }),
-    firestore: {}, collection() {}, query() {}, orderBy() {}, limit() {}
+    firestore: {}, collection() {}, query() {}, orderBy() {}, limit() {}, where() {}, startAfter() {}
   });
-  assert.equal((await list())[0].id, "id-real");
+  assert.equal((await list()).items[0].id, "id-real");
   const bindings = await source("src/modules/admin/AdminBindings.js");
   const tbody = { innerHTML: "", querySelectorAll: () => [] };
   const render = vm.runInNewContext(bindings.slice(bindings.indexOf("function escapeHtml"), bindings.indexOf("function openAuditDetail")) + "; renderAuditRows", {

@@ -12,6 +12,7 @@ import { bindAlumnosAdmin } from "./AlumnosAdmin.js";
 import { listAudit, safeAudit } from "../../services/auditData.js";
 import { modalidadDeCursos, validarAsignacionesDocente } from "../../services/modalidadDocente.js";
 import { normalizarCorreoReal } from "../../services/correoCuenta.js";
+import { alLimpiarCachePrivada } from "../../services/cachePrivada.js";
 
 const state = {
   scheduleCourseId: SCHEDULE_COURSES[0].id,
@@ -20,6 +21,7 @@ const state = {
   schedule: null,
   historicalPreview: null,
   historicalGradesPreview: null,
+  historicalBusy: false,
   teachers: []
 };
 
@@ -827,6 +829,11 @@ async function hydrateAdminDashboard() {
 }
 
 let auditItems = [];
+let auditCursor = null, auditScanned = 0, auditFilters = null, auditRequest = 0;
+alLimpiarCachePrivada(() => {
+  auditItems = []; auditCursor = null; auditFilters = null; auditScanned = 0; auditRequest++;
+  state.historicalPreview = null; state.historicalGradesPreview = null; state.teachers = [];
+});
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -884,6 +891,7 @@ function openAuditDetail(id) {
         <span class="rounded-full bg-green-50 px-3 py-1 text-[10px] font-medium text-green-700">${escapeHtml(item.accion || "movimiento")}</span>
       </div>
       <h4 class="mt-3 text-lg font-semibold text-slate-900">${escapeHtml(item.detalle || "Movimiento registrado")}</h4>
+      <p class="mt-2 text-xs text-slate-500">${item.origen === "cliente" ? "Declarado por cliente; identidad verificada al guardar." : "Registro anterior; identidad no verificada por este control."}</p>
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div><p class="text-xs font-black uppercase tracking-[.16em] text-slate-400">Usuario</p><p class="font-black text-slate-800">${escapeHtml(item.usuario || "-")}</p></div>
         <div><p class="text-xs font-black uppercase tracking-[.16em] text-slate-400">Rol</p><p class="font-black text-slate-800">${escapeHtml(item.rol || "-")}</p></div>
@@ -1422,6 +1430,16 @@ function renderHistoricalPreview(preview) {
 }
 
 function bindHistoricalPage() {
+  const currentUid = auth.currentUser?.uid, currentYear = gestionActual();
+  const importButtons = [...document.querySelectorAll("[data-action='import-historical-grades'], [data-action='import-historical-attendance']")];
+  const isCurrent = () => auth.currentUser?.uid === currentUid && gestionActual() === currentYear && importButtons.every((button) => button.isConnected);
+  const setBusy = (value) => {
+    state.historicalBusy = value;
+    importButtons.forEach((button) => { button.disabled = value; });
+  };
+  const progressText = (status) => ({ confirmed, total, created, preserved }) => {
+    if (status?.isConnected) status.textContent = `${confirmed}/${total} confirmados: ${created} nuevos y ${preserved} conservados.`;
+  };
   renderHistoricalPreview(null);
   renderHistoricalGrid().catch(() => {});
 
@@ -1605,6 +1623,8 @@ function bindHistoricalPage() {
   });
 
   document.querySelector("[data-action='import-historical-grades']")?.addEventListener("click", async () => {
+    if (state.historicalBusy || !isCurrent()) return;
+    setBusy(true);
     const status = document.querySelector("[data-historical-grades-status]");
     let preview = state.historicalGradesPreview;
     try {
@@ -1616,16 +1636,16 @@ function bindHistoricalPage() {
         status.textContent = "Guardando notas...";
         status.classList.remove("hidden");
       }
-      const result = await importHistoricalGrades(preview);
+      const result = await importHistoricalGrades({ ...preview, isCurrent, onProgress: progressText(status) });
       await safeAudit({
         tipo: "calificaciones",
         accion: "carga_historica",
         detalle: `Importo ${result.grades} notas historicas de ${result.subject} en ${preview.course.nombre}`,
-        datos: { cursoId: preview.course.id, materiaId: preview.materiaId, trimestreId: preview.trimestreId, actividades: result.activities, notas: result.grades }
+        datos: { cursoId: preview.course.id, materiaId: preview.materiaId, trimestreId: preview.trimestreId, actividades: result.activities, notas: result.grades, nuevos: result.created, conservados: result.preserved }
       });
       if (status) {
         status.className = "mt-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-bold text-green-700";
-        status.textContent = `${result.grades} notas guardadas correctamente.`;
+        status.textContent = `${result.grades} notas confirmadas. ${result.created} registros nuevos y ${result.preserved} conservados, contando actividades y notas.`;
         status.classList.remove("hidden");
       }
     } catch (error) {
@@ -1634,9 +1654,11 @@ function bindHistoricalPage() {
         status.textContent = error.message || "No se pudo importar notas.";
         status.classList.remove("hidden");
       }
-    }
+    } finally { setBusy(false); }
   });
   document.querySelector("[data-action='import-historical-attendance']")?.addEventListener("click", async () => {
+    if (state.historicalBusy || !isCurrent()) return;
+    setBusy(true);
     const status = document.querySelector("[data-historical-status]");
     let preview = state.historicalPreview;
     try {
@@ -1647,31 +1669,39 @@ function bindHistoricalPage() {
         status.className = "rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700";
         status.textContent = "Guardando asistencias...";
       }
-      const count = await importHistoricalAttendance(preview);
+      const result = await importHistoricalAttendance({ ...preview, isCurrent, onProgress: progressText(status) });
       await safeAudit({
         tipo: "asistencia",
         accion: "carga_historica",
-        detalle: `Importo ${count} asistencias historicas en ${preview.course.nombre}`,
-        datos: { cursoId: preview.course.id, trimestreId: preview.trimestreId, cantidad: count, fechas: preview.dates.length }
+        detalle: `Confirmo ${result.total} asistencias historicas en ${preview.course.nombre}`,
+        datos: { cursoId: preview.course.id, trimestreId: preview.trimestreId, cantidad: result.total, fechas: preview.dates.length, nuevos: result.created, conservados: result.preserved }
       });
       if (status) {
         status.className = "rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-bold text-green-700";
-        status.textContent = `${count} registros guardados correctamente.`;
+        status.textContent = `${result.total} asistencias confirmadas: ${result.created} nuevas y ${result.preserved} conservadas con sus observaciones.`;
       }
     } catch (error) {
       if (status) {
         status.className = "rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
         status.textContent = error.message || "No se pudo importar.";
       }
-    }
+    } finally { setBusy(false); }
   });
 }
 
-async function loadAuditPage() {
+async function loadAuditPage(append = false) {
   const status = document.querySelector("[data-audit-status]");
+  if (!status) return;
+  const request = ++auditRequest, uid = auth.currentUser?.uid;
   const fecha = document.querySelector("[data-audit-date]")?.value || "";
   const tipo = document.querySelector("[data-audit-type]")?.value || "";
   const buscar = document.querySelector("[data-audit-search]")?.value || "";
+  const filters = { fecha, tipo, buscar };
+  if (!append || JSON.stringify(filters) !== JSON.stringify(auditFilters)) {
+    auditItems = []; auditCursor = null; auditScanned = 0; auditFilters = filters;
+  }
+  const buttons = [...document.querySelectorAll('[data-action="load-audit"], [data-audit-more]')];
+  buttons.forEach((button) => { button.disabled = true; });
 
   if (status) {
     status.className = "rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700";
@@ -1679,23 +1709,32 @@ async function loadAuditPage() {
   }
 
   try {
-    auditItems = await listAudit({ fecha, tipo, buscar });
+    const page = await listAudit({ ...filters, cursor: auditCursor });
+    if (request !== auditRequest || !status.isConnected || auth.currentUser?.uid !== uid) return;
+    auditItems = [...new Map([...auditItems, ...page.items].map((item) => [item.id, item])).values()];
+    auditCursor = page.cursor; auditScanned += page.scanned;
     renderAuditRows(auditItems);
+    const more = document.querySelector("[data-audit-more]");
+    if (more) { more.hidden = !page.hasMore; more.classList.toggle("hidden", !page.hasMore); }
+    const progress = document.querySelector("[data-audit-progress]");
+    if (progress) progress.textContent = `${auditItems.length} coincidencia${auditItems.length === 1 ? "" : "s"} de ${auditScanned} movimientos revisados${page.hasMore ? " · Hay mas movimientos" : " · Consulta completa"}`;
     if (status) {
       status.className = "rounded-full bg-green-50 px-3 py-1 text-xs font-black text-green-700";
       status.textContent = "Actualizado";
     }
   } catch (error) {
-    renderAuditRows([]);
+    if (request !== auditRequest || !status.isConnected || auth.currentUser?.uid !== uid) return;
+    renderAuditRows(auditItems);
     if (status) {
       status.className = "rounded-full bg-red-50 px-3 py-1 text-xs font-black text-red-700";
-      status.textContent = error?.code === "permission-denied" ? "Sin permiso" : "Error";
+      status.textContent = error?.code === "permission-denied" ? "Sin permiso" : "No se completo la consulta";
     }
-  }
+  } finally { if (request === auditRequest) buttons.forEach((button) => { button.disabled = false; }); }
 }
 
 function bindAuditPage() {
-  document.querySelector('[data-action="load-audit"]')?.addEventListener("click", loadAuditPage);
+  document.querySelector('[data-action="load-audit"]')?.addEventListener("click", () => loadAuditPage());
+  document.querySelector('[data-audit-more]')?.addEventListener("click", () => loadAuditPage(true));
   document.querySelector('[data-action="close-audit-modal"]')?.addEventListener("click", closeAuditDetail);
   document.querySelector("[data-audit-modal]")?.addEventListener("click", (event) => {
     if (event.target.matches("[data-audit-modal]")) closeAuditDetail();

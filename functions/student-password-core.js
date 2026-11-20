@@ -1,3 +1,5 @@
+import { validateInitialPassword } from "./password-policy.js";
+
 export const MAIN_ADMIN_UID = "6GJAf3WiBaVBXypSDDR1xKLalnq2";
 
 export class StudentPasswordError extends Error {
@@ -22,10 +24,11 @@ export async function resetStudentPassword(request, { db, auth, now = Date.now()
   if (!input || !validId(input.alumnoId) || !validId(input.expectedUid) || Object.keys(input).some((key) => !["alumnoId", "expectedUid", "temporaryPassword"].includes(key))) {
     fail("invalid-argument", "Selecciona un alumno con acceso creado.");
   }
-  if (typeof input.temporaryPassword !== "string" || input.temporaryPassword.length < 6 || input.temporaryPassword.length > 128) {
-    fail("invalid-argument", "La clave temporal debe tener entre 6 y 128 caracteres.");
-  }
+  try { validateInitialPassword(input.temporaryPassword); }
+  catch (error) { fail("invalid-argument", error.message); }
   const student = (await db.doc(`alumnos/${input.alumnoId}`).get()).data();
+  try { validateInitialPassword(input.temporaryPassword, student?.ci || student?.usuario); }
+  catch (error) { fail("invalid-argument", error.message); }
   if (!student?.authUid) fail("failed-precondition", "El alumno aun no tiene una cuenta de acceso.");
   if (student.authUid !== input.expectedUid) fail("failed-precondition", "El acceso del alumno cambio. Actualiza la lista antes de continuar.");
   const uid = student.authUid;

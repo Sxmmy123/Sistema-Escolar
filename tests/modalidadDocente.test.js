@@ -64,7 +64,7 @@ test("las asignaciones requieren cursos validos y no asignan materias numericas 
 
 test("el alta rechaza una mezcla antes de consultar Firestore o crear Authentication", async () => {
   const clients = { auth: { currentUser: { uid: "admin" } } };
-  await assert.rejects(createSystemUser({ nombre: "Prueba", username: "prueba", emailRecuperacion: "prueba@example.test", password: "Temporal123", rol: "docente", asignaciones: { inicial: { materias: [] }, cuarto_a: { materias: ["matematica"] } } }, clients), /no puede combinar/);
+  await assert.rejects(createSystemUser({ nombre: "Prueba", username: "prueba", emailRecuperacion: "prueba@example.test", password: "Temporal123456", rol: "docente", asignaciones: { inicial: { materias: [] }, cuarto_a: { materias: ["matematica"] } } }, clients), /no puede combinar/);
 });
 
 test("las cuentas antiguas de Primaria siguen funcionando sin metadata nueva", () => {

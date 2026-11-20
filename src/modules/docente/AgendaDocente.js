@@ -7,6 +7,67 @@ import { deleteActivity, getTeacherScheduleRows, getTeacherStudents, listActivit
 import { attendanceLabel, gradeByActivityAndStudent, isMaterialActivity, isSaberActivity, isScoredMaterialActivity } from "./AcademicoDocente.js";
 import { gestionActual } from "../../services/rutasFirestore.js";
 
+const agendaRequests = new WeakMap();
+const agendaEditors = new WeakMap();
+
+function bindAgendaBackdrop(modal, close) {
+  let pressedOutside = false;
+  modal?.addEventListener("pointerdown", (event) => {
+    pressedOutside = event.target === modal && event.button === 0;
+  });
+  modal?.addEventListener("pointercancel", () => { pressedOutside = false; });
+  modal?.addEventListener("click", (event) => {
+    const dismiss = pressedOutside && event.target === modal;
+    pressedOutside = false;
+    if (dismiss) return close();
+  });
+}
+
+function readAgendaEditor(container, selector) {
+  const form = container.querySelector(selector);
+  if (!form) return null;
+  const editableNames = ["titulo", "maximo", "calificable", "tipo", "materiaId"];
+  const fields = [...form.querySelectorAll("[name]")]
+    .filter((field) => field.type !== "hidden" && editableNames.includes(field.name))
+    .map((field) => ({ name: field.name, value: field.value, checked: field.checked }));
+  const rows = [...form.querySelectorAll("[data-material-item-row]")];
+  const active = document.activeElement;
+  return {
+    fields,
+    materials: rows.length ? rows.map((row) => ({
+      cantidad: row.querySelector("[name='materialCantidad']")?.value || "1",
+      material: row.querySelector("[name='materialNombre']")?.value || ""
+    })) : null,
+    scrollTop: form.parentElement?.scrollTop || 0,
+    focus: active && form.contains(active) ? {
+      name: active.name,
+      index: [...form.querySelectorAll(`[name='${active.name}']`)].indexOf(active),
+      start: active.selectionStart, end: active.selectionEnd
+    } : null
+  };
+}
+
+function restoreAgendaEditor(container, selector, draft) {
+  const form = container.querySelector(selector);
+  if (!form || !draft) return;
+  for (const saved of draft.fields) {
+    const field = form.querySelector(`[name='${saved.name}']:not([type='hidden'])`);
+    if (!field || (field.options && ![...field.options].some((option) => option.value === saved.value))) continue;
+    field.value = saved.value;
+    if (field.type === "checkbox") field.checked = saved.checked;
+  }
+  const list = form.querySelector("[data-material-list]");
+  if (list && draft.materials) list.innerHTML = materialEditorRows(draft.materials);
+  if (form.parentElement) form.parentElement.scrollTop = draft.scrollTop;
+  const active = draft.focus && form.querySelectorAll(`[name='${draft.focus.name}']`)[draft.focus.index];
+  if (active && !active.disabled) {
+    active.focus({ preventScroll: true });
+    if (typeof draft.focus.start === "number" && typeof active.setSelectionRange === "function") {
+      active.setSelectionRange(draft.focus.start, draft.focus.end);
+    }
+  }
+}
+
 function materialEditorRow(item = {}) {
   return `
     <div class="grid grid-cols-[72px_minmax(0,1fr)_38px] items-center gap-2" data-material-item-row>
@@ -68,10 +129,22 @@ function subjectOptions(course) {
   }).join("");
 }
 
-export async function renderTasks(context) {
+export async function renderTasks(context, loaders = {}) {
   const container = document.querySelector("[data-teacher-tasks]");
   const course = selectedCourse(context);
   if (!container) return;
+  const request = {};
+  agendaRequests.set(container, request);
+  const year = gestionActual();
+  const trimesterId = teacherState.trimesterId;
+  const sessionUid = teacherState.context?.uid;
+  const isCurrent = () => agendaRequests.get(container) === request
+    && document.querySelector("[data-teacher-tasks]") === container
+    && gestionActual() === year && teacherState.trimesterId === trimesterId
+    && teacherState.context?.uid === sessionUid;
+  const renderAgain = () => renderTasks(context, loaders);
+  const loadActivities = loaders.loadActivities || listActivities;
+  const loadSchedule = loaders.loadSchedule || getTeacherScheduleRows;
   if (teacherState.taskMonth.slice(0, 4) !== gestionActual()) teacherState.taskMonth = `${gestionActual()}-01`;
   teacherState.gradeModalActivityId = "";
   teacherState.gradeIndex = 0;
@@ -87,7 +160,8 @@ export async function renderTasks(context) {
   const coursesById = Object.fromEntries(context.courses.map((item) => [item.id, item]));
   const showCourseInAgenda = context.courses.length >= 2;
   const singleCourse = context.courses.length === 1 ? context.courses[0] : null;
-  const activities = (await Promise.all(context.courses.map((item) => listActivities(item.id, teacherState.trimesterId)))).flat();
+  const activities = (await Promise.all(context.courses.map((item) => loadActivities(item.id, trimesterId)))).flat();
+  if (!isCurrent()) return;
   const visibleActivities = activities.filter((item) => coursesById[item.cursoId]?.materias.includes(item.materiaId) && !item.interno && !["ser", "auto"].includes(item.tipo));
   const monthActivities = visibleActivities.filter((item) => String(item.fecha || "").startsWith(teacherState.taskMonth));
   const byDate = {};
@@ -100,7 +174,8 @@ export async function renderTasks(context) {
 
   const today = todayIso();
   const modalDate = teacherState.taskModalDate || today;
-  const scheduleRows = await getTeacherScheduleRows(context);
+  const scheduleRows = await loadSchedule(context);
+  if (!isCurrent()) return;
   const hasClassOnDate = (isoDate) => {
     const dateDayId = dayIdFromIso(isoDate);
     if (!dateDayId) return false;
@@ -163,6 +238,7 @@ export async function renderTasks(context) {
       listAttendanceForCourse(activityCourse.id, teacherState.trimesterId)
     ])
     : [[], [], []];
+  if (!isCurrent()) return;
   const gradesMap = gradeByActivityAndStudent(gradesList);
   if (activity && !activity.estadoRevision && !Object.keys(gradesMap[activity.id] || {}).length) {
     activity.estadoRevision = "sin_iniciar";
@@ -221,6 +297,9 @@ export async function renderTasks(context) {
       </article>
     `;
   }
+  const editorKey = JSON.stringify([context.uid, year, trimesterId, teacherState.taskModalDate ? "new" : editActivity?.id || ""]);
+  const editorSelector = teacherState.taskModalDate ? "[data-activity-form]" : "[data-edit-activity-form]";
+  const draft = agendaEditors.get(container) === editorKey ? readAgendaEditor(container, editorSelector) : null;
   container.innerHTML = `
     <section class="space-y-3 sm:space-y-5">
       <style>
@@ -553,22 +632,24 @@ export async function renderTasks(context) {
     </section>
   `;
 
+  agendaEditors.set(container, editorKey);
+  restoreAgendaEditor(container, editorSelector, draft);
   container.querySelector("[data-task-modal-course]")?.addEventListener("change", (event) => {
     teacherState.taskDraftCourseId = event.target.value;
     teacherState.taskDraftMateriaId = "";
     teacherState.taskDraftTipo = "";
-    renderTasks(context);
+    renderAgain();
   });
   container.querySelectorAll("[data-task-materia]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.taskDraftMateriaId = button.dataset.taskMateria;
-      renderTasks(context);
+      renderAgain();
     });
   });
   container.querySelectorAll("[data-task-type]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.taskDraftTipo = button.dataset.taskType;
-      renderTasks(context);
+      renderAgain();
     });
   });
   const activityForm = container.querySelector("[data-activity-form]");
@@ -576,7 +657,8 @@ export async function renderTasks(context) {
   const materialScoreToggle = container.querySelector("[data-material-score-toggle]");
   const materialMaxField = container.querySelector("[data-activity-max-field]");
   const materialMaxInput = container.querySelector("[data-activity-max-input]");
-  materialScoreToggle?.addEventListener("change", () => {
+  const syncMaterialScore = () => {
+    if (!materialScoreToggle) return;
     const enabled = materialScoreToggle.checked;
     materialMaxField?.classList.toggle("hidden", !enabled);
     if (materialMaxInput) {
@@ -584,11 +666,13 @@ export async function renderTasks(context) {
       materialMaxInput.required = enabled;
       if (!enabled) materialMaxInput.value = "";
     }
-  });
+  };
+  materialScoreToggle?.addEventListener("change", syncMaterialScore);
+  syncMaterialScore();
   container.querySelectorAll("[data-task-date]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.taskModalDate = button.dataset.taskDate || todayIso();
-      renderTasks(context);
+      renderAgain();
     });
   });
 
@@ -629,7 +713,8 @@ export async function renderTasks(context) {
       teacherState.taskDraftCourseId = "";
       teacherState.taskDraftTipo = "";
       form.reset();
-      await renderTasks(context);
+      agendaEditors.delete(container);
+      await renderAgain();
     } catch (error) {
       if (status) {
         status.className = "mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
@@ -657,7 +742,8 @@ export async function renderTasks(context) {
       teacherState.taskDraftMateriaId = "";
       teacherState.taskDraftTipo = "";
       teacherState.taskEditActivityId = "";
-      renderTasks(context);
+      agendaEditors.delete(container);
+      renderAgain();
     });
   });
 
@@ -702,7 +788,7 @@ export async function renderTasks(context) {
       teacherState.taskMonth = targetDate.slice(0, 7);
       teacherState.taskEditActivityId = "";
       teacherState.taskDraftCourseId = "";
-      await renderTasks(context);
+      await renderAgain();
     } catch (error) {
       alert(error.message || "No se pudo cambiar la fecha de la actividad.");
     }
@@ -788,7 +874,8 @@ export async function renderTasks(context) {
       teacherState.taskModalDate = "";
       teacherState.taskDraftMateriaId = "";
       teacherState.taskDraftTipo = "";
-      renderTasks(context);
+      agendaEditors.delete(container);
+      renderAgain();
     });
   });
 
@@ -810,7 +897,7 @@ export async function renderTasks(context) {
 
   container.querySelector("[data-edit-activity-course]")?.addEventListener("change", (event) => {
     teacherState.taskDraftCourseId = event.target.value;
-    renderTasks(context);
+    renderAgain();
   });
 
   const editTypeInput = container.querySelector("[data-edit-activity-type]");
@@ -915,7 +1002,8 @@ export async function renderTasks(context) {
       teacherState.taskMonth = String(data.get("fecha") || todayIso()).slice(0, 7);
       teacherState.taskEditActivityId = "";
       teacherState.taskDraftCourseId = "";
-      await renderTasks(context);
+      agendaEditors.delete(container);
+      await renderAgain();
     } catch (error) {
       if (status) {
         status.className = "rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700";
@@ -934,7 +1022,8 @@ export async function renderTasks(context) {
       await deleteActivity(editActivity);
       teacherState.taskEditActivityId = "";
       teacherState.taskDraftCourseId = "";
-      await renderTasks(context);
+      agendaEditors.delete(container);
+      await renderAgain();
     } catch (error) {
       alert(error?.code === "permission-denied" ? "Sin permiso para eliminar actividad." : error.message);
       button.disabled = false;
@@ -946,61 +1035,61 @@ export async function renderTasks(context) {
       teacherState.taskModalDate = "";
       teacherState.taskDraftCourseId = "";
       teacherState.taskDraftTipo = "";
-      renderTasks(context);
+      agendaEditors.delete(container);
+      renderAgain();
     });
   });
 
-  container.querySelector("[data-activity-modal]")?.addEventListener("click", (event) => {
-    if (event.target.matches("[data-activity-modal]")) {
-      teacherState.taskModalDate = "";
-      teacherState.taskDraftCourseId = "";
-      teacherState.taskDraftTipo = "";
-      renderTasks(context);
-    }
+  bindAgendaBackdrop(container.querySelector("[data-activity-modal]"), () => {
+    teacherState.taskModalDate = "";
+    teacherState.taskDraftCourseId = "";
+    teacherState.taskDraftTipo = "";
+    agendaEditors.delete(container);
+    return renderAgain();
   });
 
   container.querySelectorAll("[data-close-edit-activity-modal]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.taskEditActivityId = "";
       teacherState.taskDraftCourseId = "";
-      renderTasks(context);
+      agendaEditors.delete(container);
+      renderAgain();
     });
   });
 
-  container.querySelector("[data-edit-activity-modal]")?.addEventListener("click", (event) => {
-    if (event.target.matches("[data-edit-activity-modal]")) {
-      teacherState.taskEditActivityId = "";
-      teacherState.taskDraftCourseId = "";
-      renderTasks(context);
-    }
+  bindAgendaBackdrop(container.querySelector("[data-edit-activity-modal]"), () => {
+    teacherState.taskEditActivityId = "";
+    teacherState.taskDraftCourseId = "";
+    agendaEditors.delete(container);
+    return renderAgain();
   });
 
   container.querySelectorAll("[data-open-grade]").forEach((button) => {
     button.addEventListener("click", () => {
       teacherState.gradeModalActivityId = button.dataset.openGrade;
       teacherState.gradeIndex = 0;
-      renderTasks(context);
+      renderAgain();
     });
   });
   container.querySelector("[data-close-grade-modal]")?.addEventListener("click", () => {
     teacherState.gradeModalActivityId = "";
     teacherState.gradeIndex = 0;
-    renderTasks(context);
+    renderAgain();
   });
   container.querySelector("[data-grade-modal]")?.addEventListener("click", (event) => {
     if (event.target.matches("[data-grade-modal]")) {
       teacherState.gradeModalActivityId = "";
       teacherState.gradeIndex = 0;
-      renderTasks(context);
+      renderAgain();
     }
   });
   container.querySelector("[data-grade-prev]")?.addEventListener("click", () => {
     teacherState.gradeIndex = Math.max(teacherState.gradeIndex - 1, 0);
-    renderTasks(context);
+    renderAgain();
   });
   container.querySelector("[data-grade-next]")?.addEventListener("click", () => {
     teacherState.gradeIndex = Math.min(teacherState.gradeIndex + 1, Math.max(studentsToGrade.length - 1, 0));
-    renderTasks(context);
+    renderAgain();
   });
   container.querySelectorAll("[data-grade-quick]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1036,7 +1125,7 @@ export async function renderTasks(context) {
       });
       upsertTeacherNotesSnapshotGrade(context, activity, savedGrade);
       teacherState.gradeIndex = Math.min(teacherState.gradeIndex + 1, Math.max(studentsToGrade.length - 1, 0));
-      await renderTasks(context);
+      await renderAgain();
     } catch (error) {
       alert(error?.code === "permission-denied" ? "Sin permiso para guardar nota." : error.message);
       button.disabled = false;
@@ -1044,11 +1133,11 @@ export async function renderTasks(context) {
   });
   container.querySelector("[data-task-month-prev]")?.addEventListener("click", () => {
     teacherState.taskMonth = shiftMonth(teacherState.taskMonth, -1);
-    renderTasks(context);
+    renderAgain();
   });
   container.querySelector("[data-task-month-next]")?.addEventListener("click", () => {
     teacherState.taskMonth = shiftMonth(teacherState.taskMonth, 1);
-    renderTasks(context);
+    renderAgain();
   });
   refreshIcons();
 }

@@ -1,6 +1,7 @@
 import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, auth } from "../firebase/client.js";
+import { validateInitialPassword } from "../../functions/password-policy.js";
 
 export function generateTemporaryStudentPassword() {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
@@ -20,7 +21,7 @@ async function callReset(payload, token) {
 
 export async function resetStudentPasswordAsAdmin({ student, temporaryPassword, adminPassword }, { authClient = auth, reauthenticate = reauthenticateWithCredential, call = callReset, isCurrent = () => true } = {}) {
   if (!student?.id || !student.authUid) throw new Error("Este alumno aun no tiene acceso creado.");
-  if (typeof temporaryPassword !== "string" || temporaryPassword.length < 6 || temporaryPassword.length > 128) throw new Error("La clave temporal debe tener entre 6 y 128 caracteres.");
+  validateInitialPassword(temporaryPassword, student.ci || student.usuario);
   if (!adminPassword) throw new Error("Confirma tu contrasena de administrador.");
   const user = authClient.currentUser;
   if (!user?.email || !isCurrent()) throw new Error("La sesion cambio. Vuelve a ingresar.");
