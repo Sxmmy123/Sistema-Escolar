@@ -16,9 +16,18 @@ test("alumno tiene acceso al cambio de clave desde ambos menus y sin formulario 
     assert.match(html, /data-account-password-success role="status"/);
     assert.match(html, /data-lucide="circle-check"/);
   }
-  const teacher = appShell("docente", "/docente/asistencia", "Asistencia");
-  assert.match(teacher, /data-account-email-form/);
-  assert.match(teacher, /data-account-password-form/);
+});
+
+test("la cuenta docente conserva solo el cambio de clave en un modal compacto", () => {
+  for (const route of ["/docente", "/docente/asistencia"]) {
+    const html = appShell("docente", route, "Panel");
+    assert.equal((html.match(/data-account-password-form/g) || []).length, 1);
+    assert.doesNotMatch(html, /data-account-email-form|Establecer Gmail|Guardar correo|Seguridad y recuperacion/);
+    assert.match(html, /w-full max-w-md rounded-lg overflow-y-auto/);
+    assert.match(html, /id="account-modal-title"[^>]*>Cambiar contrasena/);
+    assert.match(html, /Entre 12 y 128 caracteres/);
+    assert.match(html, /Cuenta docente/);
+  }
 });
 
 test("validar longitud y confirmacion no requiere una cuenta ni llama a Firebase", async () => {

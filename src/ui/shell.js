@@ -185,28 +185,17 @@ function accountSettingsModal(role = "docente") {
   const student = role === "alumno";
   return `
     <div class="fixed inset-0 z-[70] hidden items-start justify-center bg-slate-950/50 p-4 sm:items-center" data-account-modal aria-hidden="true">
-      <section class="max-h-[calc(100dvh-2rem)] w-full ${student ? "max-w-md rounded-lg" : "max-w-2xl rounded-3xl"} overflow-y-auto bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" tabindex="-1">
+      <section class="max-h-[calc(100dvh-2rem)] w-full max-w-md rounded-lg overflow-y-auto bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" tabindex="-1">
         <div class="flex items-center justify-between border-b border-slate-100 p-5">
           <div>
             <p class="text-xs font-semibold text-school-green">${student ? "Cuenta del estudiante" : "Cuenta docente"}</p>
-            <h3 id="account-modal-title" class="mt-1 text-lg font-semibold text-slate-900">${student ? "Cambiar contrasena" : "Seguridad y recuperacion"}</h3>
+            <h3 id="account-modal-title" class="mt-1 text-lg font-semibold text-slate-900">Cambiar contrasena</h3>
           </div>
-          <button class="grid h-10 w-10 place-items-center rounded-2xl bg-slate-100 text-slate-600" data-action="close-account-settings" aria-label="Cerrar">${icon("x", "h-5 w-5")}</button>
+          <button class="grid h-10 w-10 place-items-center rounded-lg bg-slate-100 text-slate-600" data-action="close-account-settings" aria-label="Cerrar">${icon("x", "h-5 w-5")}</button>
         </div>
-        <div class="grid gap-4 p-5 ${student ? "" : "md:grid-cols-2"}" data-account-forms>
-          ${student ? "" : `<form class="rounded-2xl border border-slate-200 bg-slate-50 p-4" data-account-email-form>
-            <p class="text-sm font-black text-slate-900">Establecer Gmail</p>
-            <p class="mt-1 text-xs font-semibold leading-5 text-slate-500">Sirve para entrar con correo real y recuperar la cuenta.</p>
-            <label class="mt-4 block text-xs font-black text-slate-700">Gmail o correo personal</label>
-            <input class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="email" type="email" placeholder="docente@gmail.com" required>
-            <label class="mt-3 block text-xs font-black text-slate-700">Contrasena actual</label>
-            <input class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-school-green focus:ring-4 focus:ring-school-green/10" name="currentPassword" type="password" required>
-            <button class="mt-4 w-full rounded-xl bg-school-green px-4 py-2.5 text-sm font-black text-white" type="submit">Guardar correo</button>
-          </form>`}
-
-          <form class="${student ? "" : "rounded-2xl border border-slate-200 bg-slate-50 p-4"}" data-account-password-form>
-            ${student ? "" : '<p class="text-sm font-semibold text-slate-900">Cambiar contrasena</p>'}
-            <p class="text-xs leading-5 text-slate-500">Minimo 6 caracteres para la nueva contrasena.</p>
+        <div class="p-5" data-account-forms>
+          <form data-account-password-form>
+            <p class="text-xs leading-5 text-slate-500">Entre 12 y 128 caracteres para la nueva contrasena.</p>
             ${accountPasswordField("currentPassword", "Contrasena actual", "current-password")}
             ${accountPasswordField("newPassword", "Nueva contrasena", "new-password")}
             ${accountPasswordField("confirmPassword", "Confirmar contrasena", "new-password")}

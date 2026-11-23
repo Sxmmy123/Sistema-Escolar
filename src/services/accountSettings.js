@@ -1,10 +1,9 @@
 import {
   EmailAuthProvider,
   reauthenticateWithCredential,
-  updateEmail,
   updatePassword
 } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, writeBatch } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
 import { validateInitialPassword } from "../../functions/password-policy.js";
 import { cambiarClaveTemporal } from "./claveTemporal.js";
@@ -29,43 +28,6 @@ async function reauth(currentPassword, { authClient = auth, reauthenticate = rea
   await reauthenticate(user, credential);
   if (authClient.currentUser?.uid !== user.uid) throw new Error("La sesion cambio. Vuelve a ingresar antes de cambiar tu cuenta.");
   return user;
-}
-
-async function updateProfileEmail(uid, profile, email) {
-  const username = String(profile.usuario || "").trim();
-  if (!profile.rol) throw new Error("Primero prepara la gestion desde el panel del administrador.");
-  const payload = {
-    authEmail: email,
-    correoRecuperacion: email,
-    updatedAt: serverTimestamp()
-  };
-
-  const batch = writeBatch(firestore);
-  batch.update(doc(firestore, "usuarios", uid), payload);
-  if (username && !username.includes("@")) {
-    batch.update(doc(firestore, "indice_accesos", username.toLowerCase()), { authEmail: email });
-  }
-  await batch.commit();
-}
-
-export async function setRecoveryEmail({ email, currentPassword }) {
-  const cleanEmail = String(email || "").trim().toLowerCase();
-  if (!cleanEmail || !cleanEmail.includes("@")) throw new Error("Escribe un correo valido.");
-
-  const user = await reauth(currentPassword);
-  const profile = await currentProfile(user.uid);
-  if (!profile.rol) throw new Error("Primero prepara la gestion desde el panel del administrador.");
-  const previousEmail = user.email;
-  await updateEmail(user, cleanEmail);
-  try {
-    await updateProfileEmail(user.uid, profile, cleanEmail);
-  } catch (error) {
-    try { await updateEmail(user, previousEmail); }
-    catch { throw new Error("El correo cambio en Authentication pero no en el perfil. Administracion debe corregir el indice de acceso."); }
-    throw error;
-  }
-  sessionStorage.setItem("sesionUsuario", cleanEmail);
-  return cleanEmail;
 }
 
 export async function changeOwnPassword({ currentPassword, newPassword, confirmPassword }, { authClient = auth, reauthenticate = reauthenticateWithCredential, update = updatePassword, readProfile = currentProfile, changeTemporary = cambiarClaveTemporal } = {}) {

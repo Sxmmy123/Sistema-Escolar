@@ -1,20 +1,18 @@
 import { auth } from "../firebase/client.js";
 import { signOut } from "firebase/auth";
-import { changeOwnPassword, setRecoveryEmail } from "../services/accountSettings.js";
+import { changeOwnPassword } from "../services/accountSettings.js";
 
 function accountErrorMessage(error) {
   const code = error?.code || "";
   if (["auth/wrong-password", "auth/invalid-credential", "auth/invalid-login-credentials"].includes(code)) return "La contrasena actual no es correcta.";
   if (code === "auth/requires-recent-login") return "Vuelve a ingresar y repite el cambio.";
-  if (code === "auth/email-already-in-use") return "Ese correo ya esta usado por otra cuenta.";
-  if (code === "auth/invalid-email") return "El correo no tiene formato valido.";
   if (["auth/weak-password", "auth/password-does-not-meet-requirements"].includes(code)) return "La nueva contrasena no cumple los requisitos. Usa una clave mas larga con letras, numeros y simbolos.";
   if (code === "auth/too-many-requests") return "Demasiados intentos. Espera un momento y vuelve a intentar.";
   if (code === "auth/network-request-failed") return "No hay conexion. Revisa internet e intenta nuevamente.";
   return error?.message || "No se pudo guardar el cambio.";
 }
 
-export function bindAccountSettings({ root = document, signal, beforeOpen = () => {}, authClient = auth, changePassword = changeOwnPassword, changeEmail = setRecoveryEmail, signOutClient = signOut } = {}) {
+export function bindAccountSettings({ root = document, signal, beforeOpen = () => {}, authClient = auth, changePassword = changeOwnPassword, signOutClient = signOut } = {}) {
   const modal = root.querySelector("[data-account-modal]");
   if (!modal) return () => {};
   const page = root.ownerDocument || root;
@@ -118,7 +116,6 @@ export function bindAccountSettings({ root = document, signal, beforeOpen = () =
     }, options);
   }
   bindForm("[data-account-password-form]", (data) => changePassword({ currentPassword: data.get("currentPassword"), newPassword: data.get("newPassword"), confirmPassword: data.get("confirmPassword") }), "Cambiando contrasena...", "Contrasena actualizada correctamente.", true);
-  bindForm("[data-account-email-form]", (data) => changeEmail({ email: data.get("email"), currentPassword: data.get("currentPassword") }), "Guardando correo...", "Correo guardado correctamente.");
   const dispose = () => { controller.abort(); clear(); unlockScroll(); };
   if (signal?.aborted) dispose();
   else signal?.addEventListener("abort", dispose, { once: true });
