@@ -868,7 +868,7 @@ test("el enlace de recuperacion restablece la clave conservando UID, usuario y a
   assert.equal(await verificarEnlaceRestablecimiento(creator.auth, code.oobCode), index.authEmail);
   await assert.rejects(confirmarRestablecimiento({ auth: creator.auth, code: code.oobCode, password: "NuevaTemporal456", confirmation: "Distinta456" }), /no coinciden/);
   assert.equal(await verificarEnlaceRestablecimiento(creator.auth, code.oobCode), index.authEmail);
-  await confirmarRestablecimiento({ auth: creator.auth, code: code.oobCode, password: "NuevaTemporal456", confirmation: "NuevaTemporal456" });
+  await confirmarRestablecimiento({ auth: creator.auth, code: code.oobCode, password: "NuevaTemporal456", confirmation: "NuevaTemporal456" }, confirmPasswordReset);
   await assert.rejects(signInWithEmailAndPassword(creator.auth, index.authEmail, "Temporal123456"));
   const login = await signInWithEmailAndPassword(creator.auth, index.authEmail, "NuevaTemporal456");
   assert.equal(login.user.uid, index.uid);

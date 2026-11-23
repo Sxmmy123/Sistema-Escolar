@@ -90,7 +90,23 @@ test("el servicio local de acceso rechaza otros origenes, rutas, metodos y cuerp
   assert.equal((await request({ socket: { remoteAddress: "192.0.2.1" } })).statusCode, 403);
   assert.equal((await request({ headers: { host: "127.0.0.1:5194", origin: "https://ajeno.test" } })).statusCode, 403);
   assert.equal((await request({}, "{" )).statusCode, 400);
-  assert.equal((await request({}, "a".repeat(4097))).statusCode, 413);
+  assert.equal((await request({}, "a".repeat(8193))).statusCode, 413);
+});
+
+test("Auth REST valida el codigo antes de confirmar y no devuelve tokens ni datos adicionales", async () => {
+  const calls = [];
+  const gateway = firebasePasswordGateway("clave-web", async (url, request) => {
+    assert.match(url, /accounts:resetPassword/);
+    calls.push(JSON.parse(request.body));
+    return { ok: true, json: async () => ({ email: "persona@example.test", requestType: "PASSWORD_RESET", idToken: "privado" }) };
+  });
+  assert.deepEqual(await gateway.verifyReset("codigo"), { email: "persona@example.test", requestType: "PASSWORD_RESET" });
+  await gateway.confirmReset("codigo", "PersonalNueva2026");
+  assert.deepEqual(calls, [{ oobCode: "codigo" }, { oobCode: "codigo", newPassword: "PersonalNueva2026" }]);
+  for (const [message, code] of [["EXPIRED_OOB_CODE", "not-found"], ["INVALID_OOB_CODE", "not-found"], ["WEAK_PASSWORD : privado", "invalid-argument"], ["USER_DISABLED", "not-found"], ["TOO_MANY_ATTEMPTS_TRY_LATER", "resource-exhausted"]]) {
+    const failed = firebasePasswordGateway("clave-web", async () => ({ ok: false, json: async () => ({ error: { message } }) }));
+    await assert.rejects(failed.confirmReset("codigo", "PersonalNueva2026"), error => error.code === code && !error.message.includes("privado"));
+  }
 });
 
 function storage() {

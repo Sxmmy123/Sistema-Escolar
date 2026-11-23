@@ -1,4 +1,6 @@
-import { verifyPasswordResetCode, confirmPasswordReset } from "firebase/auth";
+import { verifyPasswordResetCode } from "firebase/auth";
+import { validateInitialPassword } from "../../functions/password-policy.js";
+import { solicitarAccesoEscolar } from "./accesoEscolar.js";
 
 function invalidLink() {
   const error = new Error("El enlace no es valido.");
@@ -38,12 +40,19 @@ export async function verificarEnlaceRestablecimiento(auth, code, verificar = ve
   return verificar(auth, code);
 }
 
-export async function confirmarRestablecimiento({ auth, code, password, confirmation }, confirmar = confirmPasswordReset) {
+async function confirmarEnServidor(auth, code, password) {
+  const result = await solicitarAccesoEscolar({ accion: "restablecer", code, password }, { firebaseApp: auth.app });
+  if (result?.ok !== true) throw new Error("No se pudo confirmar el restablecimiento.");
+  return result;
+}
+
+export async function confirmarRestablecimiento({ auth, code, password, confirmation }, confirmar = confirmarEnServidor) {
   if (!code) throw invalidLink();
   const value = String(password || "");
-  if (value.length < 6) {
-    const error = new Error("La contrasena debe tener al menos 6 caracteres.");
-    error.code = "restablecimiento/contrasena-corta";
+  try { validateInitialPassword(value); }
+  catch (issue) {
+    const error = new Error(issue.message.replaceAll("temporal", "nueva"));
+    error.code = "restablecimiento/contrasena-invalida";
     throw error;
   }
   if (value !== String(confirmation || "")) {
@@ -51,19 +60,20 @@ export async function confirmarRestablecimiento({ auth, code, password, confirma
     error.code = "restablecimiento/confirmacion-distinta";
     throw error;
   }
-  await confirmar(auth, code, value);
+  return confirmar(auth, code, value);
 }
 
 export function errorRestablecimiento(error) {
-  const code = String(error?.code || "");
-  if (["auth/expired-action-code", "auth/invalid-action-code", "auth/user-disabled", "auth/user-not-found", "restablecimiento/enlace-invalido"].includes(code)) {
+  const code = String(error?.code || "").replace(/^functions\//, "");
+  if (["auth/expired-action-code", "auth/invalid-action-code", "auth/user-disabled", "auth/user-not-found", "not-found", "restablecimiento/enlace-invalido"].includes(code)) {
     return { terminal: true, title: "Enlace no disponible", message: "Este enlace no es valido, vencio o ya fue utilizado. Solicita uno nuevo desde Olvide mi contrasena en el ingreso." };
   }
-  if (["auth/weak-password", "auth/password-does-not-meet-requirements"].includes(code)) {
+  if (code === "aborted") return { terminal: true, title: "Contrasena actualizada", message: "Tu nueva clave ya fue guardada, pero falta confirmar el perfil. Ingresa con ella y, si vuelve a pedir un cambio, solicita ayuda a administracion. No vuelvas a usar este enlace." };
+  if (["auth/weak-password", "auth/password-does-not-meet-requirements", "invalid-argument"].includes(code)) {
     return { field: true, message: "La contrasena no cumple los requisitos de seguridad de la cuenta. Usa una clave mas larga con letras, numeros y simbolos." };
   }
   if (code.startsWith("restablecimiento/contrasena-") || code === "restablecimiento/confirmacion-distinta") return { field: true, message: error.message };
-  if (code === "auth/network-request-failed") return { title: "Revisa tu conexion", message: "No se pudo confirmar la operacion. Revisa internet y vuelve a intentar." };
-  if (code === "auth/too-many-requests") return { title: "Espera un momento", message: "Hay demasiados intentos. Espera antes de volver a intentar." };
+  if (["auth/network-request-failed", "unavailable"].includes(code)) return { title: "Revisa tu conexion", message: "No se pudo confirmar la operacion. Revisa internet y vuelve a intentar." };
+  if (["auth/too-many-requests", "resource-exhausted"].includes(code)) return { title: "Espera un momento", message: "Hay demasiados intentos o un cambio de clave en curso. Espera antes de volver a intentar." };
   return { title: "No se pudo completar", message: "No se pudo confirmar la operacion. Vuelve a intentar en un momento." };
 }

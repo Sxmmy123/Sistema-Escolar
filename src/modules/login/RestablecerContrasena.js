@@ -13,10 +13,10 @@ export function RestablecerContrasenaView({ logo, loginHref }) {
           <form data-reset-form hidden aria-label="Nueva contrasena">
             <div class="password-reset-account">${icon("shield-check")}<span data-reset-email></span></div>
             <label for="reset-password">Nueva contrasena</label>
-            <div class="password-reset-input"><input id="reset-password" name="password" type="password" autocomplete="new-password" minlength="6" maxlength="4096" required aria-describedby="reset-requirements"><button type="button" data-reset-toggle="password" aria-label="Mostrar nueva contrasena" aria-pressed="false" title="Mostrar nueva contrasena">${icon("eye")}</button></div>
-            <p id="reset-requirements" class="password-reset-help">Minimo 6 caracteres.</p>
+            <div class="password-reset-input"><input id="reset-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required aria-describedby="reset-requirements"><button type="button" data-reset-toggle="password" aria-label="Mostrar nueva contrasena" aria-pressed="false" title="Mostrar nueva contrasena">${icon("eye")}</button></div>
+            <p id="reset-requirements" class="password-reset-help">Entre 12 y 128 caracteres; no uses tu CI ni una clave solo numerica.</p>
             <label for="reset-confirmation">Confirmar nueva contrasena</label>
-            <div class="password-reset-input"><input id="reset-confirmation" name="confirmation" type="password" autocomplete="new-password" minlength="6" maxlength="4096" required><button type="button" data-reset-toggle="confirmation" aria-label="Mostrar confirmacion" aria-pressed="false" title="Mostrar confirmacion">${icon("eye")}</button></div>
+            <div class="password-reset-input"><input id="reset-confirmation" name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><button type="button" data-reset-toggle="confirmation" aria-label="Mostrar confirmacion" aria-pressed="false" title="Mostrar confirmacion">${icon("eye")}</button></div>
             <p data-reset-form-status class="password-reset-feedback" role="status" aria-live="polite" hidden></p>
             <button type="submit" class="password-reset-primary">${icon("key-round")}<span data-reset-save-label>Guardar contrasena</span></button>
           </form>

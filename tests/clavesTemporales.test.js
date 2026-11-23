@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { passwordChangeBlocksAccess } from "../functions/password-policy.js";
 import { recordatorioClaveMarkup } from "../src/ui/claveTemporal.js";
 import { validarAccesoInicial } from "../functions/informe-core.js";
+import { resetPasswordWithCode } from "../functions/recovery-password-core.js";
 
 function fixture() {
   const records = new Map([["usuarios/uid", { rol: "alumno", activo: true, usuario: "990001", passwordChangeRequired: true, passwordChangeVersion: "v1" }]]);
@@ -16,6 +17,71 @@ function fixture() {
   const request = { auth: { uid: "uid" }, data: { currentPassword: "123456", newPassword: "PersonalSegura2026" } };
   return { records, writes, passwords, dependencies, request, run: () => changeTemporaryPassword(request, dependencies) };
 }
+
+function recoveryFixture() {
+  const f = fixture();
+  f.dependencies.auth.getUserByEmail = async email => { assert.equal(email, "test@example.test"); return { uid: "uid", email }; };
+  f.dependencies.verifyReset = async code => { assert.equal(code, "codigo-unico"); return { email: "test@example.test", requestType: "PASSWORD_RESET" }; };
+  f.dependencies.confirmReset = async (code, password) => { f.passwords.push({ code, password }); };
+  f.input = { accion: "restablecer", code: "codigo-unico", password: "PersonalSegura2026" };
+  f.recover = () => resetPasswordWithCode(f.input, f.dependencies);
+  return f;
+}
+
+test("recuperar con codigo valido cambia solo su cuenta y confirma la marca sin guardar secretos", async () => {
+  const f = recoveryFixture(), before = { ...f.records.get("usuarios/uid") };
+  f.records.set("usuarios/otro", { rol: "docente", passwordChangeRequired: true });
+  assert.deepEqual(await f.recover(), { ok: true });
+  assert.deepEqual(f.passwords, [{ code: "codigo-unico", password: "PersonalSegura2026" }]);
+  assert.deepEqual(f.records.get("usuarios/uid"), { ...before, passwordChangeRequired: false });
+  assert.equal(f.records.get("usuarios/otro").passwordChangeRequired, true);
+  assert.doesNotMatch(JSON.stringify([...f.records]), /codigo-unico|PersonalSegura2026/);
+});
+
+test("la recuperacion rechaza destinos inyectados, codigos malformados y claves debiles antes de confirmar", async () => {
+  for (const patch of [{ uid: "otro" }, { email: "otro@example.test" }, { code: "" }, { code: "a\nb" }, { code: "a".repeat(4097) }, { password: "123456" }, { password: "123456789012" }, { password: "a".repeat(129) }]) {
+    const f = recoveryFixture(); Object.assign(f.input, patch);
+    await assert.rejects(f.recover, { code: "invalid-argument" });
+    assert.equal(f.passwords.length, 0);
+    assert.equal(f.records.get("usuarios/uid").passwordChangeRequired, true);
+  }
+});
+
+test("un codigo invalido, otro tipo de accion o una cuenta deshabilitada no cambian nada", async () => {
+  const invalid = recoveryFixture();
+  invalid.dependencies.verifyReset = async () => { throw Object.assign(new Error("Enlace invalido"), { code: "not-found" }); };
+  await assert.rejects(invalid.recover, { code: "not-found" }); assert.equal(invalid.passwords.length, 0);
+  for (const action of [{ email: "test@example.test", requestType: "VERIFY_EMAIL" }, { requestType: "PASSWORD_RESET" }]) {
+    const f = recoveryFixture(); f.dependencies.verifyReset = async () => action;
+    await assert.rejects(f.recover, { code: "not-found" }); assert.equal(f.passwords.length, 0);
+  }
+  const disabled = recoveryFixture(); disabled.dependencies.auth.getUserByEmail = async () => ({ uid: "uid", disabled: true });
+  await assert.rejects(disabled.recover, { code: "not-found" }); assert.equal(disabled.passwords.length, 0);
+});
+
+test("un reset administrativo en curso no consume el codigo de recuperacion", async () => {
+  const f = recoveryFixture(); f.records.set("operaciones_clave/uid", { id: "otro", expiresAt: Date.now() + 60000 });
+  await assert.rejects(f.recover, { code: "resource-exhausted" });
+  assert.equal(f.passwords.length, 0); assert.equal(f.records.get("usuarios/uid").passwordChangeRequired, true);
+});
+
+test("un fallo temporal al consultar Authentication permite reintentar sin consumir el enlace", async () => {
+  const f = recoveryFixture();
+  f.dependencies.auth.getUserByEmail = async () => { throw Object.assign(new Error("detalle privado"), { code: "app/network-error" }); };
+  await assert.rejects(f.recover, error => error.code === "unavailable" && !error.message.includes("privado"));
+  assert.equal(f.passwords.length, 0); assert.equal(f.records.get("usuarios/uid").passwordChangeRequired, true);
+});
+
+test("un fallo de Firebase conserva la marca y una version posterior nunca se borra", async () => {
+  const failed = recoveryFixture();
+  failed.dependencies.confirmReset = async () => { throw Object.assign(new Error("No disponible"), { code: "unavailable" }); };
+  await assert.rejects(failed.recover, { code: "unavailable" });
+  assert.equal(failed.records.get("usuarios/uid").passwordChangeRequired, true);
+  const changed = recoveryFixture();
+  changed.dependencies.confirmReset = async () => { changed.records.get("usuarios/uid").passwordChangeVersion = "posterior"; };
+  await assert.rejects(changed.recover, { code: "aborted" });
+  assert.equal(changed.records.get("usuarios/uid").passwordChangeRequired, true);
+});
 
 test("solo cambia la cuenta autenticada y quita la marca sin guardar claves", async () => {
   const f = fixture();

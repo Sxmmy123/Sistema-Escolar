@@ -70,6 +70,8 @@ En produccion, una cuenta con `passwordChangeRequired: true` debe cambiar su cla
 
 Eliminar `modoDemostracion` o dejarlo en `false` restaura el requisito obligatorio. No se debe activar con datos reales. Este modo no modifica roles, cursos asignados ni permisos sobre datos de otros usuarios, y solo se puede configurar desde administracion.
 
+La recuperacion por correo usa el enlace de un solo uso de Firebase. Al guardar la nueva clave, `accesoEscolar` valida y consume ese codigo en el servidor y retira la marca temporal del mismo UID, sin cambiar roles, asignaciones ni registros. Se aplica la misma politica de 12 a 128 caracteres que en Cuenta. Si hay un restablecimiento administrativo en curso, se debe esperar y reintentar sin consumir el enlace.
+
 Para desarrollo local:
 
 1. Ejecutar `npm install --prefix functions`.

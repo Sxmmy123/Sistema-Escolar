@@ -7,6 +7,9 @@ import { resetStudentPassword } from "../functions/student-password-core.js";
 import { resetStudentPasswordAsAdmin } from "../src/services/adminStudentPassword.js";
 import { changeTemporaryPassword } from "../functions/own-password-core.js";
 import { firebasePasswordGateway, createAccessLimiter } from "../functions/access-core.js";
+import { resetPasswordWithCode } from "../functions/recovery-password-core.js";
+import { confirmarRestablecimiento, verificarEnlaceRestablecimiento } from "../src/services/restablecimientoContrasena.js";
+import { passwordChangeBlocksAccess } from "../functions/password-policy.js";
 
 const projectId = "demo-sistema-seguridad";
 if (process.env.GCLOUD_PROJECT !== projectId || !/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || "") || !/^127\.0\.0\.1:\d+$/.test(process.env.FIREBASE_AUTH_EMULATOR_HOST || "")) {
@@ -63,5 +66,47 @@ test("administrador restablece en Authentication, alumno ingresa con temporal y 
     assert.equal(adminClient.currentUser.uid, adminUid);
   } finally {
     await Promise.all(apps.map(deleteApp)); await db.terminate(); await deleteAdmin(serverApp);
+  }
+});
+
+test("recuperar por correo consume el enlace una sola vez y permite volver a entrar sin marca temporal ni perdida de registros", async () => {
+  const serverApp = initializeAdmin({ projectId }, "prueba-recuperacion-correo");
+  const auth = getAdminAuth(serverApp), db = getFirestore(serverApp);
+  const app = initializeApp({ projectId, apiKey: "demo-api-key" }, "correo-recuperacion");
+  const client = getAuth(app); connectAuthEmulator(client, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+  const uid = "docente-recuperacion-emulador", email = "correo.recuperacion@example.test";
+  const profile = db.doc(`usuarios/${uid}`), assignment = db.doc(`gestiones/2026/asignaciones/${uid}`);
+  const grade = db.doc("gestiones/2026/calificaciones/recuperacion-correo"), attendance = db.doc("gestiones/2026/asistencias/recuperacion-correo");
+  try {
+    await auth.createUser({ uid, email, password: "AnteriorTemporal2026" });
+    const previousProfile = { rol: "docente", activo: true, usuario: "docentecorreo", passwordChangeRequired: true, passwordChangeVersion: "v1" };
+    const batch = db.batch();
+    batch.set(profile, previousProfile); batch.set(assignment, { cursos: { cuarto_a: { materias: ["matematica"] } } });
+    batch.set(grade, { alumnoId: "alumno-correo", nota: 79 }); batch.set(attendance, { alumnoId: "alumno-correo", estado: "presente" });
+    await batch.commit();
+    const before = (await db.getAll(assignment, grade, attendance)).map(item => item.data());
+    const link = new URL(await auth.generatePasswordResetLink(email)), code = link.searchParams.get("oobCode");
+    assert.ok(code);
+    const gateway = firebasePasswordGateway("demo-api-key", (url, options) => fetch(url.replace("https://identitytoolkit.googleapis.com", `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com`), options));
+    const dependencies = { db, auth, ...gateway, takeLimit: createAccessLimiter(db, "127.0.0.1") };
+    const confirm = (_auth, code, password) => resetPasswordWithCode({ accion: "restablecer", code, password }, dependencies);
+    await assert.rejects(confirmarRestablecimiento({ auth: client, code, password: "123456", confirmation: "123456" }, confirm));
+    assert.equal(await verificarEnlaceRestablecimiento(client, code), email);
+    const lock = db.doc(`operaciones_clave/${uid}`);
+    await lock.set({ id: "reset-administrativo", expiresAt: Date.now() + 60000 });
+    await assert.rejects(confirm(client, code, "PersonalRecuperada2026"), { code: "resource-exhausted" });
+    assert.equal(await verificarEnlaceRestablecimiento(client, code), email);
+    await lock.delete();
+    await confirmarRestablecimiento({ auth: client, code, password: "PersonalRecuperada2026", confirmation: "PersonalRecuperada2026" }, confirm);
+    assert.deepEqual((await profile.get()).data(), { ...previousProfile, passwordChangeRequired: false });
+    assert.equal(passwordChangeBlocksAccess((await profile.get()).data()), false);
+    await assert.rejects(signInWithEmailAndPassword(client, email, "AnteriorTemporal2026"));
+    assert.equal((await signInWithEmailAndPassword(client, email, "PersonalRecuperada2026")).user.uid, uid);
+    await assert.rejects(confirm(client, code, "OtraClavePersonal2026"), { code: "not-found" });
+    assert.deepEqual((await db.getAll(assignment, grade, attendance)).map(item => item.data()), before);
+    assert.ok(!JSON.stringify((await profile.get()).data()).includes("PersonalRecuperada2026"));
+    await signOut(client);
+  } finally {
+    await deleteApp(app); await db.terminate(); await deleteAdmin(serverApp);
   }
 });

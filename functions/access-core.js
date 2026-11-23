@@ -47,7 +47,7 @@ export function createAccessLimiter(db, ip, { now = Date.now } = {}) {
     const refs = identities.map((value) => db.doc(`limites_acceso/${createHash("sha256").update(value).digest("hex")}`));
     await db.runTransaction(async (transaction) => {
       const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
-      const limits = action === "recuperar" ? [30, 5] : [100, 10];
+      const limits = ["recuperar", "restablecer"].includes(action) ? [30, 5] : [100, 10];
       const values = snapshots.map((snapshot) => {
         const old = snapshot.data() || {};
         return time >= old.inicio && time - old.inicio < window ? old : { inicio: time, cantidad: 0 };
@@ -67,6 +67,10 @@ export function firebasePasswordGateway(apiKey, fetcher = fetch) {
     if (!response.ok) {
       const code = result?.error?.message || "";
       if (code.includes("TOO_MANY")) throw new SchoolAccessError("resource-exhausted", "Demasiados intentos. Espera un momento.");
+      if (method === "resetPassword") {
+        if (["INVALID_OOB_CODE", "EXPIRED_OOB_CODE", "EMAIL_NOT_FOUND", "USER_DISABLED"].includes(code)) throw new SchoolAccessError("not-found", "El enlace no es valido, vencio o ya fue utilizado.");
+        if (code.startsWith("WEAK_PASSWORD") || code.startsWith("PASSWORD_DOES_NOT_MEET_REQUIREMENTS")) throw new SchoolAccessError("invalid-argument", "La nueva contrasena no cumple los requisitos de seguridad.");
+      }
       if (["EMAIL_NOT_FOUND", "INVALID_PASSWORD", "INVALID_LOGIN_CREDENTIALS", "USER_DISABLED"].includes(code)) {
         if (method === "sendOobCode") return {};
         throw invalid();
@@ -77,6 +81,8 @@ export function firebasePasswordGateway(apiKey, fetcher = fetch) {
   };
   return {
     verifyPassword: async (email, password) => { const result = await post("signInWithPassword", { email, password, returnSecureToken: true }); return { uid: result.localId, email: result.email }; },
-    sendReset: async (email) => { await post("sendOobCode", { requestType: "PASSWORD_RESET", email }); }
+    sendReset: async (email) => { await post("sendOobCode", { requestType: "PASSWORD_RESET", email }); },
+    verifyReset: async code => { const result = await post("resetPassword", { oobCode: code }); return { email: result.email, requestType: result.requestType }; },
+    confirmReset: async (code, password) => { await post("resetPassword", { oobCode: code, newPassword: password }); }
   };
 }

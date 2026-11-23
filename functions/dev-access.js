@@ -1,6 +1,7 @@
 import { createLocalAdminClients } from "./dev-admin.js";
 import { schoolAccess, createAccessLimiter, firebasePasswordGateway, SchoolAccessError } from "./access-core.js";
 import { changeTemporaryPassword } from "./own-password-core.js";
+import { resetPasswordWithCode } from "./recovery-password-core.js";
 
 export function accessDevPlugin(env, firebase) {
   const clients = createLocalAdminClients(env, firebase);
@@ -14,7 +15,7 @@ export function accessDevPlugin(env, firebase) {
       catch { return send(403, { error: "Origen no permitido." }); }
       try {
         let body = "";
-        for await (const chunk of request) { body += chunk; if (body.length > 4096) return send(413, { error: "Solicitud demasiado grande." }); }
+        for await (const chunk of request) { body += chunk; if (body.length > 8192) return send(413, { error: "Solicitud demasiado grande." }); }
         let input;
         try { input = JSON.parse(body); } catch { return send(400, { error: "Solicitud no valida." }); }
         const { db, auth } = await clients();
@@ -25,10 +26,10 @@ export function accessDevPlugin(env, firebase) {
           try { actor = await auth.verifyIdToken(token || "", true); }
           catch { throw new SchoolAccessError("unauthenticated", "Vuelve a ingresar."); }
         }
-        const result = ownPassword ? await changeTemporaryPassword({ auth: actor, data: input }, dependencies) : await schoolAccess(input, dependencies);
+        const result = ownPassword ? await changeTemporaryPassword({ auth: actor, data: input }, dependencies) : input?.accion === "restablecer" ? await resetPasswordWithCode(input, dependencies) : await schoolAccess(input, dependencies);
         send(200, result);
       } catch (error) {
-        const codes = { "invalid-argument": 400, unauthenticated: 401, "resource-exhausted": 429, unavailable: 503 };
+        const codes = { "invalid-argument": 400, unauthenticated: 401, "not-found": 404, aborted: 409, "resource-exhausted": 429, unavailable: 503 };
         send(error instanceof SchoolAccessError ? codes[error.code] || 503 : 503, { code: error.code || "unavailable", error: error instanceof SchoolAccessError ? error.message : "Configura la credencial administrativa local para el acceso por usuario." });
       }
     };

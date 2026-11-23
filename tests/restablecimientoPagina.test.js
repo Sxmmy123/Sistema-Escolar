@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { confirmarRestablecimiento, destinoAccionFirebase, errorRestablecimiento, leerAccionCorreo, ocultarCorreo, verificarEnlaceRestablecimiento } from "../src/services/restablecimientoContrasena.js";
+import { RestablecerContrasenaView } from "../src/modules/login/RestablecerContrasena.js";
 
 const code = "codigo-de-prueba-valido";
 const href = `https://example.test/Sistema-Escolar/restablecer.html?mode=resetPassword&oobCode=${code}&apiKey=prueba`;
@@ -38,8 +39,8 @@ test("la validacion consulta Firebase y muestra el correo parcialmente oculto", 
 test("sin codigo, con contrasena corta o confirmacion distinta no se modifica la cuenta", async () => {
   let writes = 0;
   const confirmar = async () => { writes++; };
-  for (const changes of [{ code: "" }, { password: "123" }, { confirmation: "otra" }]) {
-    await assert.rejects(confirmarRestablecimiento({ auth: {}, code, password: "Segura123", confirmation: "Segura123", ...changes }, confirmar));
+  for (const changes of [{ code: "" }, { password: "123" }, { password: "123456789012", confirmation: "123456789012" }, { password: "a".repeat(129), confirmation: "a".repeat(129) }, { confirmation: "otra" }]) {
+    await assert.rejects(confirmarRestablecimiento({ auth: {}, code, password: "PersonalSegura2026", confirmation: "PersonalSegura2026", ...changes }, confirmar));
   }
   assert.equal(writes, 0);
 });
@@ -47,8 +48,25 @@ test("sin codigo, con contrasena corta o confirmacion distinta no se modifica la
 test("el cambio de clave usa solo el codigo validado y conserva exactamente lo escrito", async () => {
   let received;
   const auth = {};
-  await confirmarRestablecimiento({ auth, code, password: " Clave 123 ", confirmation: " Clave 123 " }, async (...args) => { received = args; });
-  assert.deepEqual(received, [auth, code, " Clave 123 "]);
+  await confirmarRestablecimiento({ auth, code, password: " ClavePersonal 123 ", confirmation: " ClavePersonal 123 " }, async (...args) => { received = args; });
+  assert.deepEqual(received, [auth, code, " ClavePersonal 123 "]);
+});
+
+test("la pagina pide la misma longitud que Cuenta y no permite volver a usar una confirmacion parcial", () => {
+  const html = RestablecerContrasenaView({ logo: "logo.png", loginHref: "./" });
+  assert.equal((html.match(/minlength="12" maxlength="128"/g) || []).length, 2);
+  assert.doesNotMatch(html, /Minimo 6|minlength="6"/);
+  assert.equal(errorRestablecimiento({ code: "functions/not-found" }).terminal, true);
+  assert.equal(errorRestablecimiento({ code: "functions/invalid-argument" }).field, true);
+  assert.equal(errorRestablecimiento({ code: "functions/aborted" }).terminal, true);
+  assert.match(errorRestablecimiento({ code: "functions/aborted" }).message, /nueva clave ya fue guardada/);
+});
+
+test("recuperar mantiene el cliente aislado y no importa la sesion persistente al abrir el enlace", () => {
+  const access = readFileSync(new URL("../src/services/accesoEscolar.js", import.meta.url), "utf8");
+  const recovery = readFileSync(new URL("../src/services/restablecimientoContrasena.js", import.meta.url), "utf8");
+  assert.doesNotMatch(access, /^import .*firebase\/client/gm);
+  assert.match(recovery, /firebaseApp: auth.app/);
 });
 
 test("los errores vencidos son terminales y los de red o contrasena permiten reintentar", () => {
@@ -74,7 +92,7 @@ function page(options = {}) {
   const toggle = node(); toggle.dataset.resetToggle = "password";
   const form = nodes.form;
   form.elements = { namedItem: (name) => name === "password" ? password : confirmation };
-  form.reportValidity = () => password.value.length >= 6 && confirmation.value.length >= 6;
+  form.reportValidity = () => password.value.length >= 12 && confirmation.value.length >= 12;
   form.reset = () => { password.value = ""; confirmation.value = ""; };
   form.querySelectorAll = () => [password, confirmation, submit, toggle];
   const root = { querySelector: (selector) => nodes[selector.match(/data-reset-([^\]]+)/)[1]], querySelectorAll: () => [toggle] };
@@ -92,7 +110,7 @@ test("solo se habilita el formulario despues de validar el enlace", async () => 
   let writes = 0;
   const fixture = page({ verificar: () => pending.promise, confirmar: async () => { writes++; } });
   assert.equal(fixture.nodes.loading.hidden, false);
-  fixture.password.value = fixture.confirmation.value = "Clave123";
+  fixture.password.value = fixture.confirmation.value = "ClavePersonal2026";
   await fixture.form.emit("submit");
   assert.equal(writes, 0);
   pending.resolve("docente@example.test"); await settle();
@@ -115,7 +133,7 @@ test("enlace vencido no permite escribir, mientras un fallo de red ofrece reinte
 test("guardar dos veces produce una sola operacion, limpia claves y muestra el exito", async () => {
   const pending = deferred(); let writes = 0;
   const fixture = page({ confirmar: () => { writes++; return pending.promise; } });
-  await settle(); fixture.password.value = fixture.confirmation.value = "Clave123";
+  await settle(); fixture.password.value = fixture.confirmation.value = "ClavePersonal2026";
   const first = fixture.form.emit("submit"); await fixture.form.emit("submit");
   assert.equal(writes, 1); assert.equal(fixture.submit.disabled, true);
   pending.resolve(); await first;
@@ -127,7 +145,7 @@ test("guardar dos veces produce una sola operacion, limpia claves y muestra el e
 test("una clave rechazada permite corregirla, y un codigo consumido cierra el formulario", async () => {
   let attempts = 0;
   const fixture = page({ confirmar: async () => { throw { code: ++attempts === 1 ? "auth/weak-password" : "auth/invalid-action-code" }; } });
-  await settle(); fixture.password.value = fixture.confirmation.value = "Clave123";
+  await settle(); fixture.password.value = fixture.confirmation.value = "ClavePersonal2026";
   await fixture.form.emit("submit");
   assert.equal(fixture.form.hidden, false); assert.equal(fixture.nodes["form-status"].hidden, false);
   await fixture.form.emit("submit");
