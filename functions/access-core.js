@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { MAIN_ADMIN_UID } from "./student-password-core.js";
+import { validateInitialPassword } from "./password-policy.js";
 export class SchoolAccessError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -29,6 +30,11 @@ export async function schoolAccess(input, { db, verifyPassword, sendReset, takeL
     if (!profile.alumnoId || profile.alumnoId.includes("/")) throw invalid();
     const student = (await db.doc(`alumnos/${profile.alumnoId}`).get()).data();
     if (student?.authUid !== verified.uid || student.activo === false) throw invalid();
+  }
+  let weak = false;
+  try { validateInitialPassword(input.password, profile?.usuario || key); } catch { weak = true; }
+  if (weak && profile && profile.passwordChangeRequired !== true) {
+    await db.doc(`usuarios/${verified.uid}`).update({ passwordChangeRequired: true });
   }
   // Solo una clave correcta permite resolver el correo; no se devuelve ningun token administrativo.
   return { email: verified.email || email };

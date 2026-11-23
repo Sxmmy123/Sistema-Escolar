@@ -42,12 +42,14 @@ function aplicacion(importadorEspecial = {}) {
     sessionStorage: { setItem() {}, removeItem() {}, clear() {} },
     Event, claveCache: (...parts) => parts.join(":"), gestionActual: () => configuracion.gestionActivaId,
     doc: (_, ...parts) => ({ path: parts.join("/") }),
+    getDocFromServer: async () => ({ data: () => ({}) }),
     onSnapshot: (ref, callback) => { snapshots.set(ref.path, callback); return () => snapshots.delete(ref.path); },
     auth, firestore: {}, VERSION_MODELO: 2,
     crearCargaPorRol: () => crearCargaPorRol(importadores),
     createIcons() {}, LogIn: {}, registerServiceWorker() {}, bindRegistroDocente() {}, bindAccountSettings() {}, initializeTheme() {}, bindThemeButtons() {}, limpiarDatosPrivados() {},
     setView: (markup) => { html = markup; },
     LoginView: () => "Pantalla login", bindLogin() {},
+    claveTemporalView: () => "Clave temporal", bindClaveTemporal() {},
     homeForRole: (rol) => rol ? `/${rol}` : "/",
     routeRequiredRole: (ruta) => roles.find((rol) => ruta.startsWith(`/${rol}`)) || "",
     resolveUserRole: async (usuario) => usuario.rol,
@@ -79,6 +81,16 @@ function aplicacion(importadorEspecial = {}) {
     cambiarGestion: (valor) => observar(valor)
   };
 }
+
+test("una clave temporal impide cargar cualquier modulo aunque se cambie la URL", async () => {
+  const app = aplicacion();
+  await app.sesion("alumno");
+  app.snapshots.get("usuarios/alumno")({ data: () => ({ passwordChangeRequired: true }) });
+  await app.render();
+  assert.match(app.html(), /Clave temporal/);
+  await app.navegar("/alumno/boleta");
+  assert.match(app.html(), /Clave temporal/);
+});
 
 test("crear el cargador no descarga ningun rol y rechaza roles desconocidos", async () => {
   let llamadas = 0;

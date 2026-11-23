@@ -1,10 +1,11 @@
 import { createLocalAdminClients } from "./dev-admin.js";
 import { schoolAccess, createAccessLimiter, firebasePasswordGateway, SchoolAccessError } from "./access-core.js";
+import { changeTemporaryPassword } from "./own-password-core.js";
 
 export function accessDevPlugin(env, firebase) {
   const clients = createLocalAdminClients(env, firebase);
   return { name: "acceso-escolar-local", apply: "serve", configureServer(server) {
-    server.middlewares.use("/api/acceso-escolar", async (request, response) => {
+    const handler = (ownPassword = false) => async (request, response) => {
       const send = (status, data) => { response.statusCode = status; response.setHeader("Content-Type", "application/json"); response.setHeader("Cache-Control", "no-store"); response.end(JSON.stringify(data)); };
       if (request.url && request.url !== "/") return send(404, { error: "Ruta no disponible." });
       if (request.method !== "POST") return send(405, { code: "invalid-argument", error: "Metodo no permitido." });
@@ -16,13 +17,22 @@ export function accessDevPlugin(env, firebase) {
         for await (const chunk of request) { body += chunk; if (body.length > 4096) return send(413, { error: "Solicitud demasiado grande." }); }
         let input;
         try { input = JSON.parse(body); } catch { return send(400, { error: "Solicitud no valida." }); }
-        const { db } = await clients();
-        const result = await schoolAccess(input, { db, ...firebasePasswordGateway(firebase.apiKey), takeLimit: createAccessLimiter(db, request.socket.remoteAddress) });
+        const { db, auth } = await clients();
+        const dependencies = { db, auth, ...firebasePasswordGateway(firebase.apiKey), takeLimit: createAccessLimiter(db, request.socket.remoteAddress) };
+        let actor;
+        if (ownPassword) {
+          const token = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
+          try { actor = await auth.verifyIdToken(token || "", true); }
+          catch { throw new SchoolAccessError("unauthenticated", "Vuelve a ingresar."); }
+        }
+        const result = ownPassword ? await changeTemporaryPassword({ auth: actor, data: input }, dependencies) : await schoolAccess(input, dependencies);
         send(200, result);
       } catch (error) {
         const codes = { "invalid-argument": 400, unauthenticated: 401, "resource-exhausted": 429, unavailable: 503 };
         send(error instanceof SchoolAccessError ? codes[error.code] || 503 : 503, { code: error.code || "unavailable", error: error instanceof SchoolAccessError ? error.message : "Configura la credencial administrativa local para el acceso por usuario." });
       }
-    });
+    };
+    server.middlewares.use("/api/cambiar-clave-temporal", handler(true));
+    server.middlewares.use("/api/acceso-escolar", handler());
   } };
 }

@@ -5,7 +5,8 @@ import { initializeApp, deleteApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { resetStudentPassword } from "../functions/student-password-core.js";
 import { resetStudentPasswordAsAdmin } from "../src/services/adminStudentPassword.js";
-import { changeOwnPassword } from "../src/services/accountSettings.js";
+import { changeTemporaryPassword } from "../functions/own-password-core.js";
+import { firebasePasswordGateway, createAccessLimiter } from "../functions/access-core.js";
 
 const projectId = "demo-sistema-seguridad";
 if (process.env.GCLOUD_PROJECT !== projectId || !/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || "") || !/^127\.0\.0\.1:\d+$/.test(process.env.FIREBASE_AUTH_EMULATOR_HOST || "")) {
@@ -39,7 +40,7 @@ test("administrador restablece en Authentication, alumno ingresa con temporal y 
     await batch.commit();
     const before = (await db.getAll(db.doc(`usuarios/${pupilUid}`), db.doc(`alumnos/${pupilId}`), grade, attendance)).map((item) => item.data());
     await signInWithEmailAndPassword(adminClient, "admin-reset@example.test", "Administrador2026");
-    await resetStudentPasswordAsAdmin({ student: { id: pupilId, authUid: pupilUid }, temporaryPassword: "Temporal2026", adminPassword: "Administrador2026" }, {
+    await resetStudentPasswordAsAdmin({ student: { id: pupilId, authUid: pupilUid }, temporaryPassword: "TemporalSegura2026", adminPassword: "Administrador2026" }, {
       authClient: adminClient,
       call: async (data, token) => {
         const decoded = await auth.verifyIdToken(token, true);
@@ -47,14 +48,18 @@ test("administrador restablece en Authentication, alumno ingresa con temporal y 
       }
     });
     await assert.rejects(signInWithEmailAndPassword(studentClient, "alumno-reset@example.test", "Anterior2026"));
-    const temporary = await signInWithEmailAndPassword(studentClient, "alumno-reset@example.test", "Temporal2026");
+    const temporary = await signInWithEmailAndPassword(studentClient, "alumno-reset@example.test", "TemporalSegura2026");
     assert.equal(temporary.user.uid, pupilUid);
-    await changeOwnPassword({ currentPassword: "Temporal2026", newPassword: "Personal2026", confirmPassword: "Personal2026" }, { authClient: studentClient });
+    assert.equal((await db.doc(`usuarios/${pupilUid}`).get()).data().passwordChangeRequired, true);
+    const token = await auth.verifyIdToken(await temporary.user.getIdToken());
+    const gateway = firebasePasswordGateway("demo-api-key", (url, options) => fetch(url.replace("https://identitytoolkit.googleapis.com", `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com`), options));
+    await changeTemporaryPassword({ auth: { uid: token.uid }, data: { currentPassword: "TemporalSegura2026", newPassword: "PersonalSegura2026" } }, { db, auth, ...gateway, takeLimit: createAccessLimiter(db, "127.0.0.1") });
+    assert.equal((await db.doc(`usuarios/${pupilUid}`).get()).data().passwordChangeRequired, false);
     await signOut(studentClient);
-    await assert.rejects(signInWithEmailAndPassword(studentClient, "alumno-reset@example.test", "Temporal2026"));
-    const personal = await signInWithEmailAndPassword(studentClient, "alumno-reset@example.test", "Personal2026");
+    await assert.rejects(signInWithEmailAndPassword(studentClient, "alumno-reset@example.test", "TemporalSegura2026"));
+    const personal = await signInWithEmailAndPassword(studentClient, "alumno-reset@example.test", "PersonalSegura2026");
     assert.equal(personal.user.uid, pupilUid);
-    assert.deepEqual((await db.getAll(db.doc(`usuarios/${pupilUid}`), db.doc(`alumnos/${pupilId}`), grade, attendance)).map((item) => item.data()), before);
+    assert.deepEqual((await db.getAll(db.doc(`alumnos/${pupilId}`), grade, attendance)).map((item) => item.data()), before.slice(1));
     assert.equal(adminClient.currentUser.uid, adminUid);
   } finally {
     await Promise.all(apps.map(deleteApp)); await db.terminate(); await deleteAdmin(serverApp);

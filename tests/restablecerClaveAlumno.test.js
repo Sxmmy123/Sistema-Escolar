@@ -16,7 +16,7 @@ function backendFixture({ uid = "administrador", profile = { rol: "admin", activ
     ["gestiones/2026/asistencias/asistencia-a", { alumnoId: "alumno-a", estado: "presente" }]
   ]);
   const updates = [];
-  const dependencies = { now, db: { doc: (path) => ({ get: async () => ({ data: () => documents.get(path) }) }) }, auth: { updateUser: async (target, patch) => { updates.push({ target, patch }); return { uid: target }; } } };
+  const dependencies = { now, db: { doc: (path) => ({ path, get: async () => ({ data: () => documents.get(path) }), update: async patch => documents.set(path, { ...documents.get(path), ...patch }) }), runTransaction: async callback => callback({ get: ref => ref.get(), set: (ref, data) => documents.set(ref.path, data), delete: ref => documents.delete(ref.path) }) }, auth: { updateUser: async (target, patch) => { updates.push({ target, patch }); return { uid: target }; } } };
   const request = { auth: { uid, token: { auth_time: now / 1000 } }, data: { ...input } };
   return { documents, updates, dependencies, request, run: () => resetStudentPassword(request, dependencies) };
 }
@@ -64,7 +64,9 @@ test("solo cambia password en el UID vinculado y no guarda claves en Firestore n
     const before = structuredClone([...fixture.documents]);
     assert.deepEqual(await fixture.run(), { alumnoId: input.alumnoId, uid: input.expectedUid });
     assert.deepEqual(fixture.updates, [{ target: input.expectedUid, patch: { password: input.temporaryPassword } }]);
-    assert.deepEqual([...fixture.documents], before);
+    assert.equal(fixture.documents.get(`usuarios/${input.expectedUid}`).passwordChangeRequired, true);
+    for (const [path, value] of before) if (path !== `usuarios/${input.expectedUid}`) assert.deepEqual(fixture.documents.get(path), value);
+    assert.ok(!JSON.stringify([...fixture.documents]).includes(input.temporaryPassword));
   }
 });
 

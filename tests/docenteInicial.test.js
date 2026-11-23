@@ -42,7 +42,12 @@ async function geminiPagesFixture({ rows = [], activity, key = "clave-demo", gen
   const api = vm.runInNewContext(`${source}; ({ generarCriteriosConIA, generarInformeConIA, geminiInicialDisponible })`, {
     env: { DEV: false, VITE_GEMINI_API_KEY: key, VITE_GEMINI_MODEL: "modelo-demo" },
     app: {}, firestore: {}, auth: authClient, cursoInicial, exigirTrimestreDocente,
-    getFunctions() { throw new Error("No debe usar Cloud Functions en modo directo."); },
+    getFunctions: () => ({}),
+    httpsCallable: (_, name) => async payload => {
+      calls.push({ name, payload });
+      if (name === "generarCriteriosInicial") return { data: await (generateCriteria || (async () => ({ criterios: criteria })))(payload) };
+      return { data: await (generateReport || (async () => ({ texto: "Comparte materiales y recorta con apoyo.", fuentesFirma: "1-abcd" })))(payload) };
+    },
     documentoGestion: (_, collection, id) => ({ collection, id }),
     getDoc: async (ref) => { calls.push({ read: ref }); return { data: () => activity }; },
     listarRegistrosInicial: async (...args) => { calls.push({ records: args }); return rows; },
@@ -53,40 +58,41 @@ async function geminiPagesFixture({ rows = [], activity, key = "clave-demo", gen
   return { api, calls, authClient };
 }
 
-test("GitHub Pages genera criterios directamente sin servidor y sin enviar alumnos", async () => {
+test("GitHub Pages pide criterios al servidor sin clave del proveedor ni datos de alumnos", async () => {
   const { api, calls } = await geminiPagesFixture();
   assert.equal(api.geminiInicialDisponible(), true);
   const borrador = { materiaId: "artes_plasticas", titulo: "Muneco", descripcion: "Construir con carton", alumnoId: "NO-ENVIAR" };
   const result = await api.generarCriteriosConIA(context, { cursoId: "inicial", trimestreId: "t1", borrador });
   assert.equal(Object.keys(result.criterios).length, 3);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].criteria.apiKey, "clave-demo");
-  assert.equal(calls[0].criteria.model, "modelo-demo");
-  assert.equal(calls[0].criteria.activity.alumnoId, undefined);
+  assert.equal(calls[0].name, "generarCriteriosInicial");
+  assert.equal(calls[0].payload.borrador.alumnoId, undefined);
+  assert.equal(calls[0].payload.apiKey, undefined);
 });
 
-test("la conexion directa valida la propiedad de una actividad guardada", async () => {
+test("la actividad guardada se valida en el servidor sin descargarla para invocar Gemini", async () => {
   const scope = { cursoId: "inicial", trimestreId: "t1", actividadId: "actividad" };
   const activity = { ...scope, docenteUid: context.uid, estado: "pendiente", materiaId: "lenguaje", titulo: "Vocales", descripcion: "Identificar vocales" };
   const valid = await geminiPagesFixture({ activity });
   await valid.api.generarCriteriosConIA(context, scope);
-  assert.equal(valid.calls[0].read.collection, "actividades_inicial");
-  const invalid = await geminiPagesFixture({ activity: { ...activity, docenteUid: "otro" } });
+  assert.equal(valid.calls[0].payload.actividadId, "actividad");
+  const invalid = await geminiPagesFixture({ generateCriteria: async () => { throw new Error("No puedes generar criterios para esta actividad."); } });
   await assert.rejects(invalid.api.generarCriteriosConIA(context, scope), /No puedes generar/);
   assert.equal(invalid.calls.length, 1);
 });
 
-test("el informe directo usa registros frescos de un solo alumno, sin informes anteriores", async () => {
+test("el informe se solicita solo por alumno, curso y trimestre al servidor", async () => {
   const rows = [{ id: "registro", ...observation }, { id: "otro", ...observation, alumnoId: "otro" }, { id: "informe", ...observation, tipo: "informe" }];
   const { api, calls } = await geminiPagesFixture({ rows });
   const result = await api.generarInformeConIA(context, { cursoId: "inicial", trimestreId: "t1", alumnoId: "alumno-a" });
-  assert.equal(calls[0].records[3].fresh, true);
-  assert.deepEqual(calls[1].report.records.map((row) => row.id), ["registro"]);
-  assert.equal(result.fuentesFirma, firmaRegistrosInicial(rows, "alumno-a"));
+  assert.equal(calls[0].name, "generarInformeInicial");
+  assert.equal(calls[0].payload.alumnoId, "alumno-a");
+  assert.equal(calls[0].payload.registros, undefined);
+  assert.equal(result.fuentesFirma, "1-abcd");
   assert.ok(result.texto.length <= 200);
 });
 
-test("Gemini directo no entrega respuestas a otra sesion ni oculta errores del proveedor", async () => {
+test("Gemini por servidor no entrega respuestas a otra sesion ni oculta errores del proveedor", async () => {
   const invalid = await geminiPagesFixture();
   invalid.authClient.currentUser = { uid: "otro" };
   await assert.rejects(invalid.api.generarInformeConIA(context, { cursoId: "inicial", trimestreId: "t1", alumnoId: "alumno-a" }), /sesion cambio/);
@@ -94,7 +100,7 @@ test("Gemini directo no entrega respuestas a otra sesion ni oculta errores del p
   const unavailable = await geminiPagesFixture({ generateCriteria: async () => { throw new Error("Gemini alcanzo su limite."); } });
   await assert.rejects(unavailable.api.generarCriteriosConIA(context, { cursoId: "inicial", trimestreId: "t1", borrador: { materiaId: "lenguaje", titulo: "Vocales", descripcion: "Reconocer vocales" } }), /limite/);
   const disabled = await geminiPagesFixture({ key: "" });
-  assert.equal(disabled.api.geminiInicialDisponible(), false);
+  assert.equal(disabled.api.geminiInicialDisponible(), true);
 });
 
 test("los informes de Flash Lite usan respuesta rapida sin cambiar el limite ni aprobarlos", async () => {

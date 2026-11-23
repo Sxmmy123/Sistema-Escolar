@@ -174,7 +174,7 @@ function accountPasswordField(name, label, autocomplete) {
   const id = `account-${name}`;
   return `<label class="mt-3 block text-xs font-semibold text-slate-700" for="${id}">${label}</label>
     <div class="relative mt-1.5">
-      <input id="${id}" class="min-h-11 w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-3 pr-12 text-sm outline-none focus:border-school-green focus:ring-2 focus:ring-school-green/10" name="${name}" type="password" autocomplete="${autocomplete}" ${autocomplete === "new-password" ? 'minlength="6"' : ""} required>
+      <input id="${id}" class="min-h-11 w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-3 pr-12 text-sm outline-none focus:border-school-green focus:ring-2 focus:ring-school-green/10" name="${name}" type="password" autocomplete="${autocomplete}" ${autocomplete === "new-password" ? 'minlength="12" maxlength="128"' : ""} required>
       <button type="button" class="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-lg text-slate-500 hover:bg-slate-100" data-account-toggle-password="${id}" aria-controls="${id}" aria-pressed="false" aria-label="Mostrar ${label.toLowerCase()}" title="Mostrar contrasena">
         <span data-account-eye>${icon("eye", "h-4 w-4")}</span><span data-account-eye-off class="hidden">${icon("eye-off", "h-4 w-4")}</span>
       </button>

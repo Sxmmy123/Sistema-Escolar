@@ -102,6 +102,7 @@ export async function createStudentAuthAccess(student, course = null, clients = 
         nombre: latest.nombre || usuario, usuario, authEmail, rol: "alumno", alumnoId: student.id,
         activo: latest.activo !== false && currentEnrollment.data().estado === "activo",
         ...(created || recoveredProfileMissing ? { createdAt: serverTimestamp(), createdBy: adminUid, correoRecuperacion: requestedEmail || latest.correo || null } : {}),
+        ...(created ? { passwordChangeRequired: true } : {}),
         updatedAt: serverTimestamp()
       }, { merge: true });
       transaction.update(studentRef, { authUid: uid, authEmail, password: deleteField(), updatedAt: serverTimestamp() });

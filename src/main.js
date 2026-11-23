@@ -1,6 +1,6 @@
 import { createIcons, LogIn } from "lucide";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, getDocFromServer, onSnapshot } from "firebase/firestore";
 import "./styles.css";
 import "./theme.css";
 import "./firebase/client.js";
@@ -18,6 +18,7 @@ import { bindAccountSettings } from "./ui/accountSettings.js";
 import { initializeTheme, bindThemeButtons } from "./ui/theme.js";
 import { registerServiceWorker } from "./pwa/registerServiceWorker.js";
 import { limpiarDatosPrivados } from "./services/cachePrivada.js";
+import { claveTemporalView, bindClaveTemporal } from "./ui/claveTemporal.js";
 
 initializeTheme();
 try { limpiarDatosPrivados([localStorage]); } catch { /* Almacenamiento bloqueado. */ }
@@ -29,11 +30,13 @@ let authReady = false;
 let authRevision = 0;
 let activeUser = null;
 let activeRole = "";
+let passwordChangeRequired = false;
 let renderRevision = 0;
 let moduloMontado = null;
 let shellBindingsController = null;
 let stopConfigurationWatch = null;
 let stopTeacherAccessWatch = null;
+let stopPasswordWatch = null;
 let configurationNeedsReload = false;
 
 const TEACHER_SIDEBAR_COLLAPSE_KEY = "colegio-sidebar-docente-colapsado";
@@ -63,6 +66,7 @@ function clearSession() {
   limpiarDatosPrivados();
   activeUser = null;
   activeRole = "";
+  passwordChangeRequired = false;
 }
 
 async function doLogout() {
@@ -226,6 +230,16 @@ async function render() {
       return;
     }
 
+    if (activeUser && passwordChangeRequired) {
+      if (document.querySelector("[data-temporary-password-form]")) return;
+      desmontarRol();
+      shellBindingsController?.abort();
+      shellBindingsController = new AbortController();
+      setView(claveTemporalView());
+      bindClaveTemporal({ signal: shellBindingsController.signal, logout: doLogout });
+      return;
+    }
+
     if (configurationNeedsReload) {
       desmontarRol();
       shellBindingsController?.abort();
@@ -316,10 +330,13 @@ onAuthStateChanged(auth, async (user) => {
   stopConfigurationWatch = null;
   stopTeacherAccessWatch?.();
   stopTeacherAccessWatch = null;
+  stopPasswordWatch?.();
+  stopPasswordWatch = null;
   configurationNeedsReload = false;
   authReady = false;
   activeUser = null;
   activeRole = "";
+  passwordChangeRequired = false;
   setView(loadingView());
 
   try {
@@ -327,6 +344,13 @@ onAuthStateChanged(auth, async (user) => {
       clearSession();
     } else {
       const role = await resolveUserRole(user);
+      const profile = await getDocFromServer(doc(firestore, "usuarios", user.uid));
+      if (revision !== authRevision || auth.currentUser?.uid !== user.uid) return;
+      passwordChangeRequired = profile.data()?.passwordChangeRequired === true;
+      if (passwordChangeRequired) {
+        activeUser = user; activeRole = role;
+        return;
+      }
       try {
         await cargarConfiguracion(firestore);
       } catch (error) {
@@ -337,6 +361,14 @@ onAuthStateChanged(auth, async (user) => {
       activeUser = user;
       activeRole = role;
       rememberSession(role, user);
+      stopPasswordWatch = onSnapshot(doc(firestore, "usuarios", user.uid), snapshot => {
+        if (revision !== authRevision) return;
+        if (snapshot.data()?.passwordChangeRequired === true && !passwordChangeRequired) {
+          passwordChangeRequired = true;
+          limpiarDatosPrivados();
+          if (authReady) render();
+        }
+      }, error => console.warn("No se pudo verificar la clave temporal", error));
       if (role === "docente") {
         const stopProfile = onSnapshot(doc(firestore, "usuarios", user.uid), (snapshot) => {
           if (revision !== authRevision) return;

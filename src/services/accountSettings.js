@@ -6,6 +6,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, writeBatch } from "firebase/firestore";
 import { auth, firestore } from "../firebase/client.js";
+import { validateInitialPassword } from "../../functions/password-policy.js";
 
 function currentUser(authClient = auth) {
   const user = authClient.currentUser;
@@ -68,8 +69,9 @@ export async function setRecoveryEmail({ email, currentPassword }) {
 
 export async function changeOwnPassword({ currentPassword, newPassword, confirmPassword }, { authClient = auth, reauthenticate = reauthenticateWithCredential, update = updatePassword } = {}) {
   const cleanNew = String(newPassword || "");
-  if (cleanNew.length < 6) throw new Error("La nueva contrasena debe tener al menos 6 caracteres.");
+  try { validateInitialPassword(cleanNew); } catch (error) { throw new Error(error.message.replaceAll("temporal", "nueva")); }
   if (cleanNew !== String(confirmPassword || "")) throw new Error("La confirmacion no coincide.");
+  if (cleanNew === currentPassword) throw new Error("Elige una clave diferente de la actual.");
 
   const user = await reauth(currentPassword, { authClient, reauthenticate });
   await update(user, cleanNew);

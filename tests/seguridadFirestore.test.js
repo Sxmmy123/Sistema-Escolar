@@ -64,6 +64,8 @@ const col = (actor, group) => anual.has(group) ? coleccionGestion(actor.firestor
 const ref = (actor, group, id) => doc(col(actor, group), id);
 const get = (actor, group, id) => getDocFromServer(ref(actor, group, id));
 const denied = (operation) => assert.rejects(operation, (error) => error.code === "permission-denied");
+// Otras pruebas ejercitan modulos ya habilitados; el cambio obligatorio se prueba aparte.
+const habilitarFixture = uid => updateDoc(ref(admin, "usuarios", uid), { passwordChangeRequired: false });
 const activity = (changes = {}) => ({ cursoId: "cuarto_a", materiaId: "matematica", trimestreId: "t2", creadoPorUid: "docente-a", maximo: 100, titulo: "Ejercicios", fecha: "2026-09-22", tipo: "tarea", activo: true, estadoRevision: "sin_iniciar", ...changes });
 const grade = (changes = {}) => ({ actividadId: "tarea-a", alumnoId: "alumno-a", cursoId: "cuarto_a", materiaId: "matematica", trimestreId: "t2", calificadoPorUid: "docente-a", valor: 80, nota: 80, maximo: 100, estadoEntrega: "a_tiempo", fechaEntrega: "2026-09-22", ...changes });
 const attendance = (changes = {}) => ({ cursoId: "cuarto_a", alumnoId: "alumno-a", fecha: "2026-09-22", trimestreId: "t2", estado: "presente", registradoPorUid: "docente-a", ...changes });
@@ -123,6 +125,16 @@ after(async () => {
   await signOut(migratedStudent.auth);
   for (const database of databases) await terminate(database);
   for (const app of apps) await deleteApp(app);
+});
+
+test("una clave temporal bloquea datos academicos para todos los roles sin permitir quitar su marca", async () => {
+  for (const [actor, uid] of [[student, "alumno-auth-a"], [teacher, "docente-a"], [director, "director-a"], [admin, "admin-prueba"]]) {
+    await updateDoc(ref(bootstrapAdmin, "usuarios", uid), { passwordChangeRequired: true });
+    assert.equal((await get(actor, "usuarios", uid)).data().passwordChangeRequired, true);
+    await denied(get(actor, "calificaciones", "nota-a"));
+    await denied(updateDoc(ref(actor, "usuarios", uid), { passwordChangeRequired: false }));
+    await updateDoc(ref(bootstrapAdmin, "usuarios", uid), { passwordChangeRequired: false });
+  }
 });
 
 test("sin autenticacion no se leen contrasenas, alumnos, asistencias, actividades ni notas", async () => {
@@ -596,6 +608,8 @@ test("crear acceso usa un solo perfil y un indice minimo, sin alterar datos acad
   await setDoc(ref(admin, "asistencias", "asistencia-migracion"), attendance({ alumnoId: pupil.id }));
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
   const result = await createStudentAuthAccess(pupil, { id: "cuarto_a" }, clients);
+  assert.equal((await get(admin, "usuarios", result.uid)).data().passwordChangeRequired, true);
+  await habilitarFixture(result.uid);
   assert.equal(result.created, true);
   assert.equal(result.password.length, 16);
   assert.equal(creator.auth.currentUser, null);
@@ -635,6 +649,7 @@ test("el alumno cambia su clave con la actual y vuelve a ingresar conservando UI
   const input = { currentPassword: "incorrecta", newPassword: "ClaveNueva2026", confirmPassword: "ClaveNueva2026" };
   await assert.rejects(changeOwnPassword(input, { authClient: learner.auth }), (error) => ["auth/invalid-credential", "auth/wrong-password", "auth/invalid-login-credentials"].includes(error.code));
   await changeOwnPassword({ ...input, currentPassword: access.password }, { authClient: learner.auth });
+  await habilitarFixture(access.uid);
   await signOut(learner.auth);
   await assert.rejects(signInWithEmailAndPassword(learner.auth, access.authEmail, access.password), (error) => ["auth/invalid-credential", "auth/wrong-password"].includes(error.code));
   const credential = await signInWithEmailAndPassword(learner.auth, access.authEmail, "ClaveNueva2026");
@@ -694,6 +709,7 @@ test("un alumno nuevo puede ingresar y cargar su panel sin accesos antiguos ni c
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
   const result = await createStudentAuthAccess(pupil, { id: "cuarto_a" }, clients);
   assert.equal(result.created, true);
+  await habilitarFixture(result.uid);
   assert.equal(result.password.length, 16);
   await setDoc(ref(admin, "calificaciones", "nota-alumno-nuevo"), grade({ alumnoId: pupil.id }));
   await setDoc(ref(admin, "asistencias", "asistencia-alumno-nuevo"), attendance({ alumnoId: pupil.id }));
@@ -729,6 +745,7 @@ test("la tabla crea acceso seguro, o con correo real y clave manual, y permite i
     assert.equal(access.uid, result.student.authUid);
     assert.equal(access.authEmail, index === 0 ? usernameToAuthEmail("88000551") : "alumno-tabla@demo.test");
     await signInWithEmailAndPassword(login.auth, access.authEmail, rows[index].password);
+    await habilitarFixture(access.uid);
     const context = await getStudentContext({ auth: login.auth, firestore: login.firestore });
     assert.equal(context.student.id, result.student.id);
     await denied(get(login, "alumnos", results[1 - index].student.id));
@@ -1106,11 +1123,13 @@ test("si falla el alta del perfil del docente tambien se revierte Authentication
 test("reemplazar crea acceso y reparte trimestres atomicamente sin borrar ni desactivar al anterior", async () => {
   const clients = { auth: { currentUser: { uid: "admin-prueba" } }, creatorAuth: creator.auth, firestore: admin.firestore };
   const oldTeacher = await createSystemUser({ nombre: "Docente anterior", username: "relevoanterior", emailRecuperacion: "relevo.anterior@example.test", password: "Temporal123456", rol: "docente", asignaciones: { cuarto_a: { materias: ["matematica"] } } }, clients);
+  await habilitarFixture(oldTeacher.id);
   const source = client("relevo-origen", oldTeacher.id);
   await setDoc(ref(source, "actividades", "relevo-historico"), activity({ trimestreId: "t1", creadoPorUid: oldTeacher.id }));
   await guardarNota(source, "relevo-nota-historica", grade({ actividadId: "relevo-historico", trimestreId: "t1", calificadoPorUid: oldTeacher.id }));
   const before = (await get(admin, "calificaciones", "relevo-nota-historica")).data();
   const replacement = await createSystemUser({ nombre: "Docente nuevo", username: "relevonuevo", emailRecuperacion: "relevo.nuevo@example.test", password: "Temporal123456", rol: "docente", reemplazo: { docenteUid: oldTeacher.id, trimestreInicio: "t2" } }, clients);
+  await habilitarFixture(replacement.id);
   const target = client("relevo-destino", replacement.id);
   const oldAssignment = (await get(admin, "asignaciones", oldTeacher.id)).data();
   const newAssignment = (await get(admin, "asignaciones", replacement.id)).data();

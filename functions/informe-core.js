@@ -16,7 +16,7 @@ export function validarAccesoInforme({ uid, profile, config, assignment, enrollm
 }
 export function validarAccesoInicial({ uid, profile, config, assignment, input, year }) {
   const courses = assignment?.cursos || assignment?.asignaciones || {};
-  if (!uid || profile?.rol !== "docente" || profile.activo !== true) throw new Error("permission-denied");
+  if (!uid || profile?.rol !== "docente" || profile.activo !== true || profile.passwordChangeRequired === true) throw new Error("permission-denied");
   if (!input || !["inicial", "preinicial"].includes(input.cursoId) || !["t1", "t2", "t3"].includes(input.trimestreId) || !/^20\d{2}$/.test(input.gestionId || "")) throw new Error("invalid-argument");
   if (config?.versionModelo !== 2 || config.gestionHabilitada !== true || config.gestionActivaId !== input.gestionId || input.gestionId !== year) throw new Error("failed-precondition");
   if (!Object.keys(courses).length || Object.keys(courses).some((id) => !["inicial", "preinicial"].includes(id)) || !Object.hasOwn(courses, input.cursoId) || !(assignment.trimestres || ["t1", "t2", "t3"]).includes(input.trimestreId)) throw new Error("permission-denied");

@@ -25,4 +25,16 @@
 
 No ejecutar borrados de cuentas, cambios de claves existentes ni importaciones academicas para publicar estos cambios. No incluir .env, JSON administrativos ni credenciales locales en Git.
 
-El modo directo opcional de Gemini para demostracion sigue disponible: VITE_GEMINI_API_KEY es visible en una compilacion del navegador si se configura. Para una puesta en produccion, utilizar las funciones con GEMINI_API_KEY del servidor.
+## Gemini y claves temporales
+
+- Se retiro el modo directo y las variables VITE de Gemini del proceso de compilacion. La pagina invoca funciones autenticadas; el desarrollo local usa sus rutas de servidor.
+- Las claves que estuvieron en compilaciones antiguas deben rotarse. Retirarlas del navegador no revoca copias anteriores. Antes de rotar, comprobar si otras aplicaciones usan la misma clave.
+- Las altas nuevas y los restablecimientos administrativos marcan passwordChangeRequired. Las cuentas existentes con clave debil se marcan al ingresar por usuario o correo, sin cambiar su contrasena.
+- Las sesiones antiguas no se marcan masivamente: la deteccion de una clave debil ocurre en el siguiente ingreso por el formulario. Authentication no permite consultar la clave anterior.
+- La pantalla obligatoria no abre modulos privados hasta completar el cambio. Firestore bloquea los permisos academicos de los perfiles pendientes; estos pueden leer su propio perfil y configuracion general, pero no quitarse la marca desde el navegador.
+- cambiarClaveTemporal comprueba la clave actual contra Authentication, exige una nueva diferente de 12 a 128 caracteres y serializa los cambios por cuenta con el restablecimiento administrativo.
+- No se guardan claves en Firestore, caches ni auditoria. Un identificador de operacion y vencimiento impide cambios simultaneos; la marca se limpia solo al terminar.
+- Si Authentication cambia la clave pero Firestore falla al confirmar, la marca permanece y el mensaje indica volver a ingresar con la nueva clave. No se finge un exito ni se abre el panel.
+- La pantalla muestra el acierto y cierra la sesion tras el cambio; el siguiente ingreso usa la nueva clave. El formulario normal de Cuenta tambien exige el minimo de 12 caracteres.
+
+Publicar primero cambiarClaveTemporal, despues la interfaz, luego accesoEscolar/restablecerClaveAlumno y las reglas. No desplegar la deteccion automatica antes de que la pagina pueda resolverla. No probar cambios de claves reales sin autorizacion; el ciclo completo se verifica en emuladores.

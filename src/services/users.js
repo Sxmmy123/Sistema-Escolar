@@ -26,7 +26,6 @@ export function usernameToAuthEmail(username) {
 
 export async function authEmailForLogin(login, options = {}) {
   const value = String(login || "").trim();
-  if (value.includes("@")) return value.toLowerCase();
 
   const result = await (options.solicitar || solicitarAccesoEscolar)({ accion: "ingresar", login: value, password: options.password });
   if (typeof result?.email !== "string" || !result.email.includes("@")) throw new Error("El servicio de acceso no devolvio una cuenta valida.");
@@ -91,6 +90,7 @@ export async function createSystemUser({ nombre, username, emailRecuperacion, pa
     rol: cleanRole,
     ...modality,
     activo: true,
+    passwordChangeRequired: true,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdBy: adminUid

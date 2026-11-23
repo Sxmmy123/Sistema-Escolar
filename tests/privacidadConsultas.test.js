@@ -51,7 +51,7 @@ test("el navegador no consulta un indice publico ni resuelve usuarios sin enviar
   let received;
   assert.equal(await authEmailForLogin("Yola000", { password: "existente", solicitar: async (payload) => { received = payload; return { email: "privado@example.test" }; } }), "privado@example.test");
   assert.deepEqual(received, { accion: "ingresar", login: "Yola000", password: "existente" });
-  assert.equal(await authEmailForLogin("PERSONA@example.test"), "persona@example.test");
+  assert.equal(await authEmailForLogin("PERSONA@example.test", { password: "existente", solicitar: async () => ({ email: "persona@example.test" }) }), "persona@example.test");
   const source = readFileSync(new URL("../src/services/users.js", import.meta.url), "utf8");
   assert.doesNotMatch(source.slice(source.indexOf("export async function authEmailForLogin"), source.indexOf("export function formatUsername")), /getDoc|indice_accesos/);
 });
@@ -145,13 +145,13 @@ test("la tendencia lee completos siete dias, aunque un solo dia tenga mas de 800
   } });
   assert.equal(calls, 8); assert.equal(result.length, 6307);
 });
-test("Gemini filtra por alumno en el servidor, local y navegador sin quitar SER, SABER, HACER ni Bitacora", () => {
+test("Gemini filtra por alumno en el servidor sin exponer su clave ni consultar al proveedor desde el navegador", () => {
   const cloud = readFileSync(new URL("../functions/index.js", import.meta.url), "utf8");
   const local = readFileSync(new URL("../functions/dev-gemini.js", import.meta.url), "utf8");
   const client = readFileSync(new URL("../src/services/informeInicialIA.js", import.meta.url), "utf8");
   assert.match(cloud, /\.where\("alumnoId", "==", input.alumnoId\)/);
   assert.match(local, /\["alumnoId", input.alumnoId\]/);
-  assert.match(client, /fresh: true, alumnoId: input.alumnoId/);
+  assert.doesNotMatch(client, /VITE_GEMINI_API_KEY|geminiDirecto|generarConGemini\(/);
 });
 test("los parametros de Functions no usan prefijos reservados por Firebase", () => {
   const cloud = readFileSync(new URL("../functions/index.js", import.meta.url), "utf8");

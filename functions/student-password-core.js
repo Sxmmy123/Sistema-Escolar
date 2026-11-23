@@ -1,4 +1,6 @@
 import { validateInitialPassword } from "./password-policy.js";
+import { randomUUID } from "node:crypto";
+import { withPasswordOperation } from "./password-operation.js";
 
 export const MAIN_ADMIN_UID = "6GJAf3WiBaVBXypSDDR1xKLalnq2";
 
@@ -12,7 +14,8 @@ const validId = (value) => typeof value === "string" && value.length > 0 && valu
 export async function resetStudentPassword(request, { db, auth, now = Date.now() }) {
   const actor = request.auth;
   if (!actor?.uid) fail("unauthenticated", "Inicia sesion como administrador.");
-  const administrator = actor.uid === MAIN_ADMIN_UID ? null : (await db.doc(`usuarios/${actor.uid}`).get()).data();
+  const administrator = (await db.doc(`usuarios/${actor.uid}`).get()).data();
+  if (administrator?.passwordChangeRequired === true) fail("permission-denied", "Cambia primero tu contrasena temporal.");
   if (actor.uid !== MAIN_ADMIN_UID && (administrator?.rol !== "admin" || administrator.activo !== true)) {
     fail("permission-denied", "Solo administracion puede restablecer contrasenas de alumnos.");
   }
@@ -37,8 +40,12 @@ export async function resetStudentPassword(request, { db, auth, now = Date.now()
     fail("permission-denied", "La cuenta no corresponde a este alumno. No se modifico ninguna clave.");
   }
   try {
-    await auth.updateUser(uid, { password: input.temporaryPassword });
+    await withPasswordOperation(db, uid, async () => {
+      await db.doc(`usuarios/${uid}`).update({ passwordChangeRequired: true, passwordChangeVersion: randomUUID() });
+      await auth.updateUser(uid, { password: input.temporaryPassword });
+    });
   } catch (error) {
+    if (error.code === "password-operation-busy") fail("failed-precondition", error.message);
     if (error.code === "auth/user-not-found") fail("failed-precondition", "La cuenta no existe en Authentication. Revisa su acceso.");
     if (["auth/invalid-password", "auth/password-does-not-meet-requirements"].includes(error.code)) fail("invalid-argument", "La clave temporal no cumple los requisitos de Firebase.");
     fail("unavailable", "No se pudo confirmar el restablecimiento. Revisa la conexion antes de reintentar.");

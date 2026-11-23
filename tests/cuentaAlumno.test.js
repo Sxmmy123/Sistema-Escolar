@@ -12,7 +12,7 @@ test("alumno tiene acceso al cambio de clave desde ambos menus y sin formulario 
     assert.doesNotMatch(html, /data-account-email-form|Cuenta docente/);
     assert.match(html, /role="dialog" aria-modal="true" aria-labelledby="account-modal-title"/);
     assert.match(html, /name="currentPassword" type="password" autocomplete="current-password"/);
-    assert.match(html, /name="newPassword" type="password" autocomplete="new-password" minlength="6"/);
+    assert.match(html, /name="newPassword" type="password" autocomplete="new-password" minlength="12"/);
     assert.match(html, /data-account-password-success role="status"/);
     assert.match(html, /data-lucide="circle-check"/);
   }
@@ -23,23 +23,23 @@ test("alumno tiene acceso al cambio de clave desde ambos menus y sin formulario 
 
 test("validar longitud y confirmacion no requiere una cuenta ni llama a Firebase", async () => {
   const dependencies = { authClient: { get currentUser() { assert.fail("La validacion debe terminar antes de consultar la sesion"); } } };
-  await assert.rejects(changeOwnPassword({ newPassword: "123", confirmPassword: "123" }, dependencies), /6 caracteres/);
+  await assert.rejects(changeOwnPassword({ newPassword: "123", confirmPassword: "123" }, dependencies), /12 y 128/);
   await assert.rejects(changeOwnPassword({ newPassword: "ClaveNueva2026", confirmPassword: "distinta" }, dependencies), /no coincide/);
 });
 
 test("cambiar clave verifica la actual y conserva exactamente la nueva, tambien con alias interno", async () => {
   const user = { uid: "alumno-a", email: "990001@usuarios.ue-nueva-bolivia.edu.bo" };
   const calls = [];
-  await changeOwnPassword({ currentPassword: "123456", newPassword: "  Nueva2026  ", confirmPassword: "  Nueva2026  " }, {
+  await changeOwnPassword({ currentPassword: "123456", newPassword: "  NuevaPersonal2026  ", confirmPassword: "  NuevaPersonal2026  " }, {
     authClient: { currentUser: user },
     reauthenticate: async (target, credential) => { assert.strictEqual(target, user); assert.equal(credential.providerId, "password"); calls.push("verificar"); },
-    update: async (target, value) => { assert.strictEqual(target, user); assert.equal(value, "  Nueva2026  "); calls.push("cambiar"); }
+    update: async (target, value) => { assert.strictEqual(target, user); assert.equal(value, "  NuevaPersonal2026  "); calls.push("cambiar"); }
   });
   assert.deepEqual(calls, ["verificar", "cambiar"]);
 });
 
 test("una clave actual incorrecta o un cambio de sesion impiden actualizar la contrasena", async () => {
-  const input = { currentPassword: "123456", newPassword: "Nueva2026", confirmPassword: "Nueva2026" };
+  const input = { currentPassword: "123456", newPassword: "NuevaPersonal2026", confirmPassword: "NuevaPersonal2026" };
   const authClient = { currentUser: { uid: "a", email: "a@example.test" } };
   const update = async () => assert.fail("No debe cambiar la clave");
   await assert.rejects(changeOwnPassword(input, { authClient, reauthenticate: async () => { throw Object.assign(new Error("Incorrecta"), { code: "auth/invalid-credential" }); }, update }), { code: "auth/invalid-credential" });

@@ -7,12 +7,20 @@ import { generarConGemini, validarAccesoInforme, validarAccesoInicial } from "./
 import { generarCriteriosGemini, validarAccesoActividad, validarBorradorCriterios } from "./criterios-core.js";
 import { resetStudentPassword, StudentPasswordError } from "./student-password-core.js";
 import { schoolAccess, createAccessLimiter, firebasePasswordGateway, SchoolAccessError } from "./access-core.js";
+import { changeTemporaryPassword } from "./own-password-core.js";
 
 initializeApp();
 const apiKey = defineSecret("GEMINI_API_KEY");
 const model = defineString("GEMINI_MODEL");
 const db = getFirestore();
 const firebaseWebApiKey = defineString("SCHOOL_WEB_API_KEY", { default: "AIzaSyA4O57tFObeRLbl3KSGOO2GdQt5cPpgUgU" });
+export const cambiarClaveTemporal = onCall({ region: "us-central1", timeoutSeconds: 30, maxInstances: 2, concurrency: 10 }, async request => {
+  try { return await changeTemporaryPassword(request, { db, auth: getAuth(), ...firebasePasswordGateway(firebaseWebApiKey.value()), takeLimit: createAccessLimiter(db, request.rawRequest.ip) }); }
+  catch (error) {
+    if (error instanceof SchoolAccessError) throw new HttpsError(error.code, error.message);
+    throw new HttpsError("unavailable", "No se pudo completar el cambio de clave. Intenta nuevamente.");
+  }
+});
 export const accesoEscolar = onCall({ region: "us-central1", timeoutSeconds: 30, maxInstances: 2, concurrency: 20 }, async (request) => {
   try { return await schoolAccess(request.data, { db, ...firebasePasswordGateway(firebaseWebApiKey.value()), takeLimit: createAccessLimiter(db, request.rawRequest.ip) }); }
   catch (error) {
