@@ -137,6 +137,35 @@ test("una clave temporal bloquea datos academicos para todos los roles sin permi
   }
 });
 
+test("demostracion permite claves pendientes sin ampliar los permisos ni borrar su marca", async () => {
+  await updateDoc(ref(admin, "configuracion", "sistema"), { modoDemostracion: true });
+  try {
+    for (const [actor, uid] of [[student, "alumno-auth-a"], [teacher, "docente-a"], [director, "director-a"], [admin, "admin-prueba"]]) {
+      await updateDoc(ref(bootstrapAdmin, "usuarios", uid), { passwordChangeRequired: true });
+      assert.equal((await get(actor, "calificaciones", "nota-a")).exists(), true);
+      if (actor !== admin) await denied(updateDoc(ref(actor, "usuarios", uid), { passwordChangeRequired: false }));
+      assert.equal((await get(actor, "usuarios", uid)).data().passwordChangeRequired, true);
+    }
+    await denied(get(student, "calificaciones", "nota-companero"));
+    await denied(get(teacher, "calificaciones", "nota-b"));
+    await denied(get(anonymous, "calificaciones", "nota-a"));
+    await denied(updateDoc(ref(student, "usuarios", "alumno-auth-a"), { rol: "admin" }));
+    for (const actor of [student, teacher, director]) {
+      await denied(updateDoc(ref(actor, "configuracion", "sistema"), { modoDemostracion: false }));
+    }
+    await updateDoc(ref(teacher, "asistencias", "asistencia-a"), { estado: "presente" });
+    await guardarNota(teacher, "nota-a", grade());
+    await updateDoc(ref(bootstrapAdmin, "configuracion", "sistema"), { modoDemostracion: false });
+    await denied(get(student, "calificaciones", "nota-a"));
+    await denied(get(teacher, "calificaciones", "nota-a"));
+  } finally {
+    for (const uid of ["alumno-auth-a", "docente-a", "director-a", "admin-prueba"]) {
+      await updateDoc(ref(bootstrapAdmin, "usuarios", uid), { passwordChangeRequired: false });
+    }
+    await updateDoc(ref(bootstrapAdmin, "configuracion", "sistema"), { modoDemostracion: false });
+  }
+});
+
 test("sin autenticacion no se leen contrasenas, alumnos, asistencias, actividades ni notas", async () => {
   for (const [group, id] of [["accesos_alumnos", "acceso-antiguo"], ["alumnos", "alumno-a"], ["asistencias", "asistencia-a"], ["actividades", "tarea-a"], ["calificaciones", "nota-a"]]) await denied(get(anonymous, group, id));
   await denied(get(anonymous, "indice_accesos", "docente-a"));
@@ -648,8 +677,8 @@ test("el alumno cambia su clave con la actual y vuelve a ingresar conservando UI
   await signInWithEmailAndPassword(learner.auth, access.authEmail, access.password);
   const input = { currentPassword: "incorrecta", newPassword: "ClaveNueva2026", confirmPassword: "ClaveNueva2026" };
   await assert.rejects(changeOwnPassword(input, { authClient: learner.auth }), (error) => ["auth/invalid-credential", "auth/wrong-password", "auth/invalid-login-credentials"].includes(error.code));
-  await changeOwnPassword({ ...input, currentPassword: access.password }, { authClient: learner.auth });
   await habilitarFixture(access.uid);
+  await changeOwnPassword({ ...input, currentPassword: access.password }, { authClient: learner.auth, readProfile: async uid => (await get(learner, "usuarios", uid)).data() });
   await signOut(learner.auth);
   await assert.rejects(signInWithEmailAndPassword(learner.auth, access.authEmail, access.password), (error) => ["auth/invalid-credential", "auth/wrong-password"].includes(error.code));
   const credential = await signInWithEmailAndPassword(learner.auth, access.authEmail, "ClaveNueva2026");

@@ -8,3 +8,7 @@ export function validateInitialPassword(value, identifier = "") {
   }
   return value;
 }
+
+export function passwordChangeBlocksAccess(profile, config = {}) {
+  return profile?.passwordChangeRequired === true && config?.modoDemostracion !== true;
+}

@@ -1,4 +1,4 @@
-import { validateInitialPassword } from "./password-policy.js";
+import { validateInitialPassword, passwordChangeBlocksAccess } from "./password-policy.js";
 import { randomUUID } from "node:crypto";
 import { withPasswordOperation } from "./password-operation.js";
 
@@ -15,7 +15,7 @@ export async function resetStudentPassword(request, { db, auth, now = Date.now()
   const actor = request.auth;
   if (!actor?.uid) fail("unauthenticated", "Inicia sesion como administrador.");
   const administrator = (await db.doc(`usuarios/${actor.uid}`).get()).data();
-  if (administrator?.passwordChangeRequired === true) fail("permission-denied", "Cambia primero tu contrasena temporal.");
+  if (administrator?.passwordChangeRequired === true && passwordChangeBlocksAccess(administrator, (await db.doc("configuracion/sistema").get()).data())) fail("permission-denied", "Cambia primero tu contrasena temporal.");
   if (actor.uid !== MAIN_ADMIN_UID && (administrator?.rol !== "admin" || administrator.activo !== true)) {
     fail("permission-denied", "Solo administracion puede restablecer contrasenas de alumnos.");
   }

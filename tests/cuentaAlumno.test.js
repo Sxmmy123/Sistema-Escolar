@@ -32,10 +32,23 @@ test("cambiar clave verifica la actual y conserva exactamente la nueva, tambien 
   const calls = [];
   await changeOwnPassword({ currentPassword: "123456", newPassword: "  NuevaPersonal2026  ", confirmPassword: "  NuevaPersonal2026  " }, {
     authClient: { currentUser: user },
+    readProfile: async () => ({}),
     reauthenticate: async (target, credential) => { assert.strictEqual(target, user); assert.equal(credential.providerId, "password"); calls.push("verificar"); },
     update: async (target, value) => { assert.strictEqual(target, user); assert.equal(value, "  NuevaPersonal2026  "); calls.push("cambiar"); }
   });
   assert.deepEqual(calls, ["verificar", "cambiar"]);
+});
+
+test("cambiar desde Cuenta tambien completa la marca temporal y solicita un nuevo ingreso", async () => {
+  let completed = false;
+  const result = await changeOwnPassword({ currentPassword: "123456", newPassword: "ClavePersonal2026", confirmPassword: "ClavePersonal2026" }, {
+    authClient: { currentUser: { uid: "alumno", email: "alumno@example.test" } },
+    reauthenticate: async () => {}, readProfile: async () => ({ passwordChangeRequired: true }),
+    update: async () => assert.fail("No se deben separar los dos cambios"),
+    changeTemporary: async data => { assert.equal(data.newPassword, "ClavePersonal2026"); completed = true; }
+  });
+  assert.equal(completed, true);
+  assert.equal(result.requiresRelogin, true);
 });
 
 test("una clave actual incorrecta o un cambio de sesion impiden actualizar la contrasena", async () => {

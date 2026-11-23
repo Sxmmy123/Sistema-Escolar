@@ -4,6 +4,9 @@ import { changeTemporaryPassword } from "../functions/own-password-core.js";
 import { schoolAccess } from "../functions/access-core.js";
 import { cambiarClaveTemporal } from "../src/services/claveTemporal.js";
 import { readFileSync } from "node:fs";
+import { passwordChangeBlocksAccess } from "../functions/password-policy.js";
+import { recordatorioClaveMarkup } from "../src/ui/claveTemporal.js";
+import { validarAccesoInicial } from "../functions/informe-core.js";
 
 function fixture() {
   const records = new Map([["usuarios/uid", { rol: "alumno", activo: true, usuario: "990001", passwordChangeRequired: true, passwordChangeVersion: "v1" }]]);
@@ -65,4 +68,23 @@ test("el cliente valida confirmacion y sesion y no admite un falso exito", async
 });
 test("la compilacion no configura una clave Gemini en variables VITE ni ofrece modo directo", () => {
   for (const file of ["../.github/workflows/deploy.yml", "../src/services/informeInicialIA.js"]) assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), "utf8"), /VITE_GEMINI_API_KEY|geminiDirecto/);
+});
+
+test("solo el modo demostracion explicito permite posponer sin borrar la marca pendiente", () => {
+  const profile = { passwordChangeRequired: true };
+  for (const config of [{}, { modoDemostracion: false }, { modoDemostracion: "true" }]) assert.equal(passwordChangeBlocksAccess(profile, config), true);
+  assert.equal(passwordChangeBlocksAccess(profile, { modoDemostracion: true }), false);
+  assert.equal(profile.passwordChangeRequired, true);
+  assert.equal(passwordChangeBlocksAccess({ passwordChangeRequired: false }), false);
+  assert.match(recordatorioClaveMarkup(), /Ahora no/);
+  assert.match(recordatorioClaveMarkup(), /Cambiar ahora/);
+});
+
+test("Gemini permite la clave pendiente solo en demostracion y conserva el curso y rol asignados", () => {
+  const args = { uid: "docente", profile: { rol: "docente", activo: true, passwordChangeRequired: true }, input: { gestionId: "2026", cursoId: "inicial", trimestreId: "t1" }, year: "2026", config: { versionModelo: 2, gestionHabilitada: true, gestionActivaId: "2026" }, assignment: { cursos: { inicial: { materias: [] } } } };
+  assert.throws(() => validarAccesoInicial(args), /permission-denied/);
+  args.config.modoDemostracion = true;
+  assert.doesNotThrow(() => validarAccesoInicial(args));
+  assert.throws(() => validarAccesoInicial({ ...args, profile: { ...args.profile, rol: "alumno" } }), /permission-denied/);
+  assert.throws(() => validarAccesoInicial({ ...args, assignment: { cursos: { preinicial: { materias: [] } } } }), /permission-denied/);
 });

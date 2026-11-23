@@ -39,6 +39,17 @@ test("la confirmacion administrativa reciente es obligatoria", async () => {
   }
 });
 
+test("solo demostracion permite al administrador con clave pendiente continuar sin quitar la marca", async () => {
+  for (const modoDemostracion of [undefined, false, "true", true]) {
+    const fixture = backendFixture({ profile: { rol: "admin", activo: true, passwordChangeRequired: true } });
+    fixture.documents.set("configuracion/sistema", { modoDemostracion });
+    if (modoDemostracion === true) await fixture.run();
+    else await assert.rejects(fixture.run, { code: "permission-denied" });
+    assert.equal(fixture.updates.length, modoDemostracion === true ? 1 : 0);
+    assert.equal(fixture.documents.get("usuarios/administrador").passwordChangeRequired, true);
+  }
+});
+
 test("no permite apuntar a otra cuenta ni restablecer docentes o administradores", async () => {
   const stale = backendFixture(); stale.request.data.expectedUid = "otra-cuenta";
   await assert.rejects(stale.run, { code: "failed-precondition" }); assert.equal(stale.updates.length, 0);

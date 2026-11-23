@@ -1,4 +1,5 @@
 import { auth } from "../firebase/client.js";
+import { signOut } from "firebase/auth";
 import { changeOwnPassword, setRecoveryEmail } from "../services/accountSettings.js";
 
 function accountErrorMessage(error) {
@@ -13,7 +14,7 @@ function accountErrorMessage(error) {
   return error?.message || "No se pudo guardar el cambio.";
 }
 
-export function bindAccountSettings({ root = document, signal, beforeOpen = () => {}, authClient = auth, changePassword = changeOwnPassword, changeEmail = setRecoveryEmail } = {}) {
+export function bindAccountSettings({ root = document, signal, beforeOpen = () => {}, authClient = auth, changePassword = changeOwnPassword, changeEmail = setRecoveryEmail, signOutClient = signOut } = {}) {
   const modal = root.querySelector("[data-account-modal]");
   if (!modal) return () => {};
   const page = root.ownerDocument || root;
@@ -91,7 +92,7 @@ export function bindAccountSettings({ root = document, signal, beforeOpen = () =
       busy = true; form.setAttribute("aria-busy", "true"); controls.forEach(([control]) => { control.disabled = true; });
       showStatus(progress);
       try {
-        await operation(data);
+        const result = await operation(data);
         if (!current()) { clear(); return; }
         form.reset(); visibilityButtons.forEach((button) => showPassword(button, false)); showStatus(success);
         if (closeAfterSuccess) {
@@ -100,7 +101,12 @@ export function bindAccountSettings({ root = document, signal, beforeOpen = () =
             showStatus(""); formsContainer?.classList.add("hidden");
             passwordSuccess.classList.remove("hidden"); passwordSuccess.focus({ preventScroll: true });
           }
-          closeTimer = setTimeout(() => { closeTimer = null; if (current()) close(); }, 1200);
+          closeTimer = setTimeout(() => {
+            closeTimer = null;
+            if (!current()) return;
+            close();
+            if (result?.requiresRelogin) signOutClient(authClient).catch(() => { showStatus("La clave cambio. Cierra sesion e ingresa nuevamente."); });
+          }, 1200);
         }
       } catch (error) {
         if (current()) showStatus(accountErrorMessage(error), true);

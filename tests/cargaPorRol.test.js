@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import { crearCargaPorRol } from "../src/modules/cargaPorRol.js";
+import { passwordChangeBlocksAccess } from "../functions/password-policy.js";
 
 const roles = ["admin", "docente", "director", "alumno"];
 const codigoPrincipal = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
@@ -23,6 +24,7 @@ function aplicacion(importadorEspecial = {}) {
   const desmontados = [];
   const errores = [];
   const snapshots = new Map();
+  const recordatorios = [];
   const modulos = Object.fromEntries(roles.map((rol) => [rol, {
     rutas: Object.fromEntries([`/${rol}`, `/${rol}/notas`, `/${rol}/asistencia`, `/${rol}/boleta`].map((ruta) => [ruta, () => `Pantalla ${ruta}`])),
     actualizarIconos() {},
@@ -50,6 +52,7 @@ function aplicacion(importadorEspecial = {}) {
     setView: (markup) => { html = markup; },
     LoginView: () => "Pantalla login", bindLogin() {},
     claveTemporalView: () => "Clave temporal", bindClaveTemporal() {},
+    passwordChangeBlocksAccess, mostrarRecordatorioClave: () => recordatorios.push("aviso"),
     homeForRole: (rol) => rol ? `/${rol}` : "/",
     routeRequiredRole: (ruta) => roles.find((rol) => ruta.startsWith(`/${rol}`)) || "",
     resolveUserRole: async (usuario) => usuario.rol,
@@ -66,7 +69,7 @@ function aplicacion(importadorEspecial = {}) {
   // Ejecuta el router real sustituyendo solamente sus dependencias externas.
   vm.runInContext(codigoPrincipal.replace(/^import .*;\r?$/gm, ""), contexto);
   return {
-    modulos, descargados, vinculados, desmontados, errores, snapshots,
+    modulos, descargados, vinculados, desmontados, errores, snapshots, recordatorios,
     html: () => html,
     async sesion(rol, uid = rol) {
       auth.currentUser = rol ? { uid, email: `${rol}@example.test`, rol } : null;
@@ -89,6 +92,34 @@ test("una clave temporal impide cargar cualquier modulo aunque se cambie la URL"
   await app.render();
   assert.match(app.html(), /Clave temporal/);
   await app.navegar("/alumno/boleta");
+  assert.match(app.html(), /Clave temporal/);
+});
+
+test("en demostracion se entra con clave temporal y el aviso no se repite al navegar", async () => {
+  const app = aplicacion();
+  app.configurar({ gestionActivaId: "2026", versionModelo: 2, gestionHabilitada: true, modoDemostracion: true });
+  await app.sesion("alumno");
+  app.snapshots.get("usuarios/alumno")({ data: () => ({ passwordChangeRequired: true }) });
+  await app.navegar("/alumno");
+  assert.equal(app.html(), "Pantalla /alumno");
+  assert.equal(app.recordatorios.length, 1);
+  await app.navegar("/alumno/notas");
+  assert.equal(app.recordatorios.length, 1);
+  await app.sesion(null);
+  await app.sesion("alumno");
+  app.snapshots.get("usuarios/alumno")({ data: () => ({ passwordChangeRequired: true }) });
+  await app.render();
+  assert.equal(app.recordatorios.length, 2);
+});
+
+test("salir de demostracion restablece el bloqueo sin cambiar la clave pendiente", async () => {
+  const app = aplicacion();
+  app.configurar({ gestionActivaId: "2026", versionModelo: 2, gestionHabilitada: true, modoDemostracion: true });
+  await app.sesion("alumno");
+  app.snapshots.get("usuarios/alumno")({ data: () => ({ passwordChangeRequired: true }) });
+  await app.navegar("/alumno");
+  app.cambiarGestion({ gestionActivaId: "2026", versionModelo: 2, gestionHabilitada: true, modoDemostracion: false });
+  await app.render();
   assert.match(app.html(), /Clave temporal/);
 });
 

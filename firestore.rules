@@ -3,15 +3,18 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
+    function demoMode() {
+      return get(/databases/$(database)/documents/configuracion/sistema).data.get("modoDemostracion", false) == true;
+    }
     function isMainAdmin() {
       return signedIn() && request.auth.uid == "6GJAf3WiBaVBXypSDDR1xKLalnq2" &&
-        (!exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) || profile().get("passwordChangeRequired", false) != true);
+        (!exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) || profile().get("passwordChangeRequired", false) != true || demoMode());
     }
     function profile() { return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data; }
     function hasRole(role) {
       let data = profile();
       return signedIn() && data != null && data.rol == role && data.activo == true &&
-        data.get("passwordChangeRequired", false) != true;
+        (data.get("passwordChangeRequired", false) != true || demoMode());
     }
     function isAdmin() { return isMainAdmin() || hasRole("admin"); }
     function isDocente() { return hasRole("docente"); }

@@ -1,4 +1,6 @@
 .sidebar-toolbar { display:flex; align-items:center; gap:6px; min-width:0; }
+.password-reminder-dialog { width:min(28rem,calc(100vw - 2rem)); max-height:calc(100dvh - 2rem); overflow:auto; padding:0; border:1px solid #d8e1db; border-radius:8px; }
+.password-reminder-dialog::backdrop { background:rgb(0 0 0 / .48); }
 .tinted-surface, .initial-subject-tag, .initial-activity-column > header { background-color:var(--surface-color,#fff); }
 .sidebar-tool-button, .sidebar-session-button { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; border:1px solid var(--sidebar-tool-border,#e1e7e3); border-radius:7px; background:var(--sidebar-tool-bg,#f4f7f5); color:var(--sidebar-tool-ink,#52645a); font-size:12px; font-weight:500; line-height:1.2; transition:background-color .16s,color .16s,border-color .16s; }
 .sidebar-tool-button { width:40px; height:40px; flex:0 0 40px; padding:0; }

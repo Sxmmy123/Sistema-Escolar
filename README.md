@@ -66,6 +66,10 @@ Referencias: [Cloud Functions y despliegue](https://firebase.google.com/docs/fun
 
 En Administracion > Alumnos > Alumnos, el icono de llave junto al acceso abre el restablecimiento. El administrador confirma su propia contrasena y asigna una clave temporal; el alumno puede cambiarla luego desde su cuenta. Las claves no se guardan en Firestore ni en auditoria.
 
+En produccion, una cuenta con `passwordChangeRequired: true` debe cambiar su clave antes de abrir los modulos. Solo para demostraciones, administracion puede establecer el booleano `modoDemostracion: true` en `configuracion/sistema`: permite continuar con la clave existente y muestra un recordatorio con "Cambiar ahora" y "Ahora no" una vez por ingreso, sin repetirlo al navegar. Posponerlo no cambia la clave ni elimina su marca pendiente; al cambiarla desde el recordatorio o desde Cuenta, el servidor actualiza la clave y retira esa marca.
+
+Eliminar `modoDemostracion` o dejarlo en `false` restaura el requisito obligatorio. No se debe activar con datos reales. Este modo no modifica roles, cursos asignados ni permisos sobre datos de otros usuarios, y solo se puede configurar desde administracion.
+
 Para desarrollo local:
 
 1. Ejecutar `npm install --prefix functions`.

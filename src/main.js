@@ -18,7 +18,8 @@ import { bindAccountSettings } from "./ui/accountSettings.js";
 import { initializeTheme, bindThemeButtons } from "./ui/theme.js";
 import { registerServiceWorker } from "./pwa/registerServiceWorker.js";
 import { limpiarDatosPrivados } from "./services/cachePrivada.js";
-import { claveTemporalView, bindClaveTemporal } from "./ui/claveTemporal.js";
+import { claveTemporalView, bindClaveTemporal, mostrarRecordatorioClave } from "./ui/claveTemporal.js";
+import { passwordChangeBlocksAccess } from "../functions/password-policy.js";
 
 initializeTheme();
 try { limpiarDatosPrivados([localStorage]); } catch { /* Almacenamiento bloqueado. */ }
@@ -31,6 +32,7 @@ let authRevision = 0;
 let activeUser = null;
 let activeRole = "";
 let passwordChangeRequired = false;
+let passwordReminderShown = false;
 let renderRevision = 0;
 let moduloMontado = null;
 let shellBindingsController = null;
@@ -67,6 +69,7 @@ function clearSession() {
   activeUser = null;
   activeRole = "";
   passwordChangeRequired = false;
+  passwordReminderShown = false;
 }
 
 async function doLogout() {
@@ -207,6 +210,10 @@ function afterRender(route, modulo) {
   bindShell();
   if (modulo) {
     Promise.resolve(modulo.vincular(route)).catch((error) => console.error("No se pudo cargar la pantalla", error));
+    if (passwordChangeRequired && configuracionActual().modoDemostracion === true && !passwordReminderShown) {
+      passwordReminderShown = true;
+      mostrarRecordatorioClave({ signal: shellBindingsController.signal, logout: doLogout });
+    }
   }
 }
 
@@ -230,7 +237,7 @@ async function render() {
       return;
     }
 
-    if (activeUser && passwordChangeRequired) {
+    if (activeUser && passwordChangeBlocksAccess({ passwordChangeRequired }, configuracionActual())) {
       if (document.querySelector("[data-temporary-password-form]")) return;
       desmontarRol();
       shellBindingsController?.abort();
@@ -337,6 +344,7 @@ onAuthStateChanged(auth, async (user) => {
   activeUser = null;
   activeRole = "";
   passwordChangeRequired = false;
+  passwordReminderShown = false;
   setView(loadingView());
 
   try {
@@ -347,10 +355,6 @@ onAuthStateChanged(auth, async (user) => {
       const profile = await getDocFromServer(doc(firestore, "usuarios", user.uid));
       if (revision !== authRevision || auth.currentUser?.uid !== user.uid) return;
       passwordChangeRequired = profile.data()?.passwordChangeRequired === true;
-      if (passwordChangeRequired) {
-        activeUser = user; activeRole = role;
-        return;
-      }
       try {
         await cargarConfiguracion(firestore);
       } catch (error) {
@@ -358,14 +362,20 @@ onAuthStateChanged(auth, async (user) => {
         console.warn("No se pudo leer la configuracion del sistema. Publica las reglas actualizadas.", error);
       }
       if (revision !== authRevision || auth.currentUser?.uid !== user.uid) return;
+      if (passwordChangeBlocksAccess({ passwordChangeRequired }, configuracionActual())) {
+        activeUser = user; activeRole = role;
+        return;
+      }
       activeUser = user;
       activeRole = role;
       rememberSession(role, user);
       stopPasswordWatch = onSnapshot(doc(firestore, "usuarios", user.uid), snapshot => {
         if (revision !== authRevision) return;
-        if (snapshot.data()?.passwordChangeRequired === true && !passwordChangeRequired) {
-          passwordChangeRequired = true;
-          limpiarDatosPrivados();
+        const pending = snapshot.data()?.passwordChangeRequired === true;
+        if (pending !== passwordChangeRequired) {
+          passwordChangeRequired = pending;
+          if (!pending) return;
+          if (passwordChangeBlocksAccess({ passwordChangeRequired }, configuracionActual())) limpiarDatosPrivados();
           if (authReady) render();
         }
       }, error => console.warn("No se pudo verificar la clave temporal", error));
@@ -396,7 +406,7 @@ onAuthStateChanged(auth, async (user) => {
           configurationNeedsReload = true;
           establecerConfiguracion({ ...previous, gestionHabilitada: false });
           render();
-        } else if (next.gestionHabilitada !== previous.gestionHabilitada) {
+        } else if (next.gestionHabilitada !== previous.gestionHabilitada || next.modoDemostracion !== previous.modoDemostracion) {
           establecerConfiguracion(next);
           render();
         } else {
