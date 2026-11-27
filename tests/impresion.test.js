@@ -91,16 +91,18 @@ test("dos trimestres mantienen sus etiquetas reales y el promedio acumulado", as
   assert.match(boletin, /PROM\. ACUM\./);
 });
 
-test("registro conserva su tabla original en carta vertical con un punto adicional de letra", async () => {
+test("registro conserva su tabla en carta vertical y aprovecha parte del ancho de nombres para las notas", async () => {
   const { notas } = await documentosImpresionPrueba({ cantidad: 16 });
   assert.equal((notas.match(/class="print-page /g) || []).length, 1);
   assert.match(notas, /size: letter portrait/);
-  assert.match(notas, /--print-font-increase: 1pt/);
+  assert.match(notas, /html \{ --print-font-increase: 1\.5pt; \}/);
+  assert.match(notas, /\.student-name \{ --print-font-increase: 1pt;/);
   assert.match(notas, /font-size: calc\(8\.4px \+ var\(--print-font-increase\)\)/);
   assert.match(notas, /font-size: calc\(7\.4px \+ var\(--print-font-increase\)\)/);
   assert.match(notas, /font-size: calc\(6\.6px \+ var\(--print-font-increase\)\)/);
   assert.ok([...notas.matchAll(/font-size: ([^;]+);/g)].every((match) => match[1].includes("var(--print-font-increase)")));
-  assert.match(notas, /\.col-name \{ width: 28\.5%; \}/);
+  assert.match(notas, /\.col-name \{ width: 24\.5%; \}/);
+  assert.match(notas, /\.col-note \{ width: calc\(\(100% - 2\.6% - 24\.5% - 3% - 3% - 5\.9%\) \/ var\(--regular-note-count\)\); \}/);
   assert.match(notas, /SER\/10/);
   assert.match(notas, /SABER\/45/);
   assert.match(notas, /HACER\/40/);

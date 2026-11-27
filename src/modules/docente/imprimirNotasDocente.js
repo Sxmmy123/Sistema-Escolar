@@ -227,7 +227,7 @@ export function printDocument(payload, subjects) {
         <style>
           ${page.pagina}
           * { box-sizing: border-box; }
-          html { --print-font-increase: 1pt; }
+          html { --print-font-increase: 1.5pt; }
           html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: "Arial Narrow", Arial, sans-serif; }
           .print-page {
             width: ${page.ancho}mm;
@@ -247,11 +247,11 @@ export function printDocument(payload, subjects) {
           th, td { border: 1px solid #202020; padding: 0 .25px; height: 12px; text-align: center; vertical-align: middle; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; line-height: 1; }
           th { font-size: calc(7.8px + var(--print-font-increase)); }
           .col-num { width: 2.6%; }
-          .col-name { width: 28.5%; }
-          .col-note { width: calc((100% - 2.6% - 28.5% - 3% - 3% - 5.9%) / var(--regular-note-count)); }
+          .col-name { width: 24.5%; }
+          .col-note { width: calc((100% - 2.6% - 24.5% - 3% - 3% - 5.9%) / var(--regular-note-count)); }
           .col-total { width: 3%; }
           .col-status { width: 5.9%; }
-          .brand-top { background: #087B2B; color: #fff; font-size: calc(12px + var(--print-font-increase)); font-weight: 700; text-align: left; padding-left: 5px; letter-spacing: 0; }
+          .brand-top { --print-font-increase: 1pt; background: #087B2B; color: #fff; font-size: calc(12px + var(--print-font-increase)); font-weight: 700; text-align: left; white-space: nowrap; padding-left: 5px; letter-spacing: 0; }
           .top-fill { background: #cce8c8; border-left: 0; }
           .meta-label, .meta-cell { font-weight: 700; text-align: right; background: #fff; }
           .meta-value { font-weight: 400; background: #fff; }
@@ -294,7 +294,7 @@ export function printDocument(payload, subjects) {
           .prom .vertical-text { font-weight: 700; }
           .thin-header { height: 9px; background: #f8f8f8; }
           .col-header { font-size: calc(8px + var(--print-font-increase)); font-weight: 700; background: #fff; }
-          .student-name { text-align: left; white-space: nowrap; overflow: hidden; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; }
+          .student-name { --print-font-increase: 1pt; text-align: left; white-space: nowrap; overflow: hidden; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; }
           .low-note { color: #d91f26; }
           .score { background: #fef3c7; }
           .total-score { background: #fde8d1; }
@@ -341,17 +341,22 @@ export function printDocument(payload, subjects) {
         <script>
           window.addEventListener("load", () => {
             setTimeout(() => {
-              // Keep wider marks inside dense columns without reducing their printed height.
-              document.querySelectorAll("tbody td:not(.student-name)").forEach((cell) => {
+              // Fit wider text without reducing its printed height or changing the table layout.
+              document.querySelectorAll("tbody td, .brand-top").forEach((cell) => {
                 if (!cell.textContent.trim()) return;
                 const text = document.createRange();
                 text.selectNodeContents(cell);
                 const width = text.getBoundingClientRect().width;
-                const available = cell.clientWidth - 0.5;
+                const style = getComputedStyle(cell);
+                const available = cell.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
                 if (width <= available || available <= 0) return;
                 const label = document.createElement("span");
                 label.textContent = cell.textContent;
-                label.style.cssText = "display:block;width:max-content;position:relative;left:50%;white-space:nowrap;transform:translateX(-50%) scaleX(" + (available / width) + ");transform-origin:center";
+                const scale = available / width;
+                const alignment = cell.matches(".student-name, .brand-top")
+                  ? "transform:scaleX(" + scale + ");transform-origin:left"
+                  : "position:relative;left:50%;transform:translateX(-50%) scaleX(" + scale + ");transform-origin:center";
+                label.style.cssText = "display:block;width:max-content;white-space:nowrap;" + alignment;
                 cell.replaceChildren(label);
               });
               window.focus();
