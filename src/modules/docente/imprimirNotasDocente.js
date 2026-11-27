@@ -246,6 +246,7 @@ export function printDocument(payload, subjects) {
           .notes-print-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
           th, td { border: 1px solid #202020; padding: 0 .25px; height: 12px; text-align: center; vertical-align: middle; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; line-height: 1; }
           th { font-size: calc(7.8px + var(--print-font-increase)); }
+          tbody td { height: calc(12px + 1pt); }
           .col-num { width: 2.6%; }
           .col-name { width: 24.5%; }
           .col-note { width: calc((100% - 2.6% - 24.5% - 3% - 3% - 5.9%) / var(--regular-note-count)); }
@@ -308,6 +309,7 @@ export function printDocument(payload, subjects) {
           .signatures small { display: block; font-size: calc(6.4px + var(--print-font-increase)); }
           .print-dense th, .print-dense td { height: 11px; font-size: calc(7.4px + var(--print-font-increase)); }
           .print-dense th { font-size: calc(7px + var(--print-font-increase)); }
+          .print-dense tbody td { height: calc(11px + 1pt); }
           .print-dense .vertical { height: 76px; }
           .print-dense .vertical-text { max-height: 72px; font-size: calc(6.6px + var(--print-font-increase)); }
           .print-dense .activity-head { height: 114px; }
@@ -320,6 +322,7 @@ export function printDocument(payload, subjects) {
           .print-dense .signatures { padding-top: 5px; }
           .print-ultra th, .print-ultra td { height: 10px; font-size: calc(6.6px + var(--print-font-increase)); }
           .print-ultra th { font-size: calc(6.4px + var(--print-font-increase)); }
+          .print-ultra tbody td { height: calc(10px + 1pt); }
           .print-ultra .vertical { height: 70px; }
           .print-ultra .vertical-text { max-height: 66px; font-size: calc(6px + var(--print-font-increase)); }
           .print-ultra .activity-head { height: 108px; }

@@ -159,3 +159,13 @@ test("registro conserva 40 filas por hoja y los nombres escapados", async () => 
   assert.doesNotMatch(notas, /<ALUMNO>/);
   assert.match(sheets[1], /<td>41<\/td>/);
 });
+
+test("registro aumenta un punto el alto de las filas sin modificar los encabezados ni la letra", async () => {
+  const { notas } = await documentosImpresionPrueba({ cantidad: 40 });
+  assert.match(notas, /tbody td \{ height: calc\(12px \+ 1pt\); \}/);
+  assert.match(notas, /\.print-dense tbody td \{ height: calc\(11px \+ 1pt\); \}/);
+  assert.match(notas, /\.print-ultra tbody td \{ height: calc\(10px \+ 1pt\); \}/);
+  assert.match(notas, /th, td \{[^}]*height: 12px;/);
+  assert.match(notas, /html \{ --print-font-increase: 1\.5pt; \}/);
+  assert.equal((notas.match(/class="student-name"/g) || []).length, 40);
+});
