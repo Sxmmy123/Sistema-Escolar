@@ -9,13 +9,14 @@ import { e as escapeHtml } from "../src/modules/docente-inicial/ComponentesInici
 const trimesterIds = ["t1", "t2", "t3"];
 const terms = trimesterIds.map((id, index) => ({ id, label: `${["1er", "2do", "3er"][index]} trimestre` }));
 
-export async function documentosImpresionPrueba({ cantidad = 40, trimestres = trimesterIds, nombres = [], notasPorTrimestre = {}, registro = {} } = {}) {
+export async function documentosImpresionPrueba({ cantidad = 40, trimestres = trimesterIds, nombres = [], notasPorTrimestre = {}, registro = {}, ubicacion = "http://localhost/", baseUrl = "/" } = {}) {
   const students = Array.from({ length: cantidad }, (_, index) => ({ id: `alumno_${index + 1}`, nombre: nombres[index] || `ESTUDIANTE ${String(index + 1).padStart(2, "0")} FLORES VARGAS` }));
   const course = COURSES.find((item) => item.id === "cuarto_a");
   const subject = SUBJECTS.find((item) => item.id === "matematica");
   const payload = { course, students, teacherName: "Docente de prueba", trimesterLabel: "1er trimestre", activities: [], gradesList: [], attendanceRows: [] };
   const documents = {};
-  const window = { location: { origin: "http://localhost", href: "http://localhost/" }, open: () => ({ document: { open() {}, write(value) { documents.current = value; }, close() {} }, addEventListener() {} }) };
+  const location = new URL(ubicacion);
+  const window = { location: { origin: location.origin, href: location.href }, open: () => ({ document: { open() {}, write(value) { documents.current = value; }, close() {} }, addEventListener() {} }) };
   const context = {
     formatoCarta, window, URL, SUBJECTS, TRIMESTERS: terms, gestionActual: () => "2026", icon: () => "", escapeHtml,
     gradeByActivityAndStudent, isMaterialActivity, isSaberActivity,
@@ -27,7 +28,7 @@ export async function documentosImpresionPrueba({ cantidad = 40, trimestres = tr
   async function getFunction(path, name) {
     const source = (await readFile(new URL(`../src/modules/${path}`, import.meta.url), "utf8"))
       .replace(/^\uFEFF/, "").replace(/^import[\s\S]*?;\r?\n/gm, "")
-      .replace(/\bexport (?=(?:async )?function)/g, "").replace(/import\.meta\.env(?:\?)?\.BASE_URL/g, '"/"');
+      .replace(/\bexport (?=(?:async )?function)/g, "").replace(/import\.meta\.env(?:\?)?\.BASE_URL/g, JSON.stringify(baseUrl));
     return vm.runInNewContext(`${source}; ${name}`, { ...context });
   }
   const printNotes = await getFunction("docente/imprimirNotasDocente.js", "printDocument");

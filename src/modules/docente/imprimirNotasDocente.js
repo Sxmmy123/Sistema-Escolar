@@ -75,7 +75,7 @@ function subjectSheet({
   const densityClass = noteCount > 34 ? "print-ultra" : noteCount > 27 ? "print-dense" : "";
   const info = courseInfo(course);
   const baseUrl = import.meta.env?.BASE_URL || "/";
-  const logoUrl = `${window.location.origin}${baseUrl}images/logo-nueva-bolivia.png`;
+  const logoUrl = new URL(`${baseUrl}images/logo-nueva-bolivia.png`, window.location.href).href;
 
   return `
     <section class="print-page ${densityClass}" style="--regular-note-count:${regularNoteCount}">
@@ -207,13 +207,16 @@ export function printDocument(payload, subjects) {
           .print-page {
             width: ${page.ancho}mm;
             max-width: 100%;
+            min-height: calc(${page.alto}mm - 1px);
+            display: flex;
+            flex-direction: column;
             page-break-after: always;
             break-after: page;
             page-break-inside: avoid;
             break-inside: avoid;
           }
           .print-page:last-child { page-break-after: auto; break-after: auto; }
-          .notes-print-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          .notes-print-table { width: 100%; border-collapse: collapse; table-layout: fixed; flex-shrink: 0; }
           th, td { border: 1px solid #202020; padding: 0 .25px; height: 12px; text-align: center; vertical-align: middle; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; line-height: 1.05; }
           th { font-size: calc(7.8px + var(--print-font-increase)); }
           tbody td { height: calc(12px + 1pt); }
@@ -231,7 +234,7 @@ export function printDocument(payload, subjects) {
           .record-meta strong { flex-shrink: 0; white-space: nowrap; }
           .record-meta span { min-width: 0; overflow-wrap: anywhere; font-weight: 400; }
           .school-block { height: 72px; background: #fff; }
-          .school-block img { display: block; width: 72px; height: 72px; object-fit: contain; margin: 1px auto; }
+          .school-block img { display: block; width: 104px; height: 104px; object-fit: contain; margin: 1px auto; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .school-title { font-size: calc(8px + var(--print-font-increase)); font-weight: 700; }
           .school-name { margin-top: 1px; font-size: calc(10.5px + var(--print-font-increase)); font-weight: 700; }
           .group { padding: 3px 0; font-weight: 700; color: #111; }
@@ -270,8 +273,8 @@ export function printDocument(payload, subjects) {
           .final-low { background: #fde7e7; color: #d91f26; }
           .status-ok { background: #edf8ff; color: #166534; font-size: 7.3pt; }
           .status-low { background: #edf8ff; color: #d91f26; font-size: 7.3pt; font-weight: 700; }
-          .grade-scale-note { margin: 6px 0 0; font-size: 7.3pt; }
-          .signatures { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 8px 34px 0; text-align: center; font-size: calc(7.5px + var(--print-font-increase)); break-inside: avoid; }
+          .grade-scale-note { margin: 6px 0 0; font-size: 7.3pt; flex-shrink: 0; }
+          .signatures { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 24px 34px 0; text-align: center; font-size: calc(7.5px + var(--print-font-increase)); break-inside: avoid; flex-shrink: 0; }
           .signatures span { display: block; border-top: 1px solid #111; margin: 0 auto 2px; width: 145px; }
           .signatures strong { display: block; font-size: calc(7.5px + var(--print-font-increase)); font-weight: 700; }
           .signatures small { display: block; font-size: calc(6.4px + var(--print-font-increase)); }
@@ -282,8 +285,7 @@ export function printDocument(payload, subjects) {
           .print-dense .vertical-text { font-size: calc(6.6px + var(--print-font-increase)); }
           .print-dense .student-name { font-size: calc(7.4px + var(--print-font-increase)); }
           .print-dense .school-block { height: 64px; }
-          .print-dense .school-block img { width: 64px; height: 64px; }
-          .print-dense .signatures { padding-top: 5px; }
+          .print-dense .school-block img { width: 96px; height: 96px; }
           .print-ultra th, .print-ultra td { height: 10px; font-size: calc(6.6px + var(--print-font-increase)); }
           .print-ultra th { font-size: calc(6.4px + var(--print-font-increase)); }
           .print-ultra tbody td { height: calc(10px + 1pt); }
@@ -291,9 +293,8 @@ export function printDocument(payload, subjects) {
           .print-ultra .vertical-text { font-size: calc(6px + var(--print-font-increase)); }
           .print-ultra .student-name { font-size: calc(6.6px + var(--print-font-increase)); }
           .print-ultra .school-block { height: 58px; }
-          .print-ultra .school-block img { width: 60px; height: 60px; }
+          .print-ultra .school-block img { width: 88px; height: 88px; }
           .print-ultra .school-name { font-size: calc(9px + var(--print-font-increase)); }
-          .print-ultra .signatures { padding-top: 4px; }
         </style>
       </head>
       <body>
@@ -321,7 +322,6 @@ export function printDocument(payload, subjects) {
               });
 
               // Use the remaining Letter page height for titles without moving any column or row.
-              const pageHeight = ${page.alto} * 96 / 25.4;
               document.querySelectorAll(".print-page").forEach((recordPage) => {
                 const labels = [...recordPage.querySelectorAll(".activity-title")];
                 if (!labels.length) return;
@@ -334,7 +334,7 @@ export function printDocument(payload, subjects) {
                   return height;
                 }));
                 const currentHeight = recordPage.querySelector(".vertical").getBoundingClientRect().height;
-                const freeHeight = Math.max(0, pageHeight - recordPage.getBoundingClientRect().height - 2);
+                const freeHeight = Math.max(0, recordPage.querySelector(".signatures").getBoundingClientRect().top - recordPage.querySelector(".grade-scale-note").getBoundingClientRect().bottom - 2);
                 const headerHeight = Math.max(currentHeight, Math.min(260, naturalHeight + 6, currentHeight + freeHeight));
                 recordPage.style.setProperty("--activity-header-height", headerHeight + "px");
                 recordPage.querySelectorAll(".vertical").forEach((cell) => { cell.style.height = headerHeight + "px"; });

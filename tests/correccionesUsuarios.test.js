@@ -86,7 +86,7 @@ test("el boletin incluye incorporaciones posteriores y actualiza nombres por ID"
 test("imprimir 41 alumnos genera dos paginas e incluye al ultimo", () => {
   const previousWindow = globalThis.window;
   let html = "";
-  globalThis.window = { location: { origin: "http://localhost" }, open: () => ({ document: { open() {}, write(value) { html = value; }, close() {} } }) };
+  globalThis.window = { location: { origin: "http://localhost", href: "http://localhost/" }, open: () => ({ document: { open() {}, write(value) { html = value; }, close() {} } }) };
   try {
     const students = Array.from({ length: 41 }, (_, index) => ({ id: `a${index}`, nombre: `ALUMNO ${String(index + 1).padStart(2, "0")}` }));
     printDocument({ students, course: catalog.findCourse("cuarto_a"), activities: [], gradesList: [], attendanceRows: [], calculateStudentTerm: academic.calculateStudentTerm }, [catalog.findSubject("matematica")]);

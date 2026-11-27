@@ -130,9 +130,18 @@ test("registro muestra el escudo completo y mas visible dentro de su recuadro or
   const { notas } = await documentosImpresionPrueba({ cantidad: 16 });
   assert.match(notas, /rowspan="2" class="school-block"/);
   assert.match(notas, /images\/logo-nueva-bolivia\.png/);
-  assert.match(notas, /width: 72px; height: 72px; object-fit: contain/);
-  assert.match(notas, /\.print-dense \.school-block img \{ width: 64px; height: 64px; \}/);
-  assert.match(notas, /\.print-ultra \.school-block img \{ width: 60px; height: 60px; \}/);
+  assert.match(notas, /width: 104px; height: 104px; object-fit: contain/);
+  assert.match(notas, /\.print-dense \.school-block img \{ width: 96px; height: 96px; \}/);
+  assert.match(notas, /\.print-ultra \.school-block img \{ width: 88px; height: 88px; \}/);
+  assert.match(notas, /print-color-adjust: exact; -webkit-print-color-adjust: exact/);
+});
+
+test("el escudo del registro usa la carpeta publicada de GitHub Pages y no la raiz del dominio", async () => {
+  const { notas } = await documentosImpresionPrueba({
+    cantidad: 1, baseUrl: "./", ubicacion: "https://sxmmy123.github.io/Sistema-Escolar/#/docente/notas"
+  });
+  assert.match(notas, /src="https:\/\/sxmmy123\.github\.io\/Sistema-Escolar\/images\/logo-nueva-bolivia\.png"/);
+  assert.doesNotMatch(notas, /github\.io\.\/images|src="https:\/\/sxmmy123\.github\.io\/images/);
 });
 
 test("registro mantiene actividades y puntajes en su posicion original sin dividir columnas", async () => {
@@ -213,7 +222,9 @@ test("registro ordena los metadatos y distingue subtotal de nota final sin cambi
   assert.match(notas, /Subtotal \/95 \+ Autoevaluacion \/5 = Nota final \/100/);
   assert.match(notas, /class="total-score">85<\/td>/);
   assert.match(notas, /class="final-ok">89<\/td>/);
-  assert.doesNotMatch(notas, /margin-top: auto/);
+  assert.match(notas, /min-height: calc\(259\.4mm - 1px\)/);
+  assert.match(notas, /\.signatures \{ margin-top: auto;/);
+  assert.match(notas, /padding: 24px 34px 0/);
 });
 
 test("registro aumenta un punto el alto de las filas sin modificar los encabezados ni la letra", async () => {
