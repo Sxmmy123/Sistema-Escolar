@@ -151,16 +151,32 @@ test("registro mantiene actividades y puntajes en su posicion original sin divid
   assert.deepEqual(values, ["1", "ESTUDIANTE 01 FLORES VARGAS", "100", "100", "100", "100", "100", "8", ...Array(11).fill("100"), "75", "21", ...Array(9).fill("100"), "48", "75", "16", "100", "4", "45", "49", "REPROBADO"]);
 });
 
-test("registro conserva hasta 40 alumnos por hoja sin filas vacias de relleno", async () => {
+test("registro conserva 40 renglones por hoja y continua la numeracion sin omitir alumnos", async () => {
   const { notas } = await documentosImpresionPrueba({ cantidad: 41, nombres: ["NOMBRE <ALUMNO> & FAMILIA"] });
   const sheets = [...notas.matchAll(/<section class="print-page [\s\S]*?<\/section>/g)].map((match) => match[0]);
   assert.equal(sheets.length, 2);
   assert.equal((sheets[0].match(/class="student-name"/g) || []).length, 40);
-  assert.equal((sheets[1].match(/class="student-name"/g) || []).length, 1);
+  assert.equal((sheets[1].match(/class="student-name"/g) || []).length, 40);
+  assert.equal((sheets[1].match(/class="empty-student-row"/g) || []).length, 39);
   assert.doesNotMatch(notas, /&nbsp;/);
   assert.match(notas, /NOMBRE &lt;ALUMNO&gt; &amp; FAMILIA/);
   assert.doesNotMatch(notas, /<ALUMNO>/);
   assert.match(sheets[1], /<td>41<\/td>/);
+  assert.match(sheets[1], /<td>80<\/td>/);
+});
+
+test("registro completa la lista hasta 40 con nombres y notas en blanco, sin inventar alumnos", async () => {
+  const { notas } = await documentosImpresionPrueba({ cantidad: 16 });
+  const body = notas.match(/<tbody>([\s\S]*?)<\/tbody>/)[1];
+  assert.equal((body.match(/<tr[ >]/g) || []).length, 40);
+  const blanks = [...body.matchAll(/<tr class="empty-student-row">([\s\S]*?)<\/tr>/g)].map((match) => match[1]);
+  assert.equal(blanks.length, 24);
+  assert.match(blanks[0], /^<td>17<\/td><td class="student-name"><\/td>/);
+  assert.match(blanks.at(-1), /^<td>40<\/td>/);
+  for (const row of blanks) {
+    assert.equal((row.match(/<td[^>]*>[^<]+<\/td>/g) || []).length, 1);
+    assert.doesNotMatch(row, /score|APROBADO|REPROBADO/);
+  }
 });
 
 test("registro no inventa columnas vacias en SER ni HACER", async () => {
@@ -168,23 +184,23 @@ test("registro no inventa columnas vacias en SER ni HACER", async () => {
     const activities = Array.from({ length: count }, (_, index) => ({ id: `h${index}`, materiaId: "matematica", tipo: "tarea", titulo: `Hacer ${index + 1}` }));
     const gradesList = activities.map((activity) => ({ actividadId: activity.id, alumnoId: "alumno_1", nota: 85 }));
     const { notas } = await documentosImpresionPrueba({ cantidad: 1, registro: { activities, gradesList } });
-    assert.equal((notas.match(/data-activity-code="H\d+"/g) || []).length, count);
-    assert.doesNotMatch(notas, /data-activity-code="SER\d+"/);
+    assert.equal((notas.match(/<th class="vertical activity-head hacer-col/g) || []).length, count);
+    assert.doesNotMatch(notas, /<th class="vertical activity-head ser-col/);
     assert.ok(notas.includes(`<th colspan="${count + 2}" class="group hacer-group">HACER/40</th>`));
     assert.match(notas, /<th colspan="5" class="group ser-group">SER\/10<\/th>/);
   }
 });
 
-test("registro muestra cada titulo completo con un codigo que conserva su columna", async () => {
+test("registro muestra cada titulo completo dentro de su propia columna y sin claves ni referencias", async () => {
   const title = `${"Actividad extensa de lectura y analisis. ".repeat(12)}<texto> & material`;
   const activities = [{ id: "s1", materiaId: "matematica", tipo: "examen", titulo: title }];
   const gradesList = [{ actividadId: "s1", alumnoId: "alumno_1", nota: 92 }];
   const { notas } = await documentosImpresionPrueba({ cantidad: 1, registro: { activities, gradesList } });
-  assert.match(notas, /data-activity-code="S1"><span class="vertical-text activity-title">S1<\/span>/);
-  assert.match(notas, /data-key-code="S1"><strong>S1<\/strong><span>Actividad extensa/);
+  assert.match(notas, /<th class="vertical activity-head saber-col section-start"><span class="vertical-text activity-title">Actividad extensa/);
   assert.ok(notas.includes(title.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("& material", "&amp; material")));
   assert.doesNotMatch(notas, /<texto>/);
-  assert.match(notas, /activity-reference-page/);
+  assert.doesNotMatch(notas, /activity-reference-page|activity-key|data-activity-code|data-key-code|ACTIVIDADES EVALUADAS/);
+  assert.match(notas, /--activity-header-height/);
 });
 
 test("registro ordena los metadatos y distingue subtotal de nota final sin cambiar sus valores", async () => {

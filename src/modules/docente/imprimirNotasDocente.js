@@ -45,10 +45,6 @@ function gradeCell(value) {
   return `<td class="${grade <= 50 ? "low-note" : ""}">${grade}</td>`;
 }
 
-function codedActivities(items, prefix) {
-  return items.map((item, index) => ({ ...item, printCode: `${prefix}${index + 1}` }));
-}
-
 function subjectSheet({
   course,
   subject,
@@ -70,10 +66,9 @@ function subjectSheet({
   const gradedActivities = subjectActivitiesAll
     .filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
     .filter((item) => Object.keys(gradesMap[item.id] || {}).length > 0);
-  const serColumns = codedActivities(serCriteriaRaw, "SER");
-  const saberColumns = codedActivities(gradedActivities.filter(isSaberActivity), "S");
-  const hacerColumns = codedActivities(gradedActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item)), "H");
-  const activityColumns = [...serColumns, ...saberColumns, ...hacerColumns];
+  const serColumns = serCriteriaRaw;
+  const saberColumns = gradedActivities.filter(isSaberActivity);
+  const hacerColumns = gradedActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item));
   const noteCount = 3 + serColumns.length + 2 + saberColumns.length + 2 + hacerColumns.length + 2 + 2 + 3;
   const fullSpan = 2 + noteCount;
   const regularNoteCount = Math.max(1, noteCount - 3);
@@ -126,13 +121,13 @@ function subjectSheet({
             <th class="vertical ser-col section-start">${verticalLabel("Asistencia")}</th>
             <th class="vertical ser-col">${verticalLabel("Puntualidad")}</th>
             <th class="vertical ser-col">${verticalLabel("Responsabilidad")}</th>
-            ${serColumns.map((item) => `<th class="vertical activity-head ser-col" data-activity-code="${item.printCode}">${verticalLabel(item.printCode, "activity-title")}</th>`).join("")}
+            ${serColumns.map((item) => `<th class="vertical activity-head ser-col">${verticalLabel(item.titulo || "Actividad sin titulo", "activity-title")}</th>`).join("")}
             <th class="vertical ser-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical ser-col prom">${verticalLabel("Puntaje")}</th>
-            ${saberColumns.map((item, index) => `<th class="vertical activity-head saber-col ${index === 0 ? "section-start" : ""}" data-activity-code="${item.printCode}">${verticalLabel(item.printCode, "activity-title")}</th>`).join("")}
+            ${saberColumns.map((item, index) => `<th class="vertical activity-head saber-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "Actividad sin titulo", "activity-title")}</th>`).join("")}
             <th class="vertical saber-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical saber-col prom">${verticalLabel("Puntaje")}</th>
-            ${hacerColumns.map((item, index) => `<th class="vertical activity-head hacer-col ${index === 0 ? "section-start" : ""}" data-activity-code="${item.printCode}">${verticalLabel(item.printCode, "activity-title")}</th>`).join("")}
+            ${hacerColumns.map((item, index) => `<th class="vertical activity-head hacer-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "Actividad sin titulo", "activity-title")}</th>`).join("")}
             <th class="vertical hacer-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical hacer-col prom">${verticalLabel("Puntaje")}</th>
             <th class="vertical auto-col section-start">${verticalLabel("Nota /100")}</th>
@@ -148,7 +143,9 @@ function subjectSheet({
           </tr>
         </thead>
         <tbody>
-          ${students.map((student, rowIndex) => {
+          ${Array.from({ length: Math.max(40, students.length) }, (_, rowIndex) => {
+            const student = students[rowIndex];
+            if (!student) return `<tr class="empty-student-row"><td>${rowOffset + rowIndex + 1}</td><td class="student-name"></td>${"<td></td>".repeat(noteCount)}</tr>`;
             const serExtraValues = serCriteriaRaw.filter((item) => gradesMap[item.id]?.[student.id]).map((item) => studentActivityGrade(item, student.id, gradesMap));
             const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota : null;
             const calc = calculateStudentTerm(student, gradedActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
@@ -177,11 +174,6 @@ function subjectSheet({
         </tbody>
       </table>
       <p class="grade-scale-note">Subtotal /95 + Autoevaluacion /5 = Nota final /100.</p>
-      ${activityColumns.length ? `<section class="activity-key">
-        <h2>ACTIVIDADES EVALUADAS</h2>
-        <p class="activity-context">${escapeHtml(normalizeText(subject.nombre))} &middot; ${escapeHtml(course.nombre || "")} &middot; ${escapeHtml(trimesterLabel)} &middot; ${gestionActual()}</p>
-        <div class="activity-key-list">${activityColumns.map((item) => `<div class="activity-key-item" data-key-code="${item.printCode}"><strong>${item.printCode}</strong><span>${escapeHtml(item.titulo || "Actividad sin titulo")}</span></div>`).join("")}</div>
-      </section>` : ""}
       <div class="signatures">
         <div>
           <span></span>
@@ -266,7 +258,7 @@ export function printDocument(payload, subjects) {
             line-height: 1;
             letter-spacing: 0;
           }
-          .activity-title { font-size: 8pt; font-weight: 700; }
+          .activity-title { height: calc(var(--activity-header-height, 110px) - 6px); white-space: normal; overflow-wrap: anywhere; font-size: 8pt; font-weight: 700; }
           .prom .vertical-text { font-weight: 700; }
           .thin-header { height: 9px; background: #f8f8f8; }
           .col-header { font-size: calc(8px + var(--print-font-increase)); font-weight: 700; background: #fff; }
@@ -279,14 +271,6 @@ export function printDocument(payload, subjects) {
           .status-ok { background: #edf8ff; color: #166534; font-size: 7.3pt; }
           .status-low { background: #edf8ff; color: #d91f26; font-size: 7.3pt; font-weight: 700; }
           .grade-scale-note { margin: 6px 0 0; font-size: 7.3pt; }
-          .activity-key { margin-top: 12px; break-inside: avoid; }
-          .activity-key h2 { margin: 0 0 3px; font-size: 8pt; }
-          .activity-context { margin: 0 0 6px; font-size: 7.3pt; }
-          .activity-key-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 14px; }
-          .activity-key-item { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 4px; font-size: 8pt; line-height: 1.15; break-inside: avoid; }
-          .activity-key-item span { overflow-wrap: anywhere; }
-          .activity-reference-page .activity-key { margin-top: 0; }
-          .activity-reference-page, .activity-reference-page .activity-key { break-inside: auto; }
           .signatures { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 8px 34px 0; text-align: center; font-size: calc(7.5px + var(--print-font-increase)); break-inside: avoid; }
           .signatures span { display: block; border-top: 1px solid #111; margin: 0 auto 2px; width: 145px; }
           .signatures strong { display: block; font-size: calc(7.5px + var(--print-font-increase)); font-weight: 700; }
@@ -330,40 +314,42 @@ export function printDocument(payload, subjects) {
                 if (width <= available || available <= 0) return;
                 cell.style.fontSize = (parseFloat(style.fontSize) * available / width) + "px";
               });
-              document.querySelectorAll(".vertical-text").forEach((label) => {
+              document.querySelectorAll(".vertical-text:not(.activity-title)").forEach((label) => {
                 const available = label.parentElement.clientHeight - 4;
                 const height = label.getBoundingClientRect().height;
                 if (height > available && available > 0) label.style.fontSize = (parseFloat(getComputedStyle(label).fontSize) * available / height) + "px";
               });
 
-              // Keep every mark on its original sheet; only full activity titles may continue.
+              // Use the remaining Letter page height for titles without moving any column or row.
               const pageHeight = ${page.alto} * 96 / 25.4;
               document.querySelectorAll(".print-page").forEach((recordPage) => {
-                const key = recordPage.querySelector(".activity-key");
-                if (!key) return;
-                const heading = key.querySelector("h2").cloneNode(true);
-                const context = key.querySelector(".activity-context").cloneNode(true);
-                const items = [...key.querySelectorAll(".activity-key-item")];
-                let currentPage = recordPage;
-                let currentList = key.querySelector(".activity-key-list");
-                currentList.replaceChildren();
-                items.forEach((item) => {
-                  currentList.appendChild(item);
-                  if (currentPage.getBoundingClientRect().height <= pageHeight) return;
-                  item.remove();
-                  if (!currentList.children.length && currentPage === recordPage) key.remove();
-                  const nextPage = document.createElement("section");
-                  nextPage.className = "print-page activity-reference-page";
-                  const nextKey = document.createElement("section");
-                  nextKey.className = "activity-key";
-                  nextKey.append(heading.cloneNode(true), context.cloneNode(true));
-                  currentList = document.createElement("div");
-                  currentList.className = "activity-key-list";
-                  nextKey.appendChild(currentList);
-                  nextPage.appendChild(nextKey);
-                  currentPage.after(nextPage);
-                  currentPage = nextPage;
-                  currentList.appendChild(item);
+                const labels = [...recordPage.querySelectorAll(".activity-title")];
+                if (!labels.length) return;
+                const naturalHeight = Math.max(...labels.map((label) => {
+                  label.style.height = "auto";
+                  label.style.whiteSpace = "nowrap";
+                  const height = label.getBoundingClientRect().height;
+                  label.style.height = "";
+                  label.style.whiteSpace = "";
+                  return height;
+                }));
+                const currentHeight = recordPage.querySelector(".vertical").getBoundingClientRect().height;
+                const freeHeight = Math.max(0, pageHeight - recordPage.getBoundingClientRect().height - 2);
+                const headerHeight = Math.max(currentHeight, Math.min(260, naturalHeight + 6, currentHeight + freeHeight));
+                recordPage.style.setProperty("--activity-header-height", headerHeight + "px");
+                recordPage.querySelectorAll(".vertical").forEach((cell) => { cell.style.height = headerHeight + "px"; });
+                labels.forEach((label) => {
+                  const cell = label.parentElement;
+                  const availableWidth = cell.clientWidth - 1;
+                  let low = 1, high = parseFloat(getComputedStyle(label).fontSize);
+                  if (label.getBoundingClientRect().width <= availableWidth) return;
+                  for (let step = 0; step < 16; step++) {
+                    const size = (low + high) / 2;
+                    label.style.fontSize = size + "px";
+                    if (label.getBoundingClientRect().width <= availableWidth) low = size;
+                    else high = size;
+                  }
+                  label.style.fontSize = low + "px";
                 });
               });
               document.documentElement.dataset.printReady = "true";
