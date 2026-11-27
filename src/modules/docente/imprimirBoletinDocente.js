@@ -98,9 +98,9 @@ function bulletinSheet(payload, trimesterIds, { students, offset = 0, pageNumber
   const year = gestionActual();
   const subjectColumnCount = subjects.length + 1;
   const termCount = trimesterIds.length;
-  const stackedTerms = termCount === 3;
+  const stackedTerms = termCount > 1;
   const noteColumnCount = stackedTerms ? subjectColumnCount : Math.max(1, termCount * subjectColumnCount);
-  const nameWidth = termCount === 1 ? "38%" : termCount === 2 ? "29%" : "27%";
+  const nameWidth = termCount === 1 ? "38%" : "30%";
 
   return `
     <section class="bulletin-print-page terms-${termCount}" style="--note-columns:${noteColumnCount};--name-width:${nameWidth}">
@@ -131,7 +131,7 @@ function bulletinSheet(payload, trimesterIds, { students, offset = 0, pageNumber
             <th class="number-head">N°</th><th class="name-head">APELLIDOS Y NOMBRES</th>
             <th class="trimester-label-head">TRIM.</th>
             ${subjects.map((subject) => `<th class="subject-head" title="${escapeHtml(subject.nombre)}"><span>${escapeHtml(SUBJECT_CODES[subject.id] || subject.corto || subject.nombre.slice(0, 3))}</span></th>`).join("")}
-            <th class="term-average"><span>PROM.</span></th>
+            <th class="term-average" title="Promedio trimestral"><span>PROM</span></th>
             <th class="summary-head"><span>${summaryLabel(trimesterIds)}</span></th>
           </tr>` : `
           <tr>
@@ -146,7 +146,7 @@ function bulletinSheet(payload, trimesterIds, { students, offset = 0, pageNumber
           <tr>
             ${trimesterIds.map((trimesterId) => `
               ${subjects.map((subject, subjectIndex) => `<th class="subject-head term-${trimesterId} ${subjectIndex === 0 ? "term-start" : ""}" title="${escapeHtml(subject.nombre)}"><span>${escapeHtml(SUBJECT_CODES[subject.id] || subject.corto || subject.nombre.slice(0, 3))}</span></th>`).join("")}
-              <th class="term-average term-${trimesterId}"><span>PROM.</span></th>
+              <th class="term-average term-${trimesterId}" title="Promedio trimestral"><span>PROM</span></th>
             `).join("")}
           </tr>`}
         </thead>
@@ -162,11 +162,11 @@ function bulletinSheet(payload, trimesterIds, { students, offset = 0, pageNumber
               return `${grades.map((grade, subjectIndex) => gradeCell(grade, `${subjectIndex === 0 ? "term-start " : ""}term-${trimesterId}`)).join("")}${gradeCell(termAverage, `term-average term-${trimesterId}`)}`;
             }).join("");
             if (stackedTerms) return `<tbody class="student-group">${termRows.map(({ trimesterId, grades, termAverage }, termIndex) => `<tr>
-              ${termIndex === 0 ? `<td rowspan="3">${offset + rowIndex + 1}</td><td class="student-name" rowspan="3">${escapeHtml(normalizeText(student.nombre))}</td>` : ""}
-              <th scope="row" class="trimester-label term-${trimesterId}">${termIndex + 1}°</th>
+              ${termIndex === 0 ? `<td rowspan="${termCount}">${offset + rowIndex + 1}</td><td class="student-name" rowspan="${termCount}">${escapeHtml(normalizeText(student.nombre))}</td>` : ""}
+              <th scope="row" class="trimester-label term-${trimesterId}">${TRIMESTERS.findIndex((item) => item.id === trimesterId) + 1}°</th>
               ${grades.map((grade, subjectIndex) => gradeCell(grade, `${subjectIndex === 0 ? "term-start " : ""}term-${trimesterId}`)).join("")}
               ${gradeCell(termAverage, `term-average term-${trimesterId}`)}
-              ${termIndex === 0 ? gradeCell(average(termAverages), "summary-cell", 3) : ""}
+              ${termIndex === 0 ? gradeCell(average(termAverages), "summary-cell", termCount) : ""}
             </tr>`).join("")}</tbody>`;
             return `<tbody class="student-group"><tr><td>${offset + rowIndex + 1}</td><td class="student-name">${escapeHtml(normalizeText(student.nombre))}</td>${termCells}${gradeCell(average(termAverages), "summary-cell")}</tr></tbody>`;
           }).join("")}
@@ -183,7 +183,7 @@ function bulletinSheet(payload, trimesterIds, { students, offset = 0, pageNumber
 function printDocument(payload, trimesterIds) {
   const page = formatoCarta();
   const students = sortStudentsByName(payload.students || []);
-  const studentsPerPage = trimesterIds.length === 3 ? 10 : 22;
+  const studentsPerPage = trimesterIds.length === 3 ? 8 : trimesterIds.length === 2 ? 11 : 16;
   const pageCount = Math.max(1, Math.ceil(students.length / studentsPerPage));
   const sheets = Array.from({ length: pageCount }, (_, index) => bulletinSheet(payload, trimesterIds, {
     students: students.slice(index * studentsPerPage, (index + 1) * studentsPerPage),
@@ -195,22 +195,22 @@ function printDocument(payload, trimesterIds) {
     <style>
       ${page.pagina}
       * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: "Arial Narrow", Arial, sans-serif; }
+      html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: Arial, sans-serif; }
       .bulletin-print-page { width: ${page.ancho}mm; max-width: 100%; break-after: page; page-break-after: always; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .document-header { border: 1.4px solid #111; border-bottom: 0; break-inside: avoid; }
-      .document-heading { display: grid; grid-template-columns: 42% 58%; min-height: 17mm; }
+      .document-heading { display: grid; grid-template-columns: 42% 58%; min-height: 20mm; }
       .school-brand { display: flex; align-items: center; gap: 2mm; padding: 1.5mm 2mm; border-right: 1px solid #111; }
       .school-brand img { width: 13mm; height: 13mm; object-fit: contain; }
-      .school-brand small { display: block; font-size: 8pt; font-weight: 700; }
-      .school-brand strong { display: block; margin-top: .8mm; font-size: 10pt; line-height: 1.1; }
-      .document-title { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.5mm; padding: 1.5mm 2mm; text-align: center; font-size: 13pt; font-weight: 700; }
-      .document-title span { font-size: 8.5pt; font-weight: 400; }
+      .school-brand small { display: block; font-size: 10pt; font-weight: 700; }
+      .school-brand strong { display: block; margin-top: .8mm; font-size: 11pt; line-height: 1.15; }
+      .document-title { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.5mm; padding: 1.5mm 2mm; text-align: center; font-size: 14pt; font-weight: 700; }
+      .document-title span { font-size: 10pt; font-weight: 400; }
       .document-info { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #111; }
-      .document-info > div { min-width: 0; padding: 1mm 2mm; font-size: 8pt; line-height: 1.15; overflow-wrap: anywhere; }
+      .document-info > div { min-width: 0; padding: 1mm 2mm; font-size: 10pt; line-height: 1.2; overflow-wrap: anywhere; }
       .document-info > div:nth-child(odd) { border-right: 1px solid #111; }
       .document-info > div:nth-child(-n+2) { border-bottom: 1px solid #111; }
       .bulletin-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-      .bulletin-table th, .bulletin-table td { border: 1px solid #222; height: 8mm; padding: .3mm .25mm; text-align: center; vertical-align: middle; font-size: 10pt; font-weight: 400; line-height: 1.05; }
+      .bulletin-table th, .bulletin-table td { border: 1px solid #222; height: 10mm; padding: .5mm .25mm; text-align: center; vertical-align: middle; font-size: 12pt; font-weight: 400; line-height: 1.15; }
       .bulletin-table th { font-weight: 700; }
       .bulletin-table thead { display: table-header-group; }
       .bulletin-table tr { break-inside: avoid; page-break-inside: avoid; }
@@ -219,35 +219,31 @@ function printDocument(payload, trimesterIds) {
       .name-column { width: var(--name-width); }
       .summary-column { width: 6%; }
       .note-column { width: calc((100% - 3% - var(--name-width) - 6%) / var(--note-columns)); }
-      .number-head, .name-head { background: #fff; font-size: 9pt; }
-      .trimester-head { height: 6mm !important; font-size: 10pt !important; }
-      .subject-head, th.term-average { height: 12mm !important; padding: .5mm 0; }
-      .subject-head span, th.term-average span { display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 8.5pt; white-space: nowrap; }
+      .number-head, .name-head { background: #fff; font-size: 10pt; }
+      .trimester-head { height: 8mm !important; font-size: 11pt !important; }
+      .subject-head, th.term-average { height: 9mm !important; padding: .5mm 0; }
+      .subject-head span, th.term-average span { display: inline-block; font-size: 9pt; white-space: nowrap; }
       .term-t1 { background: #fff; }
       .term-t2 { background: #f7f7f7; }
       .term-t3 { background: #f2f7f2; }
       .term-average { background: #fde7c8; }
       .term-start { border-left-width: 1.6px !important; }
       .summary-head { background: #dbeafe; padding: 0; }
-      .summary-head span { display: block; font-size: 8pt; line-height: 1.2; overflow-wrap: normal; }
+      .summary-head span { display: block; font-size: 9pt; line-height: 1.2; overflow-wrap: normal; }
       .summary-cell { background: #e8f2ff; font-weight: 600 !important; }
-      .student-name { padding-left: 1.2mm !important; text-align: left !important; white-space: normal; overflow-wrap: anywhere; font-size: 9.5pt !important; }
-      .bulletin-table td.three-digit { padding-left: 0; padding-right: 0; font-size: 9pt; }
-      .terms-1 .bulletin-table td { font-size: 11pt; }
-      .terms-1 .subject-head, .terms-1 th.term-average { height: 7mm !important; }
-      .terms-1 .subject-head span, .terms-1 th.term-average span { writing-mode: horizontal-tb; transform: none; font-size: 8.5pt; }
-      .terms-3 .trimester-column { width: 6%; }
-      .terms-3 .summary-column { width: 7%; }
-      .terms-3 .note-column { width: calc((100% - 3% - 27% - 6% - 7%) / var(--note-columns)); }
-      .terms-3 .bulletin-table td, .terms-3 .trimester-label { height: 6mm; font-size: 10.5pt; }
-      .terms-3 .subject-head, .terms-3 th.term-average { height: 8mm !important; }
-      .terms-3 .subject-head span, .terms-3 th.term-average span { writing-mode: horizontal-tb; transform: none; font-size: 8.5pt; }
-      .terms-3 .student-group + .student-group { border-top: 1.6px solid #111; }
+      .student-name { padding-left: 1.2mm !important; text-align: left !important; white-space: normal; overflow-wrap: anywhere; font-size: 11.5pt !important; }
+      .bulletin-table td.three-digit { padding-left: 0; padding-right: 0; }
+      :is(.terms-2, .terms-3) .trimester-column { width: 6%; }
+      :is(.terms-2, .terms-3) .summary-column { width: 7%; }
+      :is(.terms-2, .terms-3) .note-column { width: calc((100% - 3% - 30% - 6% - 7%) / var(--note-columns)); }
+      :is(.terms-2, .terms-3) .bulletin-table td, .bulletin-table .trimester-label { height: 7mm; }
+      .bulletin-table .trimester-label-head { font-size: 9pt; }
+      .student-group + .student-group { border-top: 1.6px solid #111; }
       .low-grade { color: #d71920; }
       .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 15mm; padding: 8mm 6mm 1mm; text-align: center; break-inside: avoid; page-break-inside: avoid; }
       .signatures span { display: block; width: 55mm; max-width: 100%; margin: 0 auto 1mm; border-top: 1px solid #111; }
-      .signatures strong { display: block; font-size: 8.5pt; }
-      .signatures small { display: block; margin-top: .7mm; font-size: 7pt; }
+      .signatures strong { display: block; font-size: 10pt; }
+      .signatures small { display: block; margin-top: .7mm; font-size: 9pt; }
       @media print { body { width: ${page.ancho}mm; } .bulletin-print-page:last-child { break-after: auto; page-break-after: auto; } }
     </style></head><body>${sheets}<script>window.addEventListener("load",()=>{setTimeout(()=>{window.focus();window.print();},250);});</script></body></html>`;
   const printWindow = window.open("", "_blank", "width=900,height=1200");
