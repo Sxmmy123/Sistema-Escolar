@@ -8,8 +8,8 @@ import { e as escapeHtml } from "../src/modules/docente-inicial/ComponentesInici
 const trimesterIds = ["t1", "t2", "t3"];
 const terms = trimesterIds.map((id, index) => ({ id, label: `${["1er", "2do", "3er"][index]} trimestre` }));
 
-export async function documentosImpresionPrueba({ cantidad = 40 } = {}) {
-  const students = Array.from({ length: cantidad }, (_, index) => ({ id: `alumno_${index + 1}`, nombre: `ESTUDIANTE ${String(index + 1).padStart(2, "0")} FLORES VARGAS` }));
+export async function documentosImpresionPrueba({ cantidad = 40, trimestres = trimesterIds, nombres = [], notasPorTrimestre = {} } = {}) {
+  const students = Array.from({ length: cantidad }, (_, index) => ({ id: `alumno_${index + 1}`, nombre: nombres[index] || `ESTUDIANTE ${String(index + 1).padStart(2, "0")} FLORES VARGAS` }));
   const course = COURSES.find((item) => item.id === "cuarto_a");
   const subject = SUBJECTS.find((item) => item.id === "matematica");
   const payload = { course, students, teacherName: "Docente de prueba", trimesterLabel: "1er trimestre", activities: [], gradesList: [], attendanceRows: [] };
@@ -18,6 +18,8 @@ export async function documentosImpresionPrueba({ cantidad = 40 } = {}) {
   const context = {
     formatoCarta, window, URL, SUBJECTS, TRIMESTERS: terms, gestionActual: () => "2026", icon: () => "", escapeHtml,
     gradeByActivityAndStudent: () => ({}), isMaterialActivity: () => false, isSaberActivity: (row) => row.tipo === "examen",
+    activityHasGrades: () => true, studentActivityGrade: () => 79,
+    calculateStudentTerm: (student, activities) => ({ final: notasPorTrimestre[activities[0]?.id?.split("_")[0]] ?? (student.id === "alumno_1" ? 100 : student.id === "alumno_2" ? 48 : 79) }),
     attendanceShort: (value) => ({ presente: "P", falta: "F", atraso: "A", permiso: "L" })[value],
     normalizarEstadoAsistencia: (value) => value, alert(message) { throw new Error(message); }
   };
@@ -31,7 +33,9 @@ export async function documentosImpresionPrueba({ cantidad = 40 } = {}) {
   printNotes({ ...payload, calculateStudentTerm: () => ({ asistencia100: 100, puntualidad100: 100, responsabilidad100: 100, ser100: 100, ser10: 10, saber100: 75, saber45: 34, hacer100: 75, hacer40: 30, auto5: 5, final: 79 }) }, [subject]);
   documents.notas = documents.current;
   const printBulletin = await getFunction("docente/imprimirBoletinDocente.js", "printDocument");
-  printBulletin(payload, trimesterIds);
+  printBulletin({ ...payload, snapshotsByTerm: Object.fromEntries(trimestres.map((id) => [id, {
+    activities: SUBJECTS.map((item) => ({ id: `${id}_${item.id}`, materiaId: item.id, tipo: "examen" })), gradesList: [], attendanceRows: []
+  }])) }, trimestres);
   documents.boletin = documents.current;
   const printAttendance = await getFunction("docente/exportResumenAsistencia.js", "printAttendanceSummaryByMonth");
   const dates = Array.from({ length: 23 }, (_, index) => `2026-03-${String(index + 1).padStart(2, "0")}`);
