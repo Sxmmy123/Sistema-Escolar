@@ -6,6 +6,7 @@ import { DELIVERY_STATES, deleteActivity, getTeacherDataCacheMeta, getTeacherNot
 import { findSubject } from "../../data/catalog.js";
 import { activityHasGrades, attendanceStateForDate, calculateStudentTerm, deliveryStateForGrade, gradeByActivityAndStudent, gradeTone, isMaterialActivity, isSaberActivity, studentActivityGrade } from "./AcademicoDocente.js";
 import { openTeacherNotesPrintModal } from "./imprimirNotasDocente.js";
+import { cargarVistaDocente } from "./CargaVistaDocente.js";
 
 function notesCriterionModal(criterion = null) {
   if (!teacherState.notesCriterionOpen) return "";
@@ -122,7 +123,7 @@ function closeNotesModals() {
   teacherState.notesGradeKind = "";
 }
 
-export async function renderNotes(context) {
+export async function renderNotes(context, { readCache = getTeacherNotesSnapshot, refresh = refreshTeacherNotesSnapshot, force = false } = {}) {
   const container = document.querySelector("[data-teacher-notes]");
   const course = selectedCourse(context);
   if (!container) return;
@@ -132,30 +133,38 @@ export async function renderNotes(context) {
   }
 
   const activeTrimesterId = teacherState.trimesterId || selectedTrimester().id || "t1";
+  const reload = () => renderNotes(context, { readCache, refresh, force: true });
+  return cargarVistaDocente({
+    container, force,
+    isCurrent: () => document.querySelector("[data-teacher-notes]") === container &&
+      teacherState.trimesterId === activeTrimesterId && selectedCourse(context)?.id === course.id &&
+      (!teacherState.context?.uid || teacherState.context.uid === context.uid),
+    readCache: () => readCache(context, course, activeTrimesterId),
+    refresh: () => refresh(context, course, activeTrimesterId),
+    draw: (snapshot, status) => renderNotesContent(context, course, activeTrimesterId, snapshot, { ...status, reload })
+  });
+}
+
+function renderNotesContent(context, course, activeTrimesterId, notesSnapshot, { loading = false, error = "", reload } = {}) {
+  const container = document.querySelector("[data-teacher-notes]");
+  if (!container) return;
   const notesCacheMeta = getTeacherDataCacheMeta(context, "notas", course.id, activeTrimesterId);
-  const notesSnapshot = await getTeacherNotesSnapshot(context, course, activeTrimesterId);
   if (!notesSnapshot) {
     container.innerHTML = `
-      <div class="teacher-module-surface rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
+      <div aria-busy="${loading}" class="teacher-module-surface rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-5">
         ${teacherModuleHeading({
           title: "Notas por materia",
           course: course.nombre,
           trimester: selectedTrimester().label,
-          detail: "Sin copia local"
+          detail: loading ? "Cargando notas..." : "Notas no disponibles"
         })}
-        <p class="mt-3 max-w-2xl text-sm font-normal text-slate-500">Para ahorrar lecturas, las notas se cargan manualmente y luego quedan guardadas en este dispositivo.</p>
-        <button type="button" data-refresh-notes-cache class="mt-4 inline-flex items-center gap-2 rounded-2xl bg-school-navy px-4 py-3 text-sm font-black text-white shadow-soft transition hover:bg-school-green">
-          ${icon("cloud-download", "h-4 w-4")} Cargar notas
+        ${error ? `<p role="alert" class="mt-3 text-sm text-red-700">${escapeHtml(error)}</p>` : ""}
+        <button type="button" data-refresh-notes-cache ${loading ? "disabled" : ""} class="mt-4 inline-flex items-center gap-2 rounded-2xl bg-school-navy px-4 py-3 text-sm font-black text-white shadow-soft transition hover:bg-school-green disabled:opacity-50">
+          ${icon(loading ? "loader-2" : "refresh-cw", "h-4 w-4")} ${loading ? "Cargando notas..." : "Reintentar"}
         </button>
       </div>
     `;
-    container.querySelector("[data-refresh-notes-cache]")?.addEventListener("click", async (event) => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      button.textContent = "Cargando notas...";
-      await refreshTeacherNotesSnapshot(context, course, activeTrimesterId);
-      await renderNotes(context);
-    });
+    container.querySelector("[data-refresh-notes-cache]")?.addEventListener("click", reload);
     refreshIcons();
     return;
   }
@@ -321,7 +330,8 @@ export async function renderNotes(context) {
   }
 
   container.innerHTML = `
-    <section class="space-y-3">
+    <section class="space-y-3" aria-busy="${loading}">
+      ${error ? `<p role="alert" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">${escapeHtml(error)} Se mantienen los datos anteriores.</p>` : ""}
       <div class="teacher-module-surface overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
         <div class="p-3 sm:p-4">
           <div class="teacher-module-header flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -348,8 +358,8 @@ export async function renderNotes(context) {
                     ${icon("pencil", "h-3.5 w-3.5")} Editar notas
                   </button>
                 `}
-                <button type="button" data-refresh-notes-cache ${teacherState.notesEditMode ? "disabled" : ""} class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-school-navy px-3 py-2 text-xs font-semibold text-white transition hover:bg-school-green disabled:cursor-not-allowed disabled:opacity-40">
-                  ${icon("refresh-cw", "h-3.5 w-3.5")} Actualizar
+                <button type="button" data-refresh-notes-cache ${teacherState.notesEditMode || loading ? "disabled" : ""} class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-school-navy px-3 py-2 text-xs font-semibold text-white transition hover:bg-school-green disabled:cursor-not-allowed disabled:opacity-40">
+                  ${icon(loading ? "loader-2" : "refresh-cw", "h-3.5 w-3.5")} ${loading ? "Actualizando..." : error ? "Reintentar" : "Actualizar"}
                 </button>
               </div>
               <span class="inline-flex items-center gap-1.5 rounded-lg bg-school-sky px-2.5 py-1.5 text-[10px] font-medium text-school-navy">
@@ -606,13 +616,7 @@ export async function renderNotes(context) {
       await renderNotes(context);
     });
   });
-  container.querySelector("[data-refresh-notes-cache]")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.textContent = "Actualizando...";
-    await refreshTeacherNotesSnapshot(context, course, activeTrimesterId);
-    await renderNotes(context);
-  });
+  container.querySelector("[data-refresh-notes-cache]")?.addEventListener("click", reload);
   container.querySelector("[data-print-notes]")?.addEventListener("click", () => {
     openTeacherNotesPrintModal({
       course,

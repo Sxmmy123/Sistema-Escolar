@@ -17,6 +17,7 @@ import {
 import { teacherState } from "./EstadoDocente.js";
 import { openTeacherBulletinPrintModal } from "./imprimirBoletinDocente.js";
 import { compactSubjectName, emptyState, escapeHtml, refreshIcons, teacherModuleHeading } from "./UtilidadesDocente.js";
+import { cargarVistaDocente } from "./CargaVistaDocente.js";
 
 function selectedCourse(context = teacherState.context) {
   const courses = context?.courses || [];
@@ -44,9 +45,8 @@ function gradeCell(value) {
 
 function buildSubjectFinal(student, subjectId, snapshot) {
   if (!snapshot) return "";
-  const { activities = [], gradesList = [], attendanceRows = [] } = snapshot;
-  const gradesMap = gradeByActivityAndStudent(gradesList);
-  const subjectActivitiesAll = activities.filter((item) => item.materiaId === subjectId);
+  const { subjects, gradesMap, attendanceRows } = snapshot;
+  const subjectActivitiesAll = subjects.get(subjectId) || [];
   const subjectActivities = subjectActivitiesAll
     .filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
     .filter((item) => activityHasGrades(item, gradesMap));
@@ -85,10 +85,20 @@ function subjectHeaderCells() {
 }
 
 function renderBulletinTable({ course, students, snapshotsByTerm, cacheMetas }) {
+  const prepared = Object.fromEntries(TRIMESTERS.map(({ id }) => {
+    const snapshot = snapshotsByTerm[id];
+    if (!snapshot) return [id, null];
+    const subjects = new Map();
+    for (const activity of snapshot.activities || []) {
+      if (!subjects.has(activity.materiaId)) subjects.set(activity.materiaId, []);
+      subjects.get(activity.materiaId).push(activity);
+    }
+    return [id, { subjects, gradesMap: gradeByActivityAndStudent(snapshot.gradesList || []), attendanceRows: snapshot.attendanceRows || [] }];
+  }));
   const rows = sortStudentsByName(students).map((student, index) => {
     const termAverages = [];
     const termCells = TRIMESTERS.map((trimester) => {
-      const snapshot = snapshotsByTerm[trimester.id];
+      const snapshot = prepared[trimester.id];
       const subjectGrades = SUBJECTS.map((subject) => buildSubjectFinal(student, subject.id, snapshot));
       const termAverage = average(subjectGrades);
       if (termAverage !== "") termAverages.push(termAverage);
@@ -141,7 +151,7 @@ export function bulletinStudents(snapshots) {
   return [...byId.values()].sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", { sensitivity: "base" }));
 }
 
-export async function renderBulletin(context) {
+export async function renderBulletin(context, { readCache = getTeacherNotesSnapshot, refresh = refreshTeacherBulletinSnapshot, force = false } = {}) {
   const container = document.querySelector("[data-teacher-bulletin]");
   if (!container) return;
   const course = selectedCourse(context);
@@ -150,14 +160,29 @@ export async function renderBulletin(context) {
     return;
   }
 
-  const snapshots = await Promise.all(TRIMESTERS.map((trimester) => getTeacherNotesSnapshot(context, course, trimester.id)));
+  const reload = () => renderBulletin(context, { readCache, refresh, force: true });
+  return cargarVistaDocente({
+    container, force,
+    isCurrent: () => document.querySelector("[data-teacher-bulletin]") === container && selectedCourse(context)?.id === course.id &&
+      (!teacherState.context?.uid || teacherState.context.uid === context.uid),
+    readCache: () => Promise.all(TRIMESTERS.map((trimester) => readCache(context, course, trimester.id))),
+    complete: (snapshots) => snapshots?.length === TRIMESTERS.length && snapshots.every(Boolean),
+    refresh: () => refresh(context, course),
+    draw: (snapshots, status) => renderBulletinContent(context, course, snapshots || [], { ...status, reload })
+  });
+}
+
+function renderBulletinContent(context, course, snapshots, { loading = false, error = "", reload } = {}) {
+  const container = document.querySelector("[data-teacher-bulletin]");
+  if (!container) return;
   const snapshotsByTerm = Object.fromEntries(TRIMESTERS.map((trimester, index) => [trimester.id, snapshots[index]]));
   const cacheMetas = Object.fromEntries(TRIMESTERS.map((trimester) => [trimester.id, getTeacherDataCacheMeta(context, "notas", course.id, trimester.id)]));
   const students = bulletinStudents(snapshots);
-  const missing = snapshots.some((snapshot) => !snapshot);
+  const missing = TRIMESTERS.some((_, index) => !snapshots[index]);
 
   container.innerHTML = `
-    <section class="space-y-3">
+    <section class="space-y-3" aria-busy="${loading}">
+      ${error ? `<p role="alert" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">${escapeHtml(error)}${students.length ? " Se mantienen los datos anteriores." : ""}</p>` : ""}
       <div class="teacher-module-surface rounded-2xl border border-slate-200 bg-white p-3 shadow-soft sm:rounded-3xl sm:p-4">
         <div class="teacher-module-header flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           ${teacherModuleHeading({
@@ -169,22 +194,22 @@ export async function renderBulletin(context) {
           <div class="flex flex-col gap-2 lg:items-end">
             ${courseTabs(context, course)}
             <div class="flex flex-wrap gap-2">
-              <button type="button" data-print-bulletin class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-school-green/30 bg-green-50 px-3 py-2 text-xs font-semibold text-school-green transition hover:bg-green-100 sm:flex-none sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">
+              <button type="button" data-print-bulletin ${loading || missing ? "disabled" : ""} class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-school-green/30 bg-green-50 px-3 py-2 text-xs font-semibold text-school-green transition hover:bg-green-100 disabled:opacity-50 sm:flex-none sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">
                 ${icon("printer", "h-4 w-4")} Imprimir
               </button>
-              <button type="button" data-refresh-bulletin class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-school-green px-3 py-2 text-xs font-semibold text-white shadow-soft transition hover:bg-school-navy sm:flex-none sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">
-                ${icon("refresh-cw", "h-4 w-4")} Actualizar boletin
+              <button type="button" data-refresh-bulletin ${loading ? "disabled" : ""} class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-school-green px-3 py-2 text-xs font-semibold text-white shadow-soft transition hover:bg-school-navy disabled:opacity-50 sm:flex-none sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">
+                ${icon(loading ? "loader-2" : "refresh-cw", "h-4 w-4")} ${loading ? "Cargando boletin..." : error ? "Reintentar" : "Actualizar boletin"}
               </button>
             </div>
           </div>
         </div>
       </div>
-      ${missing ? `
+      ${missing && !loading && !error ? `
         <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800 shadow-soft">
           Faltan datos cargados de uno o mas trimestres. Presiona <b>Actualizar boletin</b> para reunir notas, asistencias y alumnos del curso.
         </div>
       ` : ""}
-      ${students.length ? renderBulletinTable({ course, students, snapshotsByTerm, cacheMetas }) : emptyState("Sin alumnos cargados", "Actualiza el boletin o registra alumnos en este curso.")}
+      ${students.length ? renderBulletinTable({ course, students, snapshotsByTerm, cacheMetas }) : loading ? `<p role="status" class="p-4 text-sm text-slate-500">Cargando los tres trimestres...</p>` : emptyState("Sin alumnos cargados", error ? "" : "No hay alumnos en este curso.")}
     </section>
   `;
 
@@ -206,23 +231,7 @@ export async function renderBulletin(context) {
     });
   });
 
-  container.querySelector("[data-refresh-bulletin]")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.innerHTML = `${icon("loader-2", "h-4 w-4 animate-spin")} Actualizando...`;
-    try {
-      await refreshTeacherBulletinSnapshot(context, course);
-      await renderBulletin(context);
-    } catch (error) {
-      alert(error.message || "No se pudo actualizar el boletin. La copia local sigue disponible.");
-    } finally {
-      if (button.isConnected) {
-        button.disabled = false;
-        button.innerHTML = `${icon("refresh-cw", "h-4 w-4")} Actualizar boletin`;
-        refreshIcons();
-      }
-    }
-  });
+  container.querySelector("[data-refresh-bulletin]")?.addEventListener("click", reload);
 
   refreshIcons();
 }

@@ -1,11 +1,21 @@
-import { compactSubjectName, courseAccent, emptyState, escapeHtml, refreshIcons, setText, subjectIconName, teacherModuleHeading } from "./UtilidadesDocente.js";
+import { compactSubjectName, courseAccent, emptyState, escapeHtml, refreshIcons, subjectIconName, teacherModuleHeading } from "./UtilidadesDocente.js";
 import { getTeacherScheduleCacheMeta, getTeacherScheduleRows, refreshTeacherScheduleCache } from "../../services/teacherData.js";
 import { DAYS, findSubject, periodsForCourse } from "../../data/catalog.js";
 import { teacherState } from "./EstadoDocente.js";
 import { activityEvaluationLabel, activityPointsLabel } from "./ComunDocente.js";
 import { icon } from "../../ui/dom.js";
+import { cargarVistaDocente } from "./CargaVistaDocente.js";
 
-export async function renderTeacherSchedule(context) {
+async function readSchedule(context) {
+  return getTeacherScheduleCacheMeta(context) ? getTeacherScheduleRows(context, null, { cacheOnly: true }) : null;
+}
+
+async function refreshSchedule(context) {
+  await refreshTeacherScheduleCache(context);
+  return getTeacherScheduleRows(context);
+}
+
+export async function renderTeacherSchedule(context, { readCache = readSchedule, refresh = refreshSchedule, force = false } = {}) {
   const container = document.querySelector("[data-teacher-schedule]");
   if (!container) return;
   if (!context.courses.length) {
@@ -13,7 +23,20 @@ export async function renderTeacherSchedule(context) {
     return;
   }
 
-  const rows = await getTeacherScheduleRows(context);
+  const reload = () => renderTeacherSchedule(context, { readCache, refresh, force: true });
+  return cargarVistaDocente({
+    container, force,
+    isCurrent: () => document.querySelector("[data-teacher-schedule]") === container &&
+      (!teacherState.context?.uid || teacherState.context.uid === context.uid),
+    readCache: () => readCache(context),
+    refresh: () => refresh(context),
+    draw: (rows, status) => renderScheduleContent(context, rows || [], { ...status, loaded: rows !== null, reload })
+  });
+}
+
+function renderScheduleContent(context, rows, { loading = false, loaded = false, error = "", reload } = {}) {
+  const container = document.querySelector("[data-teacher-schedule]");
+  if (!container) return;
   const rowsBySlot = {};
   rows.forEach((row) => {
     const key = `${row.periodo}|${row.hora}|${row.diaId}`;
@@ -68,7 +91,8 @@ export async function renderTeacherSchedule(context) {
     `;
   }
   container.innerHTML = `
-    <div class="teacher-module-surface rounded-3xl border border-slate-200 bg-white shadow-soft">
+    <div aria-busy="${loading}" class="teacher-module-surface rounded-3xl border border-slate-200 bg-white shadow-soft">
+      ${error ? `<p role="alert" class="border-b border-red-200 bg-red-50 p-3 text-sm text-red-800">${escapeHtml(error)}${loaded ? " Se mantiene el horario anterior." : ""}</p>` : ""}
       <div class="border-b border-slate-100 p-4">
         <div class="teacher-module-header flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           ${teacherModuleHeading({
@@ -78,8 +102,8 @@ export async function renderTeacherSchedule(context) {
             detail: scheduleCache ? `Copia local: ${scheduleCache.label}` : "Sin copia local"
           })}
           <div class="flex flex-col gap-2 lg:max-w-xl lg:items-end">
-            <button type="button" data-refresh-teacher-schedule class="inline-flex items-center justify-center gap-2 rounded-2xl bg-school-navy px-4 py-2 text-sm font-black text-white shadow-soft transition hover:bg-school-green">
-              ${icon("cloud-download", "h-4 w-4")} Cargar horario
+            <button type="button" data-refresh-teacher-schedule ${loading ? "disabled" : ""} class="inline-flex items-center justify-center gap-2 rounded-2xl bg-school-navy px-4 py-2 text-sm font-black text-white shadow-soft transition hover:bg-school-green disabled:opacity-50">
+              ${icon(loading ? "loader-2" : "refresh-cw", "h-4 w-4")} ${loading ? "Cargando horario..." : error ? "Reintentar" : "Actualizar horario"}
             </button>
             <div class="${showCourseColors ? "flex" : "hidden"} flex-wrap gap-2 lg:justify-end">
               ${context.courses.map((courseItem) => {
@@ -152,26 +176,10 @@ export async function renderTeacherSchedule(context) {
             }).join("")}
           </tbody>
         </table>
-        ${!rows.length ? `<p class="mt-4 rounded-2xl bg-yellow-50 px-4 py-3 text-sm font-black text-yellow-800">${scheduleCache ? "No hay materias de este docente registradas en el horario." : "Presiona Cargar horario para descargar tu horario y guardarlo en este dispositivo."}</p>` : ""}
+        ${!rows.length ? `<p role="status" class="mt-4 rounded-2xl bg-yellow-50 px-4 py-3 text-sm font-black text-yellow-800">${loading ? "Cargando horario..." : loaded ? "No hay materias de este docente registradas en el horario." : "Horario no disponible."}</p>` : ""}
       </div>
     </div>
   `;
-  container.querySelector("[data-refresh-teacher-schedule]")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.innerHTML = `${icon("loader-2", "h-4 w-4 animate-spin")} Cargando`;
-    refreshIcons();
-    try {
-      await refreshTeacherScheduleCache(context);
-      setText("[data-teacher-page-status]", "Horario cargado");
-      await renderTeacherSchedule(context);
-    } catch (error) {
-      console.error("No se pudo cargar horario", error);
-      alert("No se pudo cargar el horario. Revisa la conexion e intenta nuevamente.");
-      button.disabled = false;
-      button.innerHTML = `${icon("cloud-download", "h-4 w-4")} Cargar horario`;
-      refreshIcons();
-    }
-  });
+  container.querySelector("[data-refresh-teacher-schedule]")?.addEventListener("click", reload);
   refreshIcons();
 }
