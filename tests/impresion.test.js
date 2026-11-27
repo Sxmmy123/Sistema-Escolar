@@ -241,3 +241,79 @@ test("registro imprime el trimestre seleccionado que envia el modulo de notas", 
   const { notas } = await documentosImpresionPrueba({ cantidad: 1, registro: { trimesterLabel: undefined, selectedTrimesterLabel: "2do trimestre" } });
   assert.match(notas, /2026 &middot; 2DO TRIMESTRE/);
 });
+
+test("asistencia conserva carta vertical, margen de anillado, letra legible y firmas al pie", async () => {
+  const { asistencia } = await documentosImpresionPrueba({ cantidad: 16 });
+  assert.match(asistencia, /size: letter portrait; margin: 10mm 10mm 10mm 25mm/);
+  assert.match(asistencia, /min-height: calc\(259\.4mm - 1px\)/);
+  assert.match(asistencia, /font-size: 8\.5pt/);
+  assert.match(asistencia, /font-size: 8\.2pt/);
+  assert.match(asistencia, /margin-top: auto;/);
+  assert.match(asistencia, /width: 96px;\s*height: 96px/);
+  assert.match(asistencia, /document\.fonts\?\.ready/);
+  assert.match(asistencia, /dataset\.printReady = "true"/);
+  assert.doesNotMatch(asistencia, /Arial Narrow|overflow: hidden|class="activity-cell"|class="bottom-table"/);
+});
+
+test("asistencia resuelve el escudo dentro de la carpeta de GitHub Pages", async () => {
+  const { asistencia } = await documentosImpresionPrueba({
+    cantidad: 1, baseUrl: "./", ubicacion: "https://sxmmy123.github.io/Sistema-Escolar/#/docente/resumen"
+  });
+  assert.match(asistencia, /src="https:\/\/sxmmy123\.github\.io\/Sistema-Escolar\/images\/logo-nueva-bolivia\.png"/);
+});
+
+test("asistencia alinea los totales diarios con las fechas dentro de la misma tabla", async () => {
+  const { asistencia } = await documentosImpresionPrueba({ cantidad: 2, asistencia: { records: [
+    { fecha: "2026-03-02", alumnoId: "alumno_1", estado: "presente" },
+    { fecha: "2026-03-02", alumnoId: "alumno_2", estado: "falta" },
+    { fecha: "2026-03-03", alumnoId: "alumno_1", estado: "atraso" },
+    { fecha: "2026-03-03", alumnoId: "alumno_2", estado: "permiso" }
+  ] } });
+  const table = asistencia.match(/<table class="attendance-table">([\s\S]*?)<\/table>/)[1];
+  const body = table.match(/<tbody>([\s\S]*?)<\/tbody>/)[1];
+  const firstRow = body.match(/<tr>([\s\S]*?)<\/tr>/)[1];
+  assert.deepEqual([...firstRow.matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((match) => match[1]), ["1", "ESTUDIANTE 01 FLORES VARGAS", "P", "A", "1", "0", "1", "0", "2"]);
+  const footer = table.match(/<tfoot>([\s\S]*?)<\/tfoot>/)[1];
+  assert.equal((footer.match(/<tr>/g) || []).length, 4);
+  assert.equal((footer.match(/TOTAL MES: 1/g) || []).length, 4);
+  assert.equal((footer.match(/colspan="2"/g) || []).length, 4);
+  assert.equal((footer.match(/class="attendance-cell"/g) || []).length, 8);
+  assert.equal((body.match(/class="empty-student-row"/g) || []).length, 38);
+});
+
+test("asistencia conserva fechas y estados sin convertir espacios vacios en faltas", async () => {
+  const { asistencia } = await documentosImpresionPrueba({ cantidad: 2, asistencia: { records: [
+    { fecha: "2026-03-03", alumnoId: "alumno_2", estado: "permiso" },
+    { fecha: "2026-02-02", alumnoId: "alumno_1", estado: "presente" }
+  ] } });
+  const sheets = [...asistencia.matchAll(/<section class="sheet[^>]*>([\s\S]*?)<\/section>/g)].map((match) => match[1]);
+  assert.equal(sheets.length, 2);
+  assert.match(sheets[0], /ASISTENCIA&nbsp;&nbsp; FEBRERO/);
+  assert.match(sheets[1], /ASISTENCIA&nbsp;&nbsp; MARZO/);
+  const row = sheets[1].match(/<tbody>\s*<tr>([\s\S]*?)<\/tr>/)[1];
+  assert.match(row, /<td class="attendance-cell"><\/td>/);
+  assert.doesNotMatch(row, />F<\/td>/);
+});
+
+test("asistencia divide cursos grandes en hojas de 40 sin perder alumnos ni duplicar totales", async () => {
+  const { asistencia } = await documentosImpresionPrueba({ cantidad: 41 });
+  const sheets = [...asistencia.matchAll(/<section class="sheet[^>]*>([\s\S]*?)<\/section>/g)].map((match) => match[1]);
+  assert.equal(sheets.length, 2);
+  for (const sheet of sheets) assert.equal((sheet.match(/<td class="number-cell">/g) || []).length, 40);
+  assert.match(sheets[1], /<td class="number-cell">41<\/td>/);
+  assert.match(sheets[1], /<td class="number-cell">80<\/td>/);
+  assert.match(sheets[1], /HOJA 2 DE 2/);
+  assert.match(sheets[0], /TOTAL HOJA: 920/);
+  assert.match(sheets[1], /TOTAL HOJA: 23/);
+  assert.equal((sheets[1].match(/class="empty-student-row"/g) || []).length, 39);
+});
+
+test("asistencia mantiene los 31 dias de un mes y ajusta solo las columnas de fechas", async () => {
+  const records = Array.from({ length: 31 }, (_, index) => ({ fecha: `2026-03-${String(index + 1).padStart(2, "0")}`, alumnoId: "alumno_1", estado: "presente" }));
+  const { asistencia } = await documentosImpresionPrueba({ cantidad: 1, asistencia: { records } });
+  assert.match(asistencia, /class="sheet sheet-dense" style="--date-count: 31"/);
+  assert.equal((asistencia.match(/class="date-number"/g) || []).length, 31);
+  assert.match(asistencia, /<th class="date-number">31<\/th>/);
+  assert.match(asistencia, /TOTAL MES: 31/);
+  assert.doesNotMatch(asistencia, /ASISTENCIA&nbsp;&nbsp; MARZO DE/);
+});

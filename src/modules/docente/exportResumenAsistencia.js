@@ -3,9 +3,8 @@
 import { formatoCarta } from "../../ui/impresion.js";
 
 function publicAsset(path) {
-  const base = import.meta.env.BASE_URL || "/";
-  const assetPath = `${base}${path}`.replace(/\/+/g, "/");
-  return new URL(assetPath, window.location.origin).href;
+  const base = import.meta.env?.BASE_URL || "/";
+  return new URL(`${base}${path}`, window.location.href).href;
 }
 
 function escapeHtml(value) {
@@ -91,9 +90,8 @@ function sortStudentsByName(students = []) {
   });
 }
 
-function studentRows(students = [], byStudent = {}, dates = []) {
-  const rows = sortStudentsByName(students);
-  const padded = [...rows];
+function studentRows(students = [], byStudent = {}, dates = [], offset = 0) {
+  const padded = [...students];
   while (padded.length < 40) padded.push({ empty: true, numeroLista: padded.length + 1, nombre: "" });
 
   return padded.map((student, index) => {
@@ -104,10 +102,9 @@ function studentRows(students = [], byStudent = {}, dates = []) {
       return `<td class="attendance-cell">${state ? escapeHtml(attendanceShort(state)) : ""}</td>`;
     }).join("");
     return `
-      <tr>
-        <td class="number-cell">${index + 1}</td>
+      <tr${student.empty ? ' class="empty-student-row"' : ""}>
+        <td class="number-cell">${offset + index + 1}</td>
         <td class="student-cell">${escapeHtml(student.nombre || "")}</td>
-        <td class="activity-cell"></td>
         ${cells}
         <td class="total-cell">${student.empty ? "" : totals.presente}</td>
         <td class="total-cell">${student.empty ? "" : totals.falta}</td>
@@ -119,14 +116,14 @@ function studentRows(students = [], byStudent = {}, dates = []) {
   }).join("");
 }
 
-function totalsRows(students, byStudent, dates) {
+function totalsRows(students, byStudent, dates, multiplePages) {
   const totalRow = (label, state) => {
     const monthTotal = dates.reduce((total, date) => total + stateTotalForDate(students, byStudent, date, state), 0);
     return `
       <tr>
         <td class="bottom-label" colspan="2">${label}</td>
         ${dates.map((date) => `<td class="attendance-cell">${stateTotalForDate(students, byStudent, date, state) || ""}</td>`).join("")}
-        <td class="bottom-total" colspan="5">TOTAL MES = ${monthTotal}</td>
+        <td class="bottom-total" colspan="5">TOTAL ${multiplePages ? "HOJA" : "MES"}: ${monthTotal}</td>
       </tr>
     `;
   };
@@ -139,21 +136,21 @@ function totalsRows(students, byStudent, dates) {
   ].join("");
 }
 
-function sheetHtml({ group, course, trimesterLabel, teacherName, students, byStudent }) {
+function sheetHtml({ group, course, trimesterLabel, teacherName, students, byStudent, offset, pageNumber, pageCount }) {
   const { escolaridad, paralelo } = courseLevel(course);
   const year = group.key.slice(0, 4);
-  const monthName = group.label.replace(/\s+\d{4}$/i, "");
+  const monthName = group.label.replace(/\s+(?:DE\s+)?\d{4}$/i, "");
   const safeTeacher = String(teacherName || "DOCENTE").toUpperCase();
   const directorName = "MSC. SAMUEL RONAL MENDOZA CALLE";
 
   return `
-    <section class="sheet">
+    <section class="sheet${group.dates.length > 26 ? " sheet-dense" : ""}" style="--date-count: ${group.dates.length}">
       <header class="top-grid">
         <div class="title-strip">ASISTENCIA&nbsp;&nbsp; ${escapeHtml(monthName)} &nbsp; ${escapeHtml(year)}</div>
         <div class="field field-wide"><b>AÑO DE ESCOLARIDAD:</b><span>${escapeHtml(escolaridad)}</span></div>
         <div class="field"><b>DISTRITO:</b><span>CARANAVI</span></div>
         <div class="field field-wide"><b>NIVEL:</b><span>PRIMARIA COMUNITARIA VOCACIONAL</span></div>
-        <div class="field field-parallel" rowspan="2"><b>PARALELO:</b><span>${escapeHtml(paralelo || "-")}</span></div>
+        <div class="field field-parallel"><b>PARALELO:</b><span>${escapeHtml(paralelo || "-")}</span></div>
         <div class="field"><b>TURNO:</b><span>MAÑANA</span></div>
         <div class="field field-wide"><b>MAESTRA / O:</b><span>${escapeHtml(safeTeacher)}</span></div>
       </header>
@@ -162,7 +159,6 @@ function sheetHtml({ group, course, trimesterLabel, teacherName, students, byStu
         <colgroup>
           <col class="number-col">
           <col class="student-col">
-          <col class="activity-col">
           ${group.dates.map(() => `<col class="date-col">`).join("")}
           <col class="summary-col">
           <col class="summary-col">
@@ -173,27 +169,25 @@ function sheetHtml({ group, course, trimesterLabel, teacherName, students, byStu
         <thead>
           <tr>
             <th class="school-head" colspan="2" rowspan="2">
-              <img src="${publicAsset("images/logo-nueva-bolivia.png")}" alt="">
+              <img src="${publicAsset("images/logo-nueva-bolivia.png")}" alt="Escudo de la Unidad Educativa Ecologica Nueva Bolivia">
               <span>UNIDAD EDUCATIVA</span>
               <strong>ECOLOGICA NUEVA BOLIVIA</strong>
               <small>${escapeHtml(trimesterLabel || "")}</small>
+              ${pageCount > 1 ? `<small>HOJA ${pageNumber} DE ${pageCount}</small>` : ""}
             </th>
-            <th class="vertical-head activity-head" rowspan="2">ACTIVIDAD</th>
-            ${group.dates.map((date) => `<th class="vertical-head">${escapeHtml(`${String(Number(date.slice(8, 10)))} DE ${monthName} ${year}`)}</th>`).join("")}
+            ${group.dates.map((date) => `<th class="vertical-head day-head" rowspan="2"><span>${escapeHtml(dayName(date))}</span></th>`).join("")}
             <th class="totals-head" colspan="5">TOTALES</th>
           </tr>
           <tr>
-            ${group.dates.map((date) => `<th class="vertical-head day-head">${escapeHtml(dayName(date))}</th>`).join("")}
-            <th class="vertical-head totals-vertical">PRESENTES</th>
-            <th class="vertical-head totals-vertical">FALTAS</th>
-            <th class="vertical-head totals-vertical">ATRASOS</th>
-            <th class="vertical-head totals-vertical">LICENCIAS</th>
-            <th class="vertical-head worked-vertical">DÍAS TRABAJADOS</th>
+            <th class="vertical-head totals-vertical"><span>PRESENTES</span></th>
+            <th class="vertical-head totals-vertical"><span>FALTAS</span></th>
+            <th class="vertical-head totals-vertical"><span>ATRASOS</span></th>
+            <th class="vertical-head totals-vertical"><span>LICENCIAS</span></th>
+            <th class="vertical-head worked-vertical"><span>DÍAS TRABAJADOS</span></th>
           </tr>
           <tr>
             <th class="number-cell">N°</th>
             <th class="student-cell">APELLIDOS Y NOMBRES</th>
-            <th class="vertical-head date-label">FECHA</th>
             ${group.dates.map((date) => `<th class="date-number">${date.slice(8, 10)}</th>`).join("")}
             <th class="total-letter">P</th>
             <th class="total-letter">F</th>
@@ -202,12 +196,11 @@ function sheetHtml({ group, course, trimesterLabel, teacherName, students, byStu
             <th class="total-letter"></th>
           </tr>
         </thead>
-        <tbody>${studentRows(students, byStudent, group.dates)}</tbody>
+        <tbody>${studentRows(students, byStudent, group.dates, offset)}</tbody>
+        <tfoot>${totalsRows(students, byStudent, group.dates, pageCount > 1)}</tfoot>
       </table>
 
-      <table class="bottom-table">
-        <tbody>${totalsRows(students, byStudent, group.dates)}</tbody>
-      </table>
+      <p class="attendance-legend">P: Presente &nbsp; F: Falta &nbsp; A: Atraso &nbsp; L: Licencia</p>
 
       <footer class="signatures">
         <div>
@@ -233,6 +226,11 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
     return;
   }
   const byStudent = recordMap(records);
+  const sortedStudents = sortStudentsByName(students);
+  const studentPages = [];
+  for (let offset = 0; offset < Math.max(sortedStudents.length, 1); offset += 40) {
+    studentPages.push({ students: sortedStudents.slice(offset, offset + 40), offset });
+  }
   const printWindow = window.open("", "_blank", "width=900,height=1100");
   if (!printWindow) {
     alert("El navegador bloqueo la ventana de impresion.");
@@ -252,27 +250,34 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
             margin: 0;
             background: #f3f4f6;
             color: #111;
-            font-family: "Arial Narrow", Arial, sans-serif;
+            font-family: Arial, sans-serif;
+            line-height: 1.1;
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
           }
           .sheet {
             width: ${page.ancho}mm;
             max-width: 100%;
-            min-height: ${page.alto}mm;
+            min-height: calc(${page.alto}mm - 1px);
             margin: 0 auto 18px;
-            padding: 0.08in;
+            display: flex;
+            flex-direction: column;
             background: #fff;
             break-after: page;
             page-break-after: always;
+            break-inside: avoid;
+            page-break-inside: avoid;
           }
           .sheet:last-child { break-after: auto; page-break-after: auto; }
           .top-grid {
             display: grid;
             grid-template-columns: minmax(0, 2.85fr) minmax(0, 1.25fr) minmax(0, 2.35fr) minmax(0, .9fr);
-            gap: 0.02in;
+            gap: 2px;
             align-items: stretch;
-            margin-bottom: 0.02in;
-            font-size: 10px;
+            margin-bottom: 3px;
+            font-size: 7pt;
             font-weight: 700;
+            flex-shrink: 0;
           }
           .title-strip {
             grid-column: span 2;
@@ -283,7 +288,7 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
             align-items: center;
             justify-content: center;
             font-size: 17px;
-            letter-spacing: 0.5px;
+            letter-spacing: 0;
           }
           .field {
             border: 1px solid #111;
@@ -298,7 +303,7 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
           .field span {
             overflow-wrap: anywhere;
             text-align: center;
-            font-size: 13px;
+            font-size: 8.5pt;
             font-weight: 500;
           }
           .field-wide { grid-column: span 2; }
@@ -306,145 +311,118 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
           .field-parallel b { font-size: 9px; }
           .field-parallel span { font-size: 24px; line-height: 1; }
           table { border-collapse: collapse; width: 100%; table-layout: fixed; }
-          .number-col { width: 0.18in; }
-          .student-col { width: 2.26in; }
-          .activity-col { width: 0.1in; }
-          .date-col { width: 0.118in; }
-          .summary-col { width: 0.085in; }
-          .worked-col { width: 0.11in; }
+          .number-col { width: 3%; }
+          .student-col { width: 27%; }
+          .date-col { width: calc(54% / var(--date-count)); }
+          .summary-col, .worked-col { width: 3.2%; }
           th, td {
             border: 1px solid #111;
             padding: 0;
             vertical-align: middle;
-            overflow: hidden;
+            line-height: 1.1;
           }
-          .attendance-table { font-size: 9px; }
+          .attendance-table { font-size: 8.5pt; flex-shrink: 0; }
+          .attendance-table tbody tr { height: 15px; }
+          .attendance-table tr { break-inside: avoid; page-break-inside: avoid; }
           .school-head {
-            height: 0.86in;
+            height: 144px;
             text-align: center;
-            font-size: 10px;
+            font-size: 7.5pt;
             line-height: 1.1;
           }
           .school-head img {
             display: block;
-            width: 0.43in;
-            height: 0.43in;
+            width: 96px;
+            height: 96px;
             object-fit: contain;
             margin: 0 auto 1px;
           }
           .school-head span, .school-head strong, .school-head small { display: block; }
-          .school-head strong { margin-top: 4px; font-size: 14px; }
-          .school-head small { margin-top: 3px; font-size: 8px; font-weight: 700; }
+          .school-head strong { margin-top: 3px; font-size: 9pt; }
+          .school-head small { margin-top: 3px; font-size: 7.5pt; font-weight: 700; }
           .vertical-head {
-            width: 0.14in;
-            height: 0.72in;
+            text-align: center;
+            font-size: 7.5pt;
+            font-weight: 700;
+          }
+          .vertical-head span {
+            display: inline-block;
             writing-mode: vertical-rl;
             transform: rotate(180deg);
-            text-align: center;
-            font-size: 8px;
             line-height: 1;
-            font-weight: 700;
             white-space: nowrap;
           }
-          .activity-head { width: 0.1in; }
-          .activity-cell {
-            width: 0.1in;
-            height: 0.15in;
-            background: #fff;
-          }
-          .date-label {
-            height: 0.28in;
-            font-size: 8px;
-          }
-          .day-head { height: 0.52in; font-size: 7px; }
+          .day-head { padding: 3px 0; }
+          .totals-vertical, .worked-vertical { height: 122px; }
           .totals-head {
-            height: 0.2in;
+            height: 22px;
             text-align: center;
-            font-size: 10px;
+            font-size: 8pt;
             font-weight: 700;
           }
           .number-cell {
-            width: 0.19in;
-            height: 0.15in;
             text-align: center;
-            font-size: 9px;
+            font-size: 8pt;
             font-weight: 700;
           }
           .student-cell {
-            width: 2.26in;
-            height: 0.15in;
-            padding-left: 4px;
+            padding: 0 3px;
             text-align: left;
-            font-size: 9px;
+            font-size: 8pt;
             font-weight: 700;
-            white-space: nowrap;
+            overflow-wrap: anywhere;
           }
           tbody .student-cell {
-            font-size: 8.8px;
+            font-size: 8.2pt;
             font-weight: 600;
             letter-spacing: 0;
           }
           .date-number, .attendance-cell {
-            width: 0.118in;
-            height: 0.15in;
             text-align: center;
-            font-size: 8.4px;
+            font-size: 8.5pt;
             font-weight: 700;
           }
+          .date-number, .total-letter { height: 19px; }
           .attendance-cell { color: #082a7a; }
           .total-letter, .total-cell {
-            width: 0.085in;
             text-align: center;
-            font-size: 6.6px;
+            font-size: 8pt;
             font-weight: 700;
           }
-          .totals-vertical {
-            width: 0.085in;
-            font-size: 6.2px;
-            letter-spacing: 0;
-          }
-          .worked-vertical {
-            width: 0.11in;
-            font-size: 6px;
-            letter-spacing: 0;
-          }
-          .worked-cell { width: 0.11in; text-align: center; font-size: 6.6px; font-weight: 700; }
-          .bottom-table {
-            width: calc(100% - 1.08in);
-            margin-left: 1.08in;
-            margin-top: 0.02in;
-            font-size: 8px;
-            font-weight: 700;
-          }
+          .worked-cell { text-align: center; font-size: 8pt; font-weight: 700; }
+          tfoot { font-size: 7.5pt; font-weight: 700; }
+          tfoot tr { height: 15px; }
+          tfoot .attendance-cell { font-size: 7.5pt; }
           .bottom-label {
-            width: 1.25in;
             padding-right: 4px;
             text-align: right;
-            height: 0.15in;
           }
           .bottom-total {
-            width: 0.9in;
             padding-right: 5px;
             text-align: right;
-            font-size: 8px;
+            font-size: 7.5pt;
           }
+          .sheet-dense .date-number, .sheet-dense tfoot .attendance-cell { font-size: 7pt; }
+          .sheet-dense tbody .attendance-cell { font-size: 8pt; }
+          .attendance-legend { margin: 5px 0 0; text-align: center; font-size: 7.5pt; flex-shrink: 0; }
           .signatures {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 1.1in;
-            margin-top: 0.36in;
-            padding: 0 0.75in;
+            gap: 34px;
+            margin-top: auto;
+            padding: 20px 18px 0;
             text-align: center;
-            font-size: 8px;
+            font-size: 7.5pt;
+            break-inside: avoid;
+            flex-shrink: 0;
           }
           .signatures span {
             display: block;
-            height: 0.18in;
-            border-bottom: 1px solid #111;
+            border-top: 1px solid #111;
             margin-bottom: 4px;
           }
           .signatures b, .signatures small { display: block; }
-          .signatures small { margin-top: 2px; font-size: 6.8px; }
+          .signatures small { margin-top: 2px; font-size: 6.5pt; }
           @media print {
             body { background: #fff; }
             .sheet { margin: 0; box-shadow: none; }
@@ -452,9 +430,24 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
         </style>
       </head>
       <body>
-        ${groups.map((group) => sheetHtml({ group, course, trimesterLabel, teacherName, students, byStudent })).join("")}
+        ${groups.flatMap((group) => studentPages.map((studentPage, index) => sheetHtml({ group, course, trimesterLabel, teacherName, ...studentPage, byStudent, pageNumber: index + 1, pageCount: studentPages.length }))).join("")}
         <script>
-          window.addEventListener("load", () => {
+          window.addEventListener("load", async () => {
+            if (document.fonts?.ready) await document.fonts.ready;
+            document.querySelectorAll("tbody .student-cell").forEach((cell) => {
+              if (!cell.textContent.trim()) return;
+              const text = document.createElement("span");
+              text.textContent = cell.textContent;
+              text.style.whiteSpace = "nowrap";
+              cell.replaceChildren(text);
+              let fontSize = 8.2;
+              while (text.getBoundingClientRect().width > cell.clientWidth - 6 && fontSize > 6.5) {
+                fontSize = Math.max(6.5, fontSize - 0.1);
+                cell.style.fontSize = fontSize + "pt";
+              }
+              text.style.whiteSpace = "normal";
+            });
+            document.documentElement.dataset.printReady = "true";
             setTimeout(() => {
               window.focus();
               window.print();

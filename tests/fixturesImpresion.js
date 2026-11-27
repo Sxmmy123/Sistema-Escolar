@@ -9,7 +9,7 @@ import { e as escapeHtml } from "../src/modules/docente-inicial/ComponentesInici
 const trimesterIds = ["t1", "t2", "t3"];
 const terms = trimesterIds.map((id, index) => ({ id, label: `${["1er", "2do", "3er"][index]} trimestre` }));
 
-export async function documentosImpresionPrueba({ cantidad = 40, trimestres = trimesterIds, nombres = [], notasPorTrimestre = {}, registro = {}, ubicacion = "http://localhost/", baseUrl = "/" } = {}) {
+export async function documentosImpresionPrueba({ cantidad = 40, trimestres = trimesterIds, nombres = [], notasPorTrimestre = {}, registro = {}, asistencia = {}, ubicacion = "http://localhost/", baseUrl = "/" } = {}) {
   const students = Array.from({ length: cantidad }, (_, index) => ({ id: `alumno_${index + 1}`, nombre: nombres[index] || `ESTUDIANTE ${String(index + 1).padStart(2, "0")} FLORES VARGAS` }));
   const course = COURSES.find((item) => item.id === "cuarto_a");
   const subject = SUBJECTS.find((item) => item.id === "matematica");
@@ -41,7 +41,7 @@ export async function documentosImpresionPrueba({ cantidad = 40, trimestres = tr
   documents.boletin = documents.current;
   const printAttendance = await getFunction("docente/exportResumenAsistencia.js", "printAttendanceSummaryByMonth");
   const dates = Array.from({ length: 23 }, (_, index) => `2026-03-${String(index + 1).padStart(2, "0")}`);
-  printAttendance({ ...payload, records: dates.flatMap((fecha) => students.map((student) => ({ fecha, alumnoId: student.id, estado: "presente" }))) });
+  printAttendance({ ...payload, records: dates.flatMap((fecha) => students.map((student) => ({ fecha, alumnoId: student.id, estado: "presente" }))), ...asistencia });
   documents.asistencia = documents.current;
   const printMaterials = await getFunction("alumno/MaterialesAlumno.js", "printStudentMaterials");
   printMaterials({ ...payload, activity: { fecha: dates[0], materiales: [{ cantidad: 2, material: "Cartulinas de colores" }, { cantidad: 1, material: "Caja de lapices de colores" }] }, student: students[0], subject: subject.nombre });
