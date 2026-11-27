@@ -1,4 +1,4 @@
-﻿import { findSubject } from "../../data/catalog.js";
+import { findSubject } from "../../data/catalog.js";
 import { gradeByActivityAndStudent, isMaterialActivity, isSaberActivity, studentActivityGrade } from "./AcademicoDocente.js";
 import { escapeHtml } from "./UtilidadesDocente.js";
 import { gestionActual } from "../../services/rutasFirestore.js";
@@ -8,16 +8,10 @@ const SCHOOL_NAME = "ECOLOGICA NUEVA BOLIVIA";
 const SCHOOL_LEVEL = "PRIMARIA COMUNITARIA VOCACIONAL";
 const SCHOOL_FIELD = "CIENCIA TECNOLOGIA Y PRODUCCION";
 const DIRECTOR_NAME = "MSC. SAMUEL RONAL MENDOZA CALLE";
+const GROUPS = { ser: "SER / 10", saber: "SABER / 45", hacer: "HACER / 40", auto: "AUTOEVALUACION", final: "CALIFICACION TRIMESTRAL" };
 
 function normalizeText(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase();
-}
-
-function cssSafe(value) {
-  return String(value || "").replace(/[<>&"]/g, "");
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
 }
 
 function courseInfo(course = {}) {
@@ -25,10 +19,7 @@ function courseInfo(course = {}) {
   if (!name) return { grade: "CURSO", parallel: "A" };
   if (name.toLowerCase().includes("inicial")) return { grade: normalizeText(name), parallel: "A" };
   const parts = name.split(/\s+/);
-  return {
-    grade: normalizeText(parts.slice(0, -1).join(" ") || name),
-    parallel: normalizeText(parts.at(-1) || "A")
-  };
+  return { grade: normalizeText(parts.slice(0, -1).join(" ") || name), parallel: normalizeText(parts.at(-1) || "A") };
 }
 
 function printableGrade(value) {
@@ -36,318 +27,140 @@ function printableGrade(value) {
   return Math.max(35, Math.min(100, number || 35));
 }
 
-function splitColumns(items, minimum, _maximum, prefix) {
-  const clean = [...items];
-  while (clean.length < minimum) {
-    clean.push({ id: `blank_${prefix}_${clean.length}`, titulo: "", empty: true, maximo: 100 });
-  }
-  return clean;
-}
-
-function verticalLabel(text, className = "") {
-  const length = String(text || "").length;
-  const density = className.includes("activity-title")
-    ? length > 34 ? " long-title" : length > 22 ? " medium-title" : ""
-    : "";
-  return `<span class="vertical-text ${className}${density}" title="${escapeHtml(text || "")}">${escapeHtml(text || "")}</span>`;
-}
-
-function gradeCell(value) {
+function gradeCell(value, key) {
   const grade = printableGrade(value);
-  return `<td class="${grade <= 50 ? "low-note" : ""}">${grade}</td>`;
+  return `<td data-column="${escapeHtml(key)}" class="${grade <= 50 ? "low-note" : ""}">${grade}</td>`;
 }
 
-function emptyCells(count) {
-  return Array.from({ length: count }, () => "<td></td>").join("");
-}
-
-function subjectSheet({
-  course,
-  subject,
-  trimesterLabel,
-  students,
-  activities,
-  gradesMap,
-  attendanceRows,
-  calculateStudentTerm,
-  teacherName,
-  rowOffset = 0
-}) {
-  const subjectActivitiesAll = activities.filter((item) => item.materiaId === subject.id);
-  const serCriteriaRaw = subjectActivitiesAll
-    .filter((item) => item.tipo === "ser")
+function subjectData(payload, subject, gradesMap) {
+  const subjectActivities = (payload.activities || []).filter((item) => item.materiaId === subject.id);
+  const serCriteria = subjectActivities.filter((item) => item.tipo === "ser")
     .sort((a, b) => String(a.titulo || "").localeCompare(String(b.titulo || ""), "es", { sensitivity: "base" }));
-  const autoActivity = subjectActivitiesAll.find((item) => item.tipo === "auto") || null;
-  const gradedActivities = subjectActivitiesAll
-    .filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
+  const autoActivity = subjectActivities.find((item) => item.tipo === "auto") || null;
+  const gradedActivities = subjectActivities.filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
     .filter((item) => Object.keys(gradesMap[item.id] || {}).length > 0);
-  const serColumns = splitColumns(serCriteriaRaw, 1, 4, "ser");
-  const saberColumns = splitColumns(gradedActivities.filter(isSaberActivity), 3, 6, "saber");
-  const hacerColumns = splitColumns(gradedActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item)), 3, 7, "hacer");
-  const noteCount = 3 + serColumns.length + 2 + saberColumns.length + 2 + hacerColumns.length + 2 + 2 + 3;
-  const fullSpan = 2 + noteCount;
-  const areaColspan = Math.max(4, fullSpan - 14);
-  const regularNoteCount = Math.max(1, noteCount - 3);
-  const densityClass = noteCount > 34 ? "print-ultra" : noteCount > 27 ? "print-dense" : "";
-  const info = courseInfo(course);
+  const saberActivities = gradedActivities.filter(isSaberActivity);
+  const hacerActivities = gradedActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item));
+  const score = (key, label, group, read = (row) => row.calc[key]) => ({ key, label, group, read, className: "score" });
+  const grade = (key, label, group) => ({ key, label, group, read: (row) => row.calc[key], grade: true });
+  const activityColumns = (activities, group, prefix) => activities.map((activity, index) => ({
+    key: activity.id, label: `${prefix}${index + 1}`, group, activityTitle: activity.titulo || "Actividad sin titulo",
+    read: (row) => studentActivityGrade(activity, row.student.id, gradesMap), grade: true
+  }));
+  const columns = [
+    grade("asistencia100", "Asist.", "ser"), grade("puntualidad100", "Punt.", "ser"), grade("responsabilidad100", "Resp.", "ser"),
+    ...activityColumns(serCriteria, "ser", "C"), grade("ser100", "Prom.", "ser"), score("ser10", "Pts.", "ser"),
+    ...activityColumns(saberActivities, "saber", "S"), grade("saber100", "Prom.", "saber"), score("saber45", "Pts.", "saber"),
+    ...activityColumns(hacerActivities, "hacer", "H"), grade("hacer100", "Prom.", "hacer"), score("hacer40", "Pts.", "hacer"),
+    { key: "auto", label: "Nota", group: "auto", grade: true, read: (row) => autoActivity ? studentActivityGrade(autoActivity, row.student.id, gradesMap) : null },
+    score("auto5", "Pts.", "auto"),
+    score("total", "Total", "final", (row) => row.calc.ser10 + row.calc.saber45 + row.calc.hacer40),
+    { key: "final", label: "Final", group: "final", read: (row) => row.calc.final, className: "final-score" },
+    { key: "status", label: "Estado", group: "final", read: (row) => row.calc.final <= 50 ? "REPROBADO" : "APROBADO", className: "status", weight: 2 }
+  ];
+  const rows = (payload.students || []).map((student, index) => {
+    const serExtraValues = serCriteria.filter((item) => gradesMap[item.id]?.[student.id])
+      .map((item) => studentActivityGrade(item, student.id, gradesMap));
+    const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota : null;
+    return { student, number: index + 1, calc: payload.calculateStudentTerm(student, gradedActivities, gradesMap, payload.attendanceRows, serExtraValues, autoGrade) };
+  });
+  return { subject, columns, rows };
+}
+
+function subjectPages(data, pageHeight) {
+  const parts = Array.from({ length: Math.ceil(data.columns.length / 8) }, (_, index) => data.columns.slice(index * 8, (index + 1) * 8));
+  return parts.flatMap((columns, partIndex) => {
+    const legend = columns.filter((column) => column.activityTitle);
+    // Reserve room for wrapped activity titles and full student names, never shrink the type.
+    const legendHeight = legend.reduce((height, column) => height + Math.ceil((column.activityTitle.length + column.label.length + 3) / 75) * 4.5 + 1.5, 0);
+    const rowsPerPage = Math.max(1, Math.min(12, Math.floor((pageHeight - 90 - legendHeight) / 11)));
+    return Array.from({ length: Math.max(1, Math.ceil(data.rows.length / rowsPerPage)) }, (_, rowPage) => ({
+      subject: data.subject, columns, legend, partNumber: partIndex + 1, partCount: parts.length,
+      rows: data.rows.slice(rowPage * rowsPerPage, (rowPage + 1) * rowsPerPage)
+    }));
+  });
+}
+
+function subjectSheet(payload, page, pageNumber, pageCount) {
+  const { subject, columns, legend, rows, partNumber, partCount } = page;
+  const info = courseInfo(payload.course);
   const baseUrl = import.meta.env?.BASE_URL || "/";
   const logoUrl = `${window.location.origin}${baseUrl}images/logo-nueva-bolivia.png`;
-
-  return `
-    <section class="print-page ${densityClass}" style="--regular-note-count:${regularNoteCount}">
-      <table class="notes-print-table">
-        <colgroup>
-          <col class="col-num">
-          <col class="col-name">
-          <col span="${3 + serColumns.length + 2}" class="col-note">
-          <col span="${saberColumns.length + 2}" class="col-note">
-          <col span="${hacerColumns.length + 2}" class="col-note">
-          <col span="2" class="col-note">
-          <col class="col-total">
-          <col class="col-total">
-          <col class="col-status">
-        </colgroup>
-        <thead>
-          <tr>
-            <th colspan="8" class="brand-top">REGISTRO DE EVALUACION&nbsp;&nbsp; ${gestionActual()}&nbsp;&nbsp; ${escapeHtml(normalizeText(trimesterLabel))}</th>
-            <th colspan="${Math.max(1, fullSpan - 13)}" class="top-fill"></th>
-            <th colspan="3" class="meta-cell">ANO DE ESCOLARIDAD:</th>
-            <th colspan="2" class="meta-value">${escapeHtml(info.grade)}</th>
-          </tr>
-          <tr>
-            <th colspan="2" class="meta-label">NIVEL:</th>
-            <th colspan="6" class="meta-value">${SCHOOL_LEVEL}</th>
-            <th colspan="2" class="meta-label">AREA:</th>
-            <th colspan="${areaColspan}" class="meta-value">${escapeHtml(normalizeText(subject.nombre))}</th>
-            <th colspan="2" class="meta-label">PARALELO:</th>
-            <th colspan="2" rowspan="2" class="parallel">${escapeHtml(info.parallel)}</th>
-          </tr>
-          <tr>
-            <th colspan="2" class="meta-label">CAMPO:</th>
-            <th colspan="6" class="meta-value">${SCHOOL_FIELD}</th>
-            <th colspan="2" class="meta-label">MAESTRA/O:</th>
-            <th colspan="${areaColspan}" class="meta-value">${escapeHtml(normalizeText(teacherName || ""))}</th>
-            <th colspan="2" class="meta-label"></th>
-          </tr>
-          <tr>
-            <th colspan="2" rowspan="2" class="school-block">
-              <div class="school-title">UNIDAD EDUCATIVA</div>
-              <img src="${cssSafe(logoUrl)}" alt="Escudo">
-              <div class="school-name">${SCHOOL_NAME}</div>
-            </th>
-            <th colspan="${3 + serColumns.length + 2}" class="group ser-group">SER/10</th>
-            <th colspan="${saberColumns.length + 2}" class="group saber-group">SABER/45</th>
-            <th colspan="${hacerColumns.length + 2}" class="group hacer-group">HACER/40</th>
-            <th colspan="2" class="group auto-group">AUTOEVALUACION</th>
-            <th colspan="3" class="group final-group">CALIFICACION TRIMESTRAL</th>
-          </tr>
-          <tr>
-            <th class="vertical ser-col section-start">${verticalLabel("Asistencia")}</th>
-            <th class="vertical ser-col">${verticalLabel("Puntualidad")}</th>
-            <th class="vertical ser-col">${verticalLabel("Responsabilidad")}</th>
-            ${serColumns.map((item) => `<th class="vertical activity-head ser-col">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
-            <th class="vertical ser-col prom">${verticalLabel("Promedio")}</th>
-            <th class="vertical ser-col prom">${verticalLabel("Puntaje")}</th>
-            ${saberColumns.map((item, index) => `<th class="vertical activity-head saber-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
-            <th class="vertical saber-col prom">${verticalLabel("Promedio")}</th>
-            <th class="vertical saber-col prom">${verticalLabel("Puntaje")}</th>
-            ${hacerColumns.map((item, index) => `<th class="vertical activity-head hacer-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
-            <th class="vertical hacer-col prom">${verticalLabel("Promedio")}</th>
-            <th class="vertical hacer-col prom">${verticalLabel("Puntaje")}</th>
-            <th class="vertical auto-col section-start">${verticalLabel("Nota")}</th>
-            <th class="vertical auto-col prom">${verticalLabel("Puntaje")}</th>
-            <th class="vertical total-col section-start prom">${verticalLabel("Total")}</th>
-            <th class="vertical final-col prom">${verticalLabel("Nota final")}</th>
-            <th class="vertical status-col">${verticalLabel("Situacion")}</th>
-          </tr>
-          <tr>
-            <th class="col-header">No.</th>
-            <th class="col-header">APELLIDOS Y NOMBRES</th>
-            <th colspan="${noteCount}" class="thin-header"></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${Array.from({ length: 40 }, (_, rowIndex) => {
-            const student = students[rowIndex];
-            if (!student) {
-              return `<tr><td>${rowOffset + rowIndex + 1}</td><td class="student-name">&nbsp;</td>${emptyCells(noteCount)}</tr>`;
-            }
-            const serExtraValues = serCriteriaRaw.filter((item) => gradesMap[item.id]?.[student.id]).map((item) => studentActivityGrade(item, student.id, gradesMap));
-            const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota : null;
-            const calc = calculateStudentTerm(student, gradedActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
-            return `<tr>
-              <td>${rowOffset + rowIndex + 1}</td>
-              <td class="student-name">${escapeHtml(student.nombre)}</td>
-              ${gradeCell(calc.asistencia100)}
-              ${gradeCell(calc.puntualidad100)}
-              ${gradeCell(calc.responsabilidad100)}
-              ${serColumns.map((item) => item.empty ? "<td></td>" : gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
-              ${gradeCell(calc.ser100)}
-              <td class="score">${calc.ser10}</td>
-              ${saberColumns.map((item) => item.empty ? "<td></td>" : gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
-              ${gradeCell(calc.saber100)}
-              <td class="score">${calc.saber45}</td>
-              ${hacerColumns.map((item) => item.empty ? "<td></td>" : gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
-              ${gradeCell(calc.hacer100)}
-              <td class="score">${calc.hacer40}</td>
-              ${autoActivity ? gradeCell(studentActivityGrade(autoActivity, student.id, gradesMap)) : "<td></td>"}
-              <td class="score">${calc.auto5}</td>
-              <td class="total-score">${calc.ser10 + calc.saber45 + calc.hacer40}</td>
-              <td class="${calc.final <= 50 ? "final-low" : "final-ok"}">${calc.final}</td>
-              <td class="${calc.final <= 50 ? "status-low" : "status-ok"}">${calc.final <= 50 ? "REPROBADO" : "APROBADO"}</td>
-            </tr>`;
-          }).join("")}
-        </tbody>
-      </table>
-      <div class="signatures">
-        <div>
-          <span></span>
-          <strong>${escapeHtml(normalizeText(teacherName || "MAESTRA/O"))}</strong>
-          <small>MAESTRA/O DEL AREA DE ${escapeHtml(normalizeText(subject.nombre))}</small>
-        </div>
-        <div>
-          <span></span>
-          <strong>${DIRECTOR_NAME}</strong>
-          <small>DIRECTOR UNIDAD EDUCATIVA ECOLOGICA NUEVA BOLIVIA</small>
-        </div>
+  const groups = [];
+  for (const column of columns) {
+    const last = groups.at(-1);
+    if (last?.id === column.group) last.count += 1;
+    else groups.push({ id: column.group, count: 1 });
+  }
+  const columnWeight = columns.reduce((total, column) => total + (column.weight || 1), 0);
+  return `<section class="print-page" data-subject="${escapeHtml(subject.id)}" data-part="${partNumber}">
+    <header class="document-header">
+      <div class="brand-row"><img src="${escapeHtml(logoUrl)}" alt="Escudo"><div><small>UNIDAD EDUCATIVA ${SCHOOL_NAME}</small><h1>REGISTRO DE EVALUACION</h1><p>${gestionActual()} · ${escapeHtml(normalizeText(payload.trimesterLabel || payload.selectedTrimesterLabel || ""))} · HOJA ${pageNumber} DE ${pageCount}</p></div></div>
+      <div class="document-meta">
+        <div><b>NIVEL:</b> ${SCHOOL_LEVEL}</div><div><b>CURSO:</b> ${escapeHtml(info.grade)} <b>PARALELO:</b> ${escapeHtml(info.parallel)}</div>
+        <div><b>AREA:</b> ${escapeHtml(normalizeText(subject.nombre))}</div><div><b>MAESTRA/O:</b> ${escapeHtml(normalizeText(payload.teacherName || ""))}</div>
+        <div class="field"><b>CAMPO:</b> ${SCHOOL_FIELD} · PARTE ${partNumber} DE ${partCount}</div>
       </div>
-    </section>
-  `;
+    </header>
+    ${legend.length ? `<dl class="activity-key">${legend.map((column) => `<div><dt>${escapeHtml(column.label)}</dt><dd>${escapeHtml(column.activityTitle)}</dd></div>`).join("")}</dl>` : ""}
+    <table class="notes-print-table">
+      <colgroup><col class="col-num"><col class="col-name">${columns.map((column) => `<col style="width:calc((100% - 67mm) * ${(column.weight || 1) / columnWeight})">`).join("")}</colgroup>
+      <thead><tr><th rowspan="2">No.</th><th rowspan="2">APELLIDOS Y NOMBRES</th>${groups.map((group) => `<th colspan="${group.count}" class="group group-${group.id}">${GROUPS[group.id]}</th>`).join("")}</tr>
+      <tr>${columns.map((column) => `<th data-column="${escapeHtml(column.key)}" class="column-label group-${column.group}" title="${escapeHtml(column.activityTitle || column.label)}">${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map((row) => `<tr><td>${row.number}</td><td class="student-name">${escapeHtml(row.student.nombre)}</td>${columns.map((column) => {
+        const value = column.read(row);
+        if (value == null) return `<td data-column="${escapeHtml(column.key)}"></td>`;
+        if (column.grade) return gradeCell(value, column.key);
+        const resultClass = ["final-score", "status"].includes(column.className) ? (row.calc.final <= 50 ? " result-low" : " result-ok") : "";
+        return `<td data-column="${escapeHtml(column.key)}" class="${column.className || ""}${resultClass}">${escapeHtml(String(value))}</td>`;
+      }).join("")}</tr>`).join("")}</tbody>
+    </table>
+    <div class="signatures"><div><span></span><strong>${escapeHtml(normalizeText(payload.teacherName || "MAESTRA/O"))}</strong><small>MAESTRA/O DEL AREA DE ${escapeHtml(normalizeText(subject.nombre))}</small></div><div><span></span><strong>${DIRECTOR_NAME}</strong><small>DIRECTOR UNIDAD EDUCATIVA ${SCHOOL_NAME}</small></div></div>
+  </section>`;
 }
 
 export function printDocument(payload, subjects) {
   const page = formatoCarta();
   const gradesMap = gradeByActivityAndStudent(payload.gradesList || []);
-  const html = `
-    <!doctype html>
-    <html lang="es">
-      <head>
-        <meta charset="UTF-8">
-        <title>Registro de evaluacion</title>
-        <style>
-          ${page.pagina}
-          * { box-sizing: border-box; }
-          html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: "Arial Narrow", Arial, sans-serif; }
-          .print-page {
-            width: ${page.ancho}mm;
-            max-width: 100%;
-            height: ${page.alto}mm;
-            max-height: ${page.alto}mm;
-            overflow: hidden;
-            page-break-after: always;
-            break-after: page;
-            page-break-inside: avoid;
-            break-inside: avoid;
-            display: flex;
-            flex-direction: column;
-          }
-          .print-page:last-child { page-break-after: auto; break-after: auto; }
-          .notes-print-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-          th, td { border: 1px solid #202020; padding: 0 1px; height: 12px; text-align: center; vertical-align: middle; font-size: 7.2px; font-weight: 400; line-height: 1; }
-          th { font-size: 6.9px; }
-          .col-num { width: 2.6%; }
-          .col-name { width: 28.5%; }
-          .col-note { width: calc((100% - 2.6% - 28.5% - 3% - 3% - 5.9%) / var(--regular-note-count)); }
-          .col-total { width: 3%; }
-          .col-status { width: 5.9%; }
-          .brand-top { background: #087B2B; color: #fff; font-size: 10.5px; font-weight: 700; text-align: left; padding-left: 5px; letter-spacing: .02em; }
-          .top-fill { background: #cce8c8; border-left: 0; }
-          .meta-label, .meta-cell { font-weight: 700; text-align: right; background: #fff; }
-          .meta-value { font-weight: 400; background: #fff; }
-          .parallel { font-size: 16px; font-weight: 400; }
-          .school-block { height: 72px; background: #fff; }
-          .school-block img { display: block; width: 40px; height: 40px; object-fit: contain; margin: 1px auto; }
-          .school-title { font-size: 7px; font-weight: 700; }
-          .school-name { margin-top: 1px; font-size: 9.5px; font-weight: 700; }
-          .group { font-weight: 700; color: #111; }
-          .ser-group, .ser-col { background: #fff; }
-          .saber-group { background: #f8dfc2; }
-          .saber-col { background: #fff7ed; }
-          .hacer-group { background: #fbe0cf; }
-          .hacer-col { background: #fff; }
-          .auto-group, .auto-col { background: #fde7a8; }
-          .auto-group { overflow-wrap: anywhere; }
-          .final-group, .final-col { background: #dff2c6; }
-          .total-col { background: #f8dfc2; }
-          .status-col { background: #e7f2ff; }
-          .section-start { border-left-width: 2px; }
-          .vertical { height: 82px; padding: 0; overflow: hidden; }
-          .vertical-text {
-            display: inline-block;
-            max-height: 78px;
-            max-width: 100%;
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            transform: rotate(180deg);
-            white-space: nowrap;
-            overflow: hidden;
-            font-size: 6.4px;
-            font-weight: 400;
-            line-height: 1;
-            letter-spacing: 0;
-          }
-          .activity-head { height: 122px; }
-          .activity-title { max-height: 116px; font-size: 6px; }
-          .activity-title.medium-title { max-height: 116px; font-size: 5.5px; }
-          .activity-title.long-title { max-height: 116px; font-size: 5px; }
-          .prom .vertical-text { font-weight: 700; }
-          .thin-header { height: 9px; background: #f8f8f8; }
-          .col-header { font-size: 7px; font-weight: 700; background: #fff; }
-          .student-name { text-align: left; white-space: nowrap; overflow: hidden; font-size: 7.2px; font-weight: 400; }
-          .low-note { color: #d91f26; }
-          .score { background: #fef3c7; }
-          .total-score { background: #fde8d1; }
-          .final-ok { background: #e7f7df; color: #111; }
-          .final-low { background: #fde7e7; color: #d91f26; }
-          .status-ok { background: #edf8ff; color: #166534; font-size: 5.9px; }
-          .status-low { background: #edf8ff; color: #d91f26; font-size: 5.9px; }
-          .signatures { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 8px 34px 0; text-align: center; font-size: 6.6px; }
-          .signatures span { display: block; border-top: 1px solid #111; margin: 0 auto 2px; width: 145px; }
-          .signatures strong { display: block; font-size: 6.6px; font-weight: 700; }
-          .signatures small { display: block; font-size: 5.6px; }
-          .print-dense th, .print-dense td { height: 11px; font-size: 6.4px; }
-          .print-dense th { font-size: 6.1px; }
-          .print-dense .vertical { height: 76px; }
-          .print-dense .vertical-text { max-height: 72px; font-size: 5.8px; }
-          .print-dense .activity-head { height: 114px; }
-          .print-dense .activity-title { max-height: 108px; font-size: 5.4px; }
-          .print-dense .activity-title.medium-title { max-height: 108px; font-size: 5px; }
-          .print-dense .activity-title.long-title { max-height: 108px; font-size: 4.6px; }
-          .print-dense .student-name { font-size: 6.4px; }
-          .print-dense .school-block { height: 64px; }
-          .print-dense .school-block img { width: 34px; height: 34px; }
-          .print-dense .signatures { padding-top: 5px; }
-          .print-ultra th, .print-ultra td { height: 10px; font-size: 5.8px; }
-          .print-ultra th { font-size: 5.6px; }
-          .print-ultra .vertical { height: 70px; }
-          .print-ultra .vertical-text { max-height: 66px; font-size: 5.2px; }
-          .print-ultra .activity-head { height: 108px; }
-          .print-ultra .activity-title { max-height: 102px; font-size: 4.9px; }
-          .print-ultra .activity-title.medium-title { max-height: 102px; font-size: 4.5px; }
-          .print-ultra .activity-title.long-title { max-height: 102px; font-size: 4.2px; }
-          .print-ultra .student-name { font-size: 5.8px; }
-          .print-ultra .school-block { height: 58px; }
-          .print-ultra .school-block img { width: 30px; height: 30px; }
-          .print-ultra .brand-top { font-size: 9px; }
-          .print-ultra .school-name { font-size: 8px; }
-          .print-ultra .signatures { padding-top: 4px; }
-        </style>
-      </head>
-      <body>
-        ${subjects.flatMap((subject) => Array.from({ length: Math.max(1, Math.ceil(payload.students.length / 40)) }, (_, page) =>
-          subjectSheet({ ...payload, students: payload.students.slice(page * 40, (page + 1) * 40), rowOffset: page * 40, subject, gradesMap })
-        )).join("")}
-        <script>
-          window.addEventListener("load", () => {
-            setTimeout(() => {
-              window.focus();
-              window.print();
-            }, 250);
-          });
-        </script>
-      </body>
-    </html>
-  `;
+  const pages = subjects.flatMap((subject) => subjectPages(subjectData(payload, subject, gradesMap), page.alto));
+  const html = `<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>Registro de evaluacion</title><style>
+    ${page.pagina}
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: Arial, sans-serif; }
+    .print-page { width: ${page.ancho}mm; max-width: 100%; page-break-after: always; break-after: page; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .print-page:last-child { page-break-after: auto; break-after: auto; }
+    .document-header { border: 1.2px solid #202020; break-inside: avoid; }
+    .brand-row { display: flex; align-items: center; gap: 3mm; padding: 2mm 3mm; }
+    .brand-row img { width: 16mm; height: 16mm; object-fit: contain; flex-shrink: 0; }
+    .brand-row small { font-size: 10pt; font-weight: 700; }
+    h1 { margin: 1mm 0; font-size: 15pt; line-height: 1.1; }
+    .brand-row p { margin: 0; font-size: 10pt; }
+    .document-meta { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #202020; font-size: 9.5pt; line-height: 1.2; }
+    .document-meta > div { min-width: 0; padding: 1mm 2mm; overflow-wrap: anywhere; }
+    .field { grid-column: 1 / -1; }
+    .activity-key { margin: 2mm 0; font-size: 10pt; line-height: 1.2; }
+    .activity-key > div { display: flex; align-items: baseline; gap: 2mm; padding: .6mm 0; break-inside: avoid; }
+    .activity-key dt { flex: 0 0 10mm; font-weight: 700; }
+    .activity-key dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+    .notes-print-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .col-num { width: 7mm; } .col-name { width: 60mm; }
+    th, td { border: 1px solid #202020; padding: .5mm .4mm; height: 9mm; text-align: center; vertical-align: middle; font-size: 12pt; font-weight: 400; line-height: 1.15; }
+    thead { display: table-header-group; } tr { break-inside: avoid; page-break-inside: avoid; }
+    th { font-size: 10pt; font-weight: 700; overflow-wrap: anywhere; }
+    .group { height: 8mm; }
+    .column-label { height: 7mm; }
+    .group-ser { background: #edf6ed; } .group-saber { background: #f8dfc2; }
+    .group-hacer { background: #fbe0cf; } .group-auto { background: #fde7a8; } .group-final { background: #dff2c6; }
+    .student-name { text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 11.5pt; }
+    .low-note { color: #d91f26; } .score { background: #fef3c7; }
+    .final-score { font-weight: 700; } .status { font-size: 10pt; overflow-wrap: anywhere; }
+    .result-ok { background: #e7f7df; } .result-low { background: #fde7e7; color: #d91f26; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; padding: 8mm 4mm 1mm; text-align: center; break-inside: avoid; }
+    .signatures span { display: block; width: 60mm; max-width: 100%; margin: 0 auto 1mm; border-top: 1px solid #111; }
+    .signatures strong { display: block; font-size: 9.5pt; }
+    .signatures small { display: block; margin-top: .7mm; font-size: 9pt; }
+    @media print { body { width: ${page.ancho}mm; } }
+  </style></head><body>${pages.map((item, index) => subjectSheet(payload, item, index + 1, pages.length)).join("")}<script>window.addEventListener("load",()=>{setTimeout(()=>{window.focus();window.print();},250);});</script></body></html>`;
   const printWindow = window.open("", "_blank", "width=900,height=1200");
   if (!printWindow) {
     alert("El navegador bloqueo la ventana de impresion. Permite ventanas emergentes e intenta nuevamente.");
@@ -359,12 +172,8 @@ export function printDocument(payload, subjects) {
 }
 
 export function openTeacherNotesPrintModal(payload) {
-  const courseSubjects = (payload.availableSubjects || [])
-    .map((id) => findSubject(id))
-    .filter(Boolean);
-  const subjectsWithGrades = courseSubjects.filter((subject) =>
-    (payload.activities || []).some((activity) => activity.materiaId === subject.id)
-  );
+  const courseSubjects = (payload.availableSubjects || []).map((id) => findSubject(id)).filter(Boolean);
+  const subjectsWithGrades = courseSubjects.filter((subject) => (payload.activities || []).some((activity) => activity.materiaId === subject.id));
   const subjects = subjectsWithGrades.length ? subjectsWithGrades : courseSubjects;
   const selectedSubjectId = payload.selectedSubject?.id || subjects[0]?.id || "";
   document.querySelector("[data-notes-print-modal]")?.remove();
@@ -372,7 +181,6 @@ export function openTeacherNotesPrintModal(payload) {
     alert("No hay materias disponibles para imprimir.");
     return;
   }
-
   const modal = document.createElement("div");
   modal.dataset.notesPrintModal = "true";
   modal.className = "fixed inset-0 z-[80] grid place-items-center bg-slate-950/40 p-4";
@@ -400,15 +208,13 @@ export function openTeacherNotesPrintModal(payload) {
           `).join("")}
         </div>
       </div>
-      <p class="mt-3 text-xs leading-5 text-slate-500">Se imprimira en hoja carta vertical, con hasta 40 alumnos por pagina.</p>
+      <p class="mt-3 text-xs leading-5 text-slate-500">Se imprimira en hoja carta vertical.</p>
       <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <button type="button" data-close-notes-print class="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancelar</button>
         <button type="button" data-print-selected-notes class="rounded-2xl bg-school-green px-4 py-2 text-sm font-semibold text-white shadow-soft hover:bg-school-navy">Imprimir</button>
       </div>
-    </div>
-  `;
+    </div>`;
   document.body.appendChild(modal);
-
   const allToggle = modal.querySelector("[data-print-all-subjects]");
   const checkboxes = [...modal.querySelectorAll("[data-print-subject]")];
   const syncAllToggle = () => {
@@ -419,17 +225,10 @@ export function openTeacherNotesPrintModal(payload) {
   };
   allToggle.addEventListener("change", syncAllToggle);
   syncAllToggle();
-
-  modal.querySelectorAll("[data-close-notes-print]").forEach((button) => {
-    button.addEventListener("click", () => modal.remove());
-  });
-  modal.addEventListener("click", (event) => {
-    if (event.target === modal) modal.remove();
-  });
+  modal.querySelectorAll("[data-close-notes-print]").forEach((button) => button.addEventListener("click", () => modal.remove()));
+  modal.addEventListener("click", (event) => { if (event.target === modal) modal.remove(); });
   modal.querySelector("[data-print-selected-notes]")?.addEventListener("click", () => {
-    const picked = allToggle.checked
-      ? subjects
-      : subjects.filter((subject) => modal.querySelector(`[data-print-subject="${subject.id}"]`)?.checked);
+    const picked = allToggle.checked ? subjects : subjects.filter((subject) => modal.querySelector(`[data-print-subject="${subject.id}"]`)?.checked);
     if (!picked.length) {
       alert("Selecciona al menos una materia.");
       return;
@@ -438,5 +237,3 @@ export function openTeacherNotesPrintModal(payload) {
     printDocument(payload, picked);
   });
 }
-
-

@@ -3,12 +3,13 @@ import vm from "node:vm";
 import { formatoCarta } from "../src/ui/impresion.js";
 import { COURSES, SUBJECTS } from "../src/data/catalog.js";
 import { documentoInformesCursoInicial } from "../src/modules/docente-inicial/ImpresionInformesInicial.js";
+import { gradeByActivityAndStudent, studentActivityGrade, isSaberActivity, isMaterialActivity } from "../src/services/calculoAcademico.js";
 import { e as escapeHtml } from "../src/modules/docente-inicial/ComponentesInicial.js";
 
 const trimesterIds = ["t1", "t2", "t3"];
 const terms = trimesterIds.map((id, index) => ({ id, label: `${["1er", "2do", "3er"][index]} trimestre` }));
 
-export async function documentosImpresionPrueba({ cantidad = 40, trimestres = trimesterIds, nombres = [], notasPorTrimestre = {} } = {}) {
+export async function documentosImpresionPrueba({ cantidad = 40, trimestres = trimesterIds, nombres = [], notasPorTrimestre = {}, registro = {} } = {}) {
   const students = Array.from({ length: cantidad }, (_, index) => ({ id: `alumno_${index + 1}`, nombre: nombres[index] || `ESTUDIANTE ${String(index + 1).padStart(2, "0")} FLORES VARGAS` }));
   const course = COURSES.find((item) => item.id === "cuarto_a");
   const subject = SUBJECTS.find((item) => item.id === "matematica");
@@ -17,8 +18,8 @@ export async function documentosImpresionPrueba({ cantidad = 40, trimestres = tr
   const window = { location: { origin: "http://localhost", href: "http://localhost/" }, open: () => ({ document: { open() {}, write(value) { documents.current = value; }, close() {} }, addEventListener() {} }) };
   const context = {
     formatoCarta, window, URL, SUBJECTS, TRIMESTERS: terms, gestionActual: () => "2026", icon: () => "", escapeHtml,
-    gradeByActivityAndStudent: () => ({}), isMaterialActivity: () => false, isSaberActivity: (row) => row.tipo === "examen",
-    activityHasGrades: () => true, studentActivityGrade: () => 79,
+    gradeByActivityAndStudent, isMaterialActivity, isSaberActivity,
+    activityHasGrades: () => true, studentActivityGrade,
     calculateStudentTerm: (student, activities) => ({ final: notasPorTrimestre[activities[0]?.id?.split("_")[0]] ?? (student.id === "alumno_1" ? 100 : student.id === "alumno_2" ? 48 : 79) }),
     attendanceShort: (value) => ({ presente: "P", falta: "F", atraso: "A", permiso: "L" })[value],
     normalizarEstadoAsistencia: (value) => value, alert(message) { throw new Error(message); }
@@ -30,7 +31,7 @@ export async function documentosImpresionPrueba({ cantidad = 40, trimestres = tr
     return vm.runInNewContext(`${source}; ${name}`, { ...context });
   }
   const printNotes = await getFunction("docente/imprimirNotasDocente.js", "printDocument");
-  printNotes({ ...payload, calculateStudentTerm: () => ({ asistencia100: 100, puntualidad100: 100, responsabilidad100: 100, ser100: 100, ser10: 10, saber100: 75, saber45: 34, hacer100: 75, hacer40: 30, auto5: 5, final: 79 }) }, [subject]);
+  printNotes({ ...payload, ...registro, calculateStudentTerm: () => ({ asistencia100: 100, puntualidad100: 100, responsabilidad100: 100, ser100: 100, ser10: 10, saber100: 75, saber45: 34, hacer100: 75, hacer40: 30, auto5: 5, final: 79, ...registro.values }) }, registro.subjects || [subject]);
   documents.notas = documents.current;
   const printBulletin = await getFunction("docente/imprimirBoletinDocente.js", "printDocument");
   printBulletin({ ...payload, snapshotsByTerm: Object.fromEntries(trimestres.map((id) => [id, {

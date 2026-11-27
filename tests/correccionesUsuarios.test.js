@@ -83,16 +83,23 @@ test("el boletin incluye incorporaciones posteriores y actualiza nombres por ID"
   assert.deepEqual(rows.map((row) => [row.id, row.nombre]), [["a", "Ana actual"], ["b", "Bruno"]]);
 });
 
-test("imprimir 41 alumnos genera dos paginas e incluye al ultimo", () => {
+test("imprimir 41 alumnos conserva el curso completo en cada bloque legible", () => {
   const previousWindow = globalThis.window;
   let html = "";
   globalThis.window = { location: { origin: "http://localhost" }, open: () => ({ document: { open() {}, write(value) { html = value; }, close() {} } }) };
   try {
     const students = Array.from({ length: 41 }, (_, index) => ({ id: `a${index}`, nombre: `ALUMNO ${String(index + 1).padStart(2, "0")}` }));
     printDocument({ students, course: catalog.findCourse("cuarto_a"), activities: [], gradesList: [], attendanceRows: [], calculateStudentTerm: academic.calculateStudentTerm }, [catalog.findSubject("matematica")]);
-    assert.equal((html.match(/class="print-page /g) || []).length, 2);
+    assert.equal((html.match(/class="print-page"/g) || []).length, 8);
     for (const student of students) assert.ok(html.includes(student.nombre));
     assert.match(html, /<td>41<\/td>/);
+    for (const part of [1, 2]) {
+      const sheets = [...html.matchAll(/<section class="print-page"[\s\S]*?<\/section>/g)].map((match) => match[0]);
+      const content = sheets.filter((sheet) => sheet.includes(`data-part="${part}"`)).join("");
+      for (const student of students) assert.equal(content.split(student.nombre).length - 1, 1);
+    }
+    const expected = academic.calculateStudentTerm(students[0], [], {}, []).final;
+    assert.ok(html.includes(`data-column="final" class="final-score result-low">${expected}</td>`));
   } finally { globalThis.window = previousWindow; }
 });
 

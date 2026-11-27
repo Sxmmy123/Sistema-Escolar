@@ -90,3 +90,66 @@ test("dos trimestres mantienen sus etiquetas reales y el promedio acumulado", as
   assert.match(student, /class="summary-cell" rowspan="2">70/);
   assert.match(boletin, /PROM\. ACUM\./);
 });
+
+test("registro por materia usa letra de 12 puntos sin compresion ni filas de relleno", async () => {
+  const { notas } = await documentosImpresionPrueba({ cantidad: 1, nombres: ["SOLIZ MORALES ALESSANDRO FABRICIO"] });
+  assert.match(notas, /font-size: 12pt/);
+  assert.match(notas, /font-size: 11\.5pt/);
+  assert.match(notas, /font-family: Arial, sans-serif/);
+  assert.doesNotMatch(notas, /Arial Narrow|print-dense|print-ultra|font-size: [\d.]+px|overflow: hidden/);
+  const sheets = [...notas.matchAll(/<section class="print-page"[\s\S]*?<\/section>/g)].map((match) => match[0]);
+  assert.equal(sheets.length, 2);
+  for (const sheet of sheets) {
+    assert.equal((sheet.match(/class="student-name"/g) || []).length, 1);
+    assert.match(sheet, /SOLIZ MORALES ALESSANDRO FABRICIO/);
+    assert.ok((sheet.match(/class="column-label /g) || []).length <= 8);
+  }
+});
+
+test("registro conserva todas las actividades, sus notas y los puntajes al repartir columnas", async () => {
+  const activities = [
+    ...Array.from({ length: 11 }, (_, index) => ({ id: `s${index + 1}`, materiaId: "matematica", tipo: "examen", titulo: `Saber: actividad ${index + 1}` })),
+    ...Array.from({ length: 10 }, (_, index) => ({ id: `h${index + 1}`, materiaId: "matematica", tipo: "tarea", titulo: `Hacer: actividad ${index + 1}` })),
+    { id: "ser", materiaId: "matematica", tipo: "ser", titulo: "Colabora y respeta a sus companeros" },
+    { id: "auto", materiaId: "matematica", tipo: "auto", titulo: "Autoevaluacion" }
+  ];
+  const gradesList = activities.map((activity) => ({ actividadId: activity.id, alumnoId: "alumno_1", nota: activity.id === "h10" ? 48 : 100 }));
+  const { notas } = await documentosImpresionPrueba({ cantidad: 1, registro: { activities, gradesList, values: { ser10: 8, saber45: 21, hacer40: 16, auto5: 4, final: 49 } } });
+  for (const activity of activities.filter((item) => item.tipo !== "auto")) {
+    assert.ok(notas.includes(escapeForTest(activity.titulo)), activity.id);
+    assert.equal((notas.match(new RegExp(`<td data-column="${activity.id}"`, "g")) || []).length, 1, activity.id);
+  }
+  assert.match(notas, /data-column="s11" class="">100/);
+  assert.match(notas, /data-column="h10" class="low-note">48/);
+  assert.match(notas, /data-column="ser10" class="score">8/);
+  assert.match(notas, /data-column="saber45" class="score">21/);
+  assert.match(notas, /data-column="hacer40" class="score">16/);
+  assert.match(notas, /data-column="auto5" class="score">4/);
+  assert.match(notas, /data-column="total" class="score">45/);
+  assert.match(notas, /data-column="final" class="final-score result-low">49/);
+  assert.match(notas, /data-column="status" class="status result-low">REPROBADO/);
+});
+
+test("registro repite la numeracion y el alumno correcto en cada parte sin cortar el curso", async () => {
+  const { notas } = await documentosImpresionPrueba({ cantidad: 25 });
+  const sheets = [...notas.matchAll(/<section class="print-page"[\s\S]*?<\/section>/g)].map((match) => match[0]);
+  assert.equal(sheets.length, 6);
+  for (const part of [1, 2]) {
+    const section = sheets.filter((sheet) => sheet.includes(`data-part="${part}"`)).join("");
+    for (let number = 1; number <= 25; number += 1) assert.equal((section.match(new RegExp(`<td>${number}<\\/td><td class="student-name">`, "g")) || []).length, 1);
+  }
+  assert.match(notas, /HOJA 6 DE 6/);
+});
+
+test("registro conserva titulos y nombres con caracteres especiales sin insertar HTML", async () => {
+  const activities = [{ id: "larga", materiaId: "matematica", tipo: "examen", titulo: 'Comparar <cantidades> & "resultados" '.repeat(6) }];
+  const { notas } = await documentosImpresionPrueba({ cantidad: 1, nombres: ["NOMBRE <ALUMNO> & FAMILIA"], registro: { activities, gradesList: [{ actividadId: "larga", alumnoId: "alumno_1", nota: 87 }] } });
+  assert.match(notas, /NOMBRE &lt;ALUMNO&gt; &amp; FAMILIA/);
+  assert.ok(notas.includes(escapeForTest(activities[0].titulo)));
+  assert.doesNotMatch(notas, /<cantidades>|<ALUMNO>/);
+  assert.match(notas, /data-column="larga" class="">87/);
+});
+
+function escapeForTest(value) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
