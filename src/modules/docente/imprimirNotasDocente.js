@@ -36,20 +36,8 @@ function printableGrade(value) {
   return Math.max(35, Math.min(100, number || 35));
 }
 
-function splitColumns(items, minimum, _maximum, prefix) {
-  const clean = [...items];
-  while (clean.length < minimum) {
-    clean.push({ id: `blank_${prefix}_${clean.length}`, titulo: "", empty: true, maximo: 100 });
-  }
-  return clean;
-}
-
 function verticalLabel(text, className = "") {
-  const length = String(text || "").length;
-  const density = className.includes("activity-title")
-    ? length > 34 ? " long-title" : length > 22 ? " medium-title" : ""
-    : "";
-  return `<span class="vertical-text ${className}${density}" title="${escapeHtml(text || "")}">${escapeHtml(text || "")}</span>`;
+  return `<span class="vertical-text ${className}">${escapeHtml(text || "")}</span>`;
 }
 
 function gradeCell(value) {
@@ -57,14 +45,15 @@ function gradeCell(value) {
   return `<td class="${grade <= 50 ? "low-note" : ""}">${grade}</td>`;
 }
 
-function emptyCells(count) {
-  return Array.from({ length: count }, () => "<td></td>").join("");
+function codedActivities(items, prefix) {
+  return items.map((item, index) => ({ ...item, printCode: `${prefix}${index + 1}` }));
 }
 
 function subjectSheet({
   course,
   subject,
-  trimesterLabel,
+  selectedTrimesterLabel = "",
+  trimesterLabel = selectedTrimesterLabel,
   students,
   activities,
   gradesMap,
@@ -81,12 +70,12 @@ function subjectSheet({
   const gradedActivities = subjectActivitiesAll
     .filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
     .filter((item) => Object.keys(gradesMap[item.id] || {}).length > 0);
-  const serColumns = splitColumns(serCriteriaRaw, 1, 4, "ser");
-  const saberColumns = gradedActivities.filter(isSaberActivity);
-  const hacerColumns = splitColumns(gradedActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item)), 3, 7, "hacer");
+  const serColumns = codedActivities(serCriteriaRaw, "SER");
+  const saberColumns = codedActivities(gradedActivities.filter(isSaberActivity), "S");
+  const hacerColumns = codedActivities(gradedActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item)), "H");
+  const activityColumns = [...serColumns, ...saberColumns, ...hacerColumns];
   const noteCount = 3 + serColumns.length + 2 + saberColumns.length + 2 + hacerColumns.length + 2 + 2 + 3;
   const fullSpan = 2 + noteCount;
-  const areaColspan = Math.max(4, fullSpan - 14);
   const regularNoteCount = Math.max(1, noteCount - 3);
   const densityClass = noteCount > 34 ? "print-ultra" : noteCount > 27 ? "print-dense" : "";
   const info = courseInfo(course);
@@ -109,25 +98,17 @@ function subjectSheet({
         </colgroup>
         <thead>
           <tr>
-            <th colspan="8" class="brand-top">REGISTRO DE EVALUACION&nbsp;&nbsp; ${gestionActual()}&nbsp;&nbsp; ${escapeHtml(normalizeText(trimesterLabel))}</th>
-            <th colspan="${Math.max(1, fullSpan - 13)}" class="top-fill"></th>
-            <th colspan="3" class="meta-cell">ANO DE ESCOLARIDAD:</th>
-            <th colspan="2" class="meta-value">${escapeHtml(info.grade)}</th>
-          </tr>
-          <tr>
-            <th colspan="2" class="meta-label">NIVEL:</th>
-            <th colspan="6" class="meta-value">${SCHOOL_LEVEL}</th>
-            <th colspan="2" class="meta-label">AREA:</th>
-            <th colspan="${areaColspan}" class="meta-value">${escapeHtml(normalizeText(subject.nombre))}</th>
-            <th colspan="2" class="meta-label">PARALELO:</th>
-            <th colspan="2" rowspan="2" class="parallel">${escapeHtml(info.parallel)}</th>
-          </tr>
-          <tr>
-            <th colspan="2" class="meta-label">CAMPO:</th>
-            <th colspan="6" class="meta-value">${SCHOOL_FIELD}</th>
-            <th colspan="2" class="meta-label">MAESTRA/O:</th>
-            <th colspan="${areaColspan}" class="meta-value">${escapeHtml(normalizeText(teacherName || ""))}</th>
-            <th colspan="2" class="meta-label"></th>
+            <th colspan="${fullSpan}" class="record-heading">
+              <div class="brand-top"><span>REGISTRO DE EVALUACION</span><span>${gestionActual()} &middot; ${escapeHtml(normalizeText(trimesterLabel))}</span></div>
+              <div class="record-meta">
+                <div><strong>NIVEL:</strong><span>${SCHOOL_LEVEL}</span></div>
+                <div><strong>AREA:</strong><span>${escapeHtml(normalizeText(subject.nombre))}</span></div>
+                <div><strong>CURSO:</strong><span>${escapeHtml(info.grade)}</span></div>
+                <div><strong>CAMPO:</strong><span>${SCHOOL_FIELD}</span></div>
+                <div><strong>MAESTRA/O:</strong><span>${escapeHtml(normalizeText(teacherName || ""))}</span></div>
+                <div><strong>PARALELO:</strong><span>${escapeHtml(info.parallel)}</span></div>
+              </div>
+            </th>
           </tr>
           <tr>
             <th colspan="2" rowspan="2" class="school-block">
@@ -138,26 +119,26 @@ function subjectSheet({
             <th colspan="${3 + serColumns.length + 2}" class="group ser-group">SER/10</th>
             <th colspan="${saberColumns.length + 2}" class="group saber-group">SABER/45</th>
             <th colspan="${hacerColumns.length + 2}" class="group hacer-group">HACER/40</th>
-            <th colspan="2" class="group auto-group">AUTOEVALUACION</th>
-            <th colspan="3" class="group final-group">CALIFICACION TRIMESTRAL</th>
+            <th colspan="2" class="group auto-group"><span>AUTO</span><span>/5</span></th>
+            <th colspan="3" class="group final-group"><span>CALIFICACION</span><span>TRIMESTRAL</span></th>
           </tr>
           <tr>
             <th class="vertical ser-col section-start">${verticalLabel("Asistencia")}</th>
             <th class="vertical ser-col">${verticalLabel("Puntualidad")}</th>
             <th class="vertical ser-col">${verticalLabel("Responsabilidad")}</th>
-            ${serColumns.map((item) => `<th class="vertical activity-head ser-col">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
+            ${serColumns.map((item) => `<th class="vertical activity-head ser-col" data-activity-code="${item.printCode}">${verticalLabel(item.printCode, "activity-title")}</th>`).join("")}
             <th class="vertical ser-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical ser-col prom">${verticalLabel("Puntaje")}</th>
-            ${saberColumns.map((item, index) => `<th class="vertical activity-head saber-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
+            ${saberColumns.map((item, index) => `<th class="vertical activity-head saber-col ${index === 0 ? "section-start" : ""}" data-activity-code="${item.printCode}">${verticalLabel(item.printCode, "activity-title")}</th>`).join("")}
             <th class="vertical saber-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical saber-col prom">${verticalLabel("Puntaje")}</th>
-            ${hacerColumns.map((item, index) => `<th class="vertical activity-head hacer-col ${index === 0 ? "section-start" : ""}">${verticalLabel(item.titulo || "", "activity-title")}</th>`).join("")}
+            ${hacerColumns.map((item, index) => `<th class="vertical activity-head hacer-col ${index === 0 ? "section-start" : ""}" data-activity-code="${item.printCode}">${verticalLabel(item.printCode, "activity-title")}</th>`).join("")}
             <th class="vertical hacer-col prom">${verticalLabel("Promedio")}</th>
             <th class="vertical hacer-col prom">${verticalLabel("Puntaje")}</th>
-            <th class="vertical auto-col section-start">${verticalLabel("Nota")}</th>
-            <th class="vertical auto-col prom">${verticalLabel("Puntaje")}</th>
-            <th class="vertical total-col section-start prom">${verticalLabel("Total")}</th>
-            <th class="vertical final-col prom">${verticalLabel("Nota final")}</th>
+            <th class="vertical auto-col section-start">${verticalLabel("Nota /100")}</th>
+            <th class="vertical auto-col prom">${verticalLabel("Puntaje /5")}</th>
+            <th class="vertical total-col section-start prom">${verticalLabel("Subtotal /95")}</th>
+            <th class="vertical final-col prom">${verticalLabel("Nota final /100")}</th>
             <th class="vertical status-col">${verticalLabel("Situacion")}</th>
           </tr>
           <tr>
@@ -167,11 +148,7 @@ function subjectSheet({
           </tr>
         </thead>
         <tbody>
-          ${Array.from({ length: 40 }, (_, rowIndex) => {
-            const student = students[rowIndex];
-            if (!student) {
-              return `<tr><td>${rowOffset + rowIndex + 1}</td><td class="student-name">&nbsp;</td>${emptyCells(noteCount)}</tr>`;
-            }
+          ${students.map((student, rowIndex) => {
             const serExtraValues = serCriteriaRaw.filter((item) => gradesMap[item.id]?.[student.id]).map((item) => studentActivityGrade(item, student.id, gradesMap));
             const autoGrade = autoActivity ? gradesMap[autoActivity.id]?.[student.id]?.nota : null;
             const calc = calculateStudentTerm(student, gradedActivities, gradesMap, attendanceRows, serExtraValues, autoGrade);
@@ -181,13 +158,13 @@ function subjectSheet({
               ${gradeCell(calc.asistencia100)}
               ${gradeCell(calc.puntualidad100)}
               ${gradeCell(calc.responsabilidad100)}
-              ${serColumns.map((item) => item.empty ? "<td></td>" : gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
+              ${serColumns.map((item) => gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
               ${gradeCell(calc.ser100)}
               <td class="score">${calc.ser10}</td>
-              ${saberColumns.map((item) => item.empty ? "<td></td>" : gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
+              ${saberColumns.map((item) => gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
               ${gradeCell(calc.saber100)}
               <td class="score">${calc.saber45}</td>
-              ${hacerColumns.map((item) => item.empty ? "<td></td>" : gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
+              ${hacerColumns.map((item) => gradeCell(studentActivityGrade(item, student.id, gradesMap))).join("")}
               ${gradeCell(calc.hacer100)}
               <td class="score">${calc.hacer40}</td>
               ${autoActivity ? gradeCell(studentActivityGrade(autoActivity, student.id, gradesMap)) : "<td></td>"}
@@ -199,6 +176,12 @@ function subjectSheet({
           }).join("")}
         </tbody>
       </table>
+      <p class="grade-scale-note">Subtotal /95 + Autoevaluacion /5 = Nota final /100.</p>
+      ${activityColumns.length ? `<section class="activity-key">
+        <h2>ACTIVIDADES EVALUADAS</h2>
+        <p class="activity-context">${escapeHtml(normalizeText(subject.nombre))} &middot; ${escapeHtml(course.nombre || "")} &middot; ${escapeHtml(trimesterLabel)} &middot; ${gestionActual()}</p>
+        <div class="activity-key-list">${activityColumns.map((item) => `<div class="activity-key-item" data-key-code="${item.printCode}"><strong>${item.printCode}</strong><span>${escapeHtml(item.titulo || "Actividad sin titulo")}</span></div>`).join("")}</div>
+      </section>` : ""}
       <div class="signatures">
         <div>
           <span></span>
@@ -232,90 +215,87 @@ export function printDocument(payload, subjects) {
           .print-page {
             width: ${page.ancho}mm;
             max-width: 100%;
-            height: ${page.alto}mm;
-            max-height: ${page.alto}mm;
-            overflow: hidden;
             page-break-after: always;
             break-after: page;
             page-break-inside: avoid;
             break-inside: avoid;
-            display: flex;
-            flex-direction: column;
           }
           .print-page:last-child { page-break-after: auto; break-after: auto; }
           .notes-print-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-          th, td { border: 1px solid #202020; padding: 0 .25px; height: 12px; text-align: center; vertical-align: middle; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; line-height: 1; }
+          th, td { border: 1px solid #202020; padding: 0 .25px; height: 12px; text-align: center; vertical-align: middle; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; line-height: 1.05; }
           th { font-size: calc(7.8px + var(--print-font-increase)); }
           tbody td { height: calc(12px + 1pt); }
           .col-num { width: 2.6%; }
           .col-name { width: 24.5%; }
-          .col-note { width: calc((100% - 2.6% - 24.5% - 3% - 3% - 5.9%) / var(--regular-note-count)); }
+          .col-note { width: calc((100% - 2.6% - 24.5% - 3% - 3% - 8%) / var(--regular-note-count)); }
           .col-total { width: 3%; }
-          .col-status { width: 5.9%; }
-          .brand-top { --print-font-increase: 1pt; background: #087B2B; color: #fff; font-size: calc(12px + var(--print-font-increase)); font-weight: 700; text-align: left; white-space: nowrap; padding-left: 5px; letter-spacing: 0; }
-          .top-fill { background: #cce8c8; border-left: 0; }
-          .meta-label, .meta-cell { font-weight: 700; text-align: right; background: #fff; }
-          .meta-value { font-weight: 400; background: #fff; }
-          .parallel { font-size: calc(16px + var(--print-font-increase)); font-weight: 400; }
+          .col-status { width: 8%; }
+          .record-heading { padding: 0; }
+          .brand-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #087B2B; color: #fff; padding: 4px 6px; font-size: 10pt; font-weight: 700; text-align: left; }
+          .brand-top span { white-space: nowrap; }
+          .record-meta { display: grid; grid-template-columns: 1.4fr 1.6fr .7fr; font-size: 7.4pt; text-align: left; }
+          .record-meta > div { display: flex; align-items: baseline; gap: 4px; min-width: 0; padding: 4px 5px; border-top: 1px solid #202020; }
+          .record-meta > div:not(:nth-child(3n)) { border-right: 1px solid #202020; }
+          .record-meta strong { flex-shrink: 0; white-space: nowrap; }
+          .record-meta span { min-width: 0; overflow-wrap: anywhere; font-weight: 400; }
           .school-block { height: 72px; background: #fff; }
           .school-block img { display: block; width: 72px; height: 72px; object-fit: contain; margin: 1px auto; }
           .school-title { font-size: calc(8px + var(--print-font-increase)); font-weight: 700; }
           .school-name { margin-top: 1px; font-size: calc(10.5px + var(--print-font-increase)); font-weight: 700; }
-          .group { font-weight: 700; color: #111; }
+          .group { padding: 3px 0; font-weight: 700; color: #111; }
+          .group > span { display: block; white-space: nowrap; }
           .ser-group, .ser-col { background: #fff; }
           .saber-group { background: #f8dfc2; }
           .saber-col { background: #fff7ed; }
           .hacer-group { background: #fbe0cf; }
           .hacer-col { background: #fff; }
           .auto-group, .auto-col { background: #fde7a8; }
-          .auto-group { overflow-wrap: anywhere; }
           .final-group, .final-col { background: #dff2c6; }
           .total-col { background: #f8dfc2; }
           .status-col { background: #e7f2ff; }
           .section-start { border-left-width: 2px; }
-          .vertical { height: 82px; padding: 0; overflow: hidden; }
+          .vertical { height: 110px; padding: 2px 0; }
           .vertical-text {
             display: inline-block;
-            max-height: 78px;
-            max-width: 100%;
             writing-mode: vertical-rl;
             text-orientation: mixed;
             transform: rotate(180deg);
             white-space: nowrap;
-            overflow: hidden;
             font-size: calc(7.2px + var(--print-font-increase));
             font-weight: 400;
             line-height: 1;
             letter-spacing: 0;
           }
-          .activity-head { height: 122px; }
-          .activity-title { max-height: 116px; font-size: calc(6.8px + var(--print-font-increase)); }
-          .activity-title.medium-title { max-height: 116px; font-size: calc(6.2px + var(--print-font-increase)); }
-          .activity-title.long-title { max-height: 116px; font-size: calc(5.7px + var(--print-font-increase)); }
+          .activity-title { font-size: 8pt; font-weight: 700; }
           .prom .vertical-text { font-weight: 700; }
           .thin-header { height: 9px; background: #f8f8f8; }
           .col-header { font-size: calc(8px + var(--print-font-increase)); font-weight: 700; background: #fff; }
-          .student-name { --print-font-increase: 1pt; text-align: left; white-space: nowrap; overflow: hidden; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; }
+          .student-name { --print-font-increase: 1pt; text-align: left; white-space: nowrap; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; }
           .low-note { color: #d91f26; }
           .score { background: #fef3c7; }
           .total-score { background: #fde8d1; }
           .final-ok { background: #e7f7df; color: #111; }
           .final-low { background: #fde7e7; color: #d91f26; }
-          .status-ok { background: #edf8ff; color: #166534; font-size: calc(6.8px + var(--print-font-increase)); }
-          .status-low { background: #edf8ff; color: #d91f26; font-size: calc(6.8px + var(--print-font-increase)); }
-          .signatures { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 8px 34px 0; text-align: center; font-size: calc(7.5px + var(--print-font-increase)); }
+          .status-ok { background: #edf8ff; color: #166534; font-size: 7.3pt; }
+          .status-low { background: #edf8ff; color: #d91f26; font-size: 7.3pt; font-weight: 700; }
+          .grade-scale-note { margin: 6px 0 0; font-size: 7.3pt; }
+          .activity-key { margin-top: 12px; break-inside: avoid; }
+          .activity-key h2 { margin: 0 0 3px; font-size: 8pt; }
+          .activity-context { margin: 0 0 6px; font-size: 7.3pt; }
+          .activity-key-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 14px; }
+          .activity-key-item { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 4px; font-size: 8pt; line-height: 1.15; break-inside: avoid; }
+          .activity-key-item span { overflow-wrap: anywhere; }
+          .activity-reference-page .activity-key { margin-top: 0; }
+          .activity-reference-page, .activity-reference-page .activity-key { break-inside: auto; }
+          .signatures { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 8px 34px 0; text-align: center; font-size: calc(7.5px + var(--print-font-increase)); break-inside: avoid; }
           .signatures span { display: block; border-top: 1px solid #111; margin: 0 auto 2px; width: 145px; }
           .signatures strong { display: block; font-size: calc(7.5px + var(--print-font-increase)); font-weight: 700; }
           .signatures small { display: block; font-size: calc(6.4px + var(--print-font-increase)); }
           .print-dense th, .print-dense td { height: 11px; font-size: calc(7.4px + var(--print-font-increase)); }
           .print-dense th { font-size: calc(7px + var(--print-font-increase)); }
           .print-dense tbody td { height: calc(11px + 1pt); }
-          .print-dense .vertical { height: 76px; }
-          .print-dense .vertical-text { max-height: 72px; font-size: calc(6.6px + var(--print-font-increase)); }
-          .print-dense .activity-head { height: 114px; }
-          .print-dense .activity-title { max-height: 108px; font-size: calc(6.2px + var(--print-font-increase)); }
-          .print-dense .activity-title.medium-title { max-height: 108px; font-size: calc(5.7px + var(--print-font-increase)); }
-          .print-dense .activity-title.long-title { max-height: 108px; font-size: calc(5.3px + var(--print-font-increase)); }
+          .print-dense .vertical { height: 110px; }
+          .print-dense .vertical-text { font-size: calc(6.6px + var(--print-font-increase)); }
           .print-dense .student-name { font-size: calc(7.4px + var(--print-font-increase)); }
           .print-dense .school-block { height: 64px; }
           .print-dense .school-block img { width: 64px; height: 64px; }
@@ -323,16 +303,11 @@ export function printDocument(payload, subjects) {
           .print-ultra th, .print-ultra td { height: 10px; font-size: calc(6.6px + var(--print-font-increase)); }
           .print-ultra th { font-size: calc(6.4px + var(--print-font-increase)); }
           .print-ultra tbody td { height: calc(10px + 1pt); }
-          .print-ultra .vertical { height: 70px; }
-          .print-ultra .vertical-text { max-height: 66px; font-size: calc(6px + var(--print-font-increase)); }
-          .print-ultra .activity-head { height: 108px; }
-          .print-ultra .activity-title { max-height: 102px; font-size: calc(5.6px + var(--print-font-increase)); }
-          .print-ultra .activity-title.medium-title { max-height: 102px; font-size: calc(5.2px + var(--print-font-increase)); }
-          .print-ultra .activity-title.long-title { max-height: 102px; font-size: calc(4.9px + var(--print-font-increase)); }
+          .print-ultra .vertical { height: 110px; }
+          .print-ultra .vertical-text { font-size: calc(6px + var(--print-font-increase)); }
           .print-ultra .student-name { font-size: calc(6.6px + var(--print-font-increase)); }
           .print-ultra .school-block { height: 58px; }
           .print-ultra .school-block img { width: 60px; height: 60px; }
-          .print-ultra .brand-top { font-size: calc(10px + var(--print-font-increase)); }
           .print-ultra .school-name { font-size: calc(9px + var(--print-font-increase)); }
           .print-ultra .signatures { padding-top: 4px; }
         </style>
@@ -342,10 +317,10 @@ export function printDocument(payload, subjects) {
           subjectSheet({ ...payload, students: payload.students.slice(page * 40, (page + 1) * 40), rowOffset: page * 40, subject, gradesMap })
         )).join("")}
         <script>
-          window.addEventListener("load", () => {
-            setTimeout(() => {
-              // Fit wider text without reducing its printed height or changing the table layout.
-              document.querySelectorAll("tbody td, .brand-top").forEach((cell) => {
+          window.addEventListener("load", async () => {
+              if (document.fonts?.ready) await document.fonts.ready;
+              // Reduce font size proportionally when necessary; never stretch letters or marks.
+              document.querySelectorAll("tbody td, .group").forEach((cell) => {
                 if (!cell.textContent.trim()) return;
                 const text = document.createRange();
                 text.selectNodeContents(cell);
@@ -353,15 +328,46 @@ export function printDocument(payload, subjects) {
                 const style = getComputedStyle(cell);
                 const available = cell.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
                 if (width <= available || available <= 0) return;
-                const label = document.createElement("span");
-                label.textContent = cell.textContent;
-                const scale = available / width;
-                const alignment = cell.matches(".student-name, .brand-top")
-                  ? "transform:scaleX(" + scale + ");transform-origin:left"
-                  : "position:relative;left:50%;transform:translateX(-50%) scaleX(" + scale + ");transform-origin:center";
-                label.style.cssText = "display:block;width:max-content;white-space:nowrap;" + alignment;
-                cell.replaceChildren(label);
+                cell.style.fontSize = (parseFloat(style.fontSize) * available / width) + "px";
               });
+              document.querySelectorAll(".vertical-text").forEach((label) => {
+                const available = label.parentElement.clientHeight - 4;
+                const height = label.getBoundingClientRect().height;
+                if (height > available && available > 0) label.style.fontSize = (parseFloat(getComputedStyle(label).fontSize) * available / height) + "px";
+              });
+
+              // Keep every mark on its original sheet; only full activity titles may continue.
+              const pageHeight = ${page.alto} * 96 / 25.4;
+              document.querySelectorAll(".print-page").forEach((recordPage) => {
+                const key = recordPage.querySelector(".activity-key");
+                if (!key) return;
+                const heading = key.querySelector("h2").cloneNode(true);
+                const context = key.querySelector(".activity-context").cloneNode(true);
+                const items = [...key.querySelectorAll(".activity-key-item")];
+                let currentPage = recordPage;
+                let currentList = key.querySelector(".activity-key-list");
+                currentList.replaceChildren();
+                items.forEach((item) => {
+                  currentList.appendChild(item);
+                  if (currentPage.getBoundingClientRect().height <= pageHeight) return;
+                  item.remove();
+                  if (!currentList.children.length && currentPage === recordPage) key.remove();
+                  const nextPage = document.createElement("section");
+                  nextPage.className = "print-page activity-reference-page";
+                  const nextKey = document.createElement("section");
+                  nextKey.className = "activity-key";
+                  nextKey.append(heading.cloneNode(true), context.cloneNode(true));
+                  currentList = document.createElement("div");
+                  currentList.className = "activity-key-list";
+                  nextKey.appendChild(currentList);
+                  nextPage.appendChild(nextKey);
+                  currentPage.after(nextPage);
+                  currentPage = nextPage;
+                  currentList.appendChild(item);
+                });
+              });
+              document.documentElement.dataset.printReady = "true";
+            setTimeout(() => {
               window.focus();
               window.print();
             }, 250);

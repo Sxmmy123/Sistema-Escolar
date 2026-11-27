@@ -100,16 +100,17 @@ test("registro conserva su tabla en carta vertical y aprovecha parte del ancho d
   assert.match(notas, /font-size: calc\(8\.4px \+ var\(--print-font-increase\)\)/);
   assert.match(notas, /font-size: calc\(7\.4px \+ var\(--print-font-increase\)\)/);
   assert.match(notas, /font-size: calc\(6\.6px \+ var\(--print-font-increase\)\)/);
-  assert.ok([...notas.matchAll(/font-size: ([^;]+);/g)].every((match) => match[1].includes("var(--print-font-increase)")));
   assert.match(notas, /\.col-name \{ width: 24\.5%; \}/);
-  assert.match(notas, /\.col-note \{ width: calc\(\(100% - 2\.6% - 24\.5% - 3% - 3% - 5\.9%\) \/ var\(--regular-note-count\)\); \}/);
+  assert.match(notas, /\.col-note \{ width: calc\(\(100% - 2\.6% - 24\.5% - 3% - 3% - 8%\) \/ var\(--regular-note-count\)\); \}/);
   assert.match(notas, /SER\/10/);
   assert.match(notas, /SABER\/45/);
   assert.match(notas, /HACER\/40/);
-  assert.match(notas, /AUTOEVALUACION/);
-  assert.match(notas, /CALIFICACION TRIMESTRAL/);
+  assert.match(notas, /Autoevaluacion/);
+  assert.match(notas, /<span>CALIFICACION<\/span><span>TRIMESTRAL<\/span>/);
   assert.match(notas, /writing-mode: vertical-rl/);
-  assert.doesNotMatch(notas, /activity-key|data-part=|PARTE \d+ DE/);
+  assert.doesNotMatch(notas, /scaleX|data-part=|PARTE \d+ DE/);
+  assert.doesNotMatch(notas, /overflow: hidden|max-height:/);
+  assert.match(notas, /cell\.style\.fontSize =/);
 });
 
 test("registro omite columnas de relleno en SABER sin eliminar actividades calificadas", async () => {
@@ -150,14 +151,53 @@ test("registro mantiene actividades y puntajes en su posicion original sin divid
   assert.deepEqual(values, ["1", "ESTUDIANTE 01 FLORES VARGAS", "100", "100", "100", "100", "100", "8", ...Array(11).fill("100"), "75", "21", ...Array(9).fill("100"), "48", "75", "16", "100", "4", "45", "49", "REPROBADO"]);
 });
 
-test("registro conserva 40 filas por hoja y los nombres escapados", async () => {
+test("registro conserva hasta 40 alumnos por hoja sin filas vacias de relleno", async () => {
   const { notas } = await documentosImpresionPrueba({ cantidad: 41, nombres: ["NOMBRE <ALUMNO> & FAMILIA"] });
   const sheets = [...notas.matchAll(/<section class="print-page [\s\S]*?<\/section>/g)].map((match) => match[0]);
   assert.equal(sheets.length, 2);
-  for (const sheet of sheets) assert.equal((sheet.match(/class="student-name"/g) || []).length, 40);
+  assert.equal((sheets[0].match(/class="student-name"/g) || []).length, 40);
+  assert.equal((sheets[1].match(/class="student-name"/g) || []).length, 1);
+  assert.doesNotMatch(notas, /&nbsp;/);
   assert.match(notas, /NOMBRE &lt;ALUMNO&gt; &amp; FAMILIA/);
   assert.doesNotMatch(notas, /<ALUMNO>/);
   assert.match(sheets[1], /<td>41<\/td>/);
+});
+
+test("registro no inventa columnas vacias en SER ni HACER", async () => {
+  for (const count of [0, 1, 2, 4]) {
+    const activities = Array.from({ length: count }, (_, index) => ({ id: `h${index}`, materiaId: "matematica", tipo: "tarea", titulo: `Hacer ${index + 1}` }));
+    const gradesList = activities.map((activity) => ({ actividadId: activity.id, alumnoId: "alumno_1", nota: 85 }));
+    const { notas } = await documentosImpresionPrueba({ cantidad: 1, registro: { activities, gradesList } });
+    assert.equal((notas.match(/data-activity-code="H\d+"/g) || []).length, count);
+    assert.doesNotMatch(notas, /data-activity-code="SER\d+"/);
+    assert.ok(notas.includes(`<th colspan="${count + 2}" class="group hacer-group">HACER/40</th>`));
+    assert.match(notas, /<th colspan="5" class="group ser-group">SER\/10<\/th>/);
+  }
+});
+
+test("registro muestra cada titulo completo con un codigo que conserva su columna", async () => {
+  const title = `${"Actividad extensa de lectura y analisis. ".repeat(12)}<texto> & material`;
+  const activities = [{ id: "s1", materiaId: "matematica", tipo: "examen", titulo: title }];
+  const gradesList = [{ actividadId: "s1", alumnoId: "alumno_1", nota: 92 }];
+  const { notas } = await documentosImpresionPrueba({ cantidad: 1, registro: { activities, gradesList } });
+  assert.match(notas, /data-activity-code="S1"><span class="vertical-text activity-title">S1<\/span>/);
+  assert.match(notas, /data-key-code="S1"><strong>S1<\/strong><span>Actividad extensa/);
+  assert.ok(notas.includes(title.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("& material", "&amp; material")));
+  assert.doesNotMatch(notas, /<texto>/);
+  assert.match(notas, /activity-reference-page/);
+});
+
+test("registro ordena los metadatos y distingue subtotal de nota final sin cambiar sus valores", async () => {
+  const { notas } = await documentosImpresionPrueba({ cantidad: 1, registro: { values: { ser10: 10, saber45: 40, hacer40: 35, auto5: 4, final: 89 } } });
+  assert.match(notas, /class="record-meta"/);
+  assert.match(notas, /<strong>NIVEL:<\/strong>/);
+  assert.match(notas, /<strong>AREA:<\/strong>/);
+  assert.match(notas, /Subtotal \/95/);
+  assert.match(notas, /Nota final \/100/);
+  assert.match(notas, /Subtotal \/95 \+ Autoevaluacion \/5 = Nota final \/100/);
+  assert.match(notas, /class="total-score">85<\/td>/);
+  assert.match(notas, /class="final-ok">89<\/td>/);
+  assert.doesNotMatch(notas, /margin-top: auto/);
 });
 
 test("registro aumenta un punto el alto de las filas sin modificar los encabezados ni la letra", async () => {
@@ -168,4 +208,9 @@ test("registro aumenta un punto el alto de las filas sin modificar los encabezad
   assert.match(notas, /th, td \{[^}]*height: 12px;/);
   assert.match(notas, /html \{ --print-font-increase: 1\.5pt; \}/);
   assert.equal((notas.match(/class="student-name"/g) || []).length, 40);
+});
+
+test("registro imprime el trimestre seleccionado que envia el modulo de notas", async () => {
+  const { notas } = await documentosImpresionPrueba({ cantidad: 1, registro: { trimesterLabel: undefined, selectedTrimesterLabel: "2do trimestre" } });
+  assert.match(notas, /2026 &middot; 2DO TRIMESTRE/);
 });
