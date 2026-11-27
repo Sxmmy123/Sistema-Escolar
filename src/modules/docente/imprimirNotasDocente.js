@@ -82,7 +82,7 @@ function subjectSheet({
     .filter((item) => !item.interno && !["ser", "auto"].includes(item.tipo))
     .filter((item) => Object.keys(gradesMap[item.id] || {}).length > 0);
   const serColumns = splitColumns(serCriteriaRaw, 1, 4, "ser");
-  const saberColumns = splitColumns(gradedActivities.filter(isSaberActivity), 3, 6, "saber");
+  const saberColumns = gradedActivities.filter(isSaberActivity);
   const hacerColumns = splitColumns(gradedActivities.filter((item) => !isSaberActivity(item) && !isMaterialActivity(item)), 3, 7, "hacer");
   const noteCount = 3 + serColumns.length + 2 + saberColumns.length + 2 + hacerColumns.length + 2 + 2 + 3;
   const fullSpan = 2 + noteCount;
@@ -227,6 +227,7 @@ export function printDocument(payload, subjects) {
         <style>
           ${page.pagina}
           * { box-sizing: border-box; }
+          html { --print-font-increase: 1pt; }
           html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: "Arial Narrow", Arial, sans-serif; }
           .print-page {
             width: ${page.ancho}mm;
@@ -243,22 +244,22 @@ export function printDocument(payload, subjects) {
           }
           .print-page:last-child { page-break-after: auto; break-after: auto; }
           .notes-print-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-          th, td { border: 1px solid #202020; padding: 0 .25px; height: 12px; text-align: center; vertical-align: middle; font-size: 8.4px; font-weight: 400; line-height: 1; }
-          th { font-size: 7.8px; }
+          th, td { border: 1px solid #202020; padding: 0 .25px; height: 12px; text-align: center; vertical-align: middle; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; line-height: 1; }
+          th { font-size: calc(7.8px + var(--print-font-increase)); }
           .col-num { width: 2.6%; }
           .col-name { width: 28.5%; }
           .col-note { width: calc((100% - 2.6% - 28.5% - 3% - 3% - 5.9%) / var(--regular-note-count)); }
           .col-total { width: 3%; }
           .col-status { width: 5.9%; }
-          .brand-top { background: #087B2B; color: #fff; font-size: 12px; font-weight: 700; text-align: left; padding-left: 5px; letter-spacing: .02em; }
+          .brand-top { background: #087B2B; color: #fff; font-size: calc(12px + var(--print-font-increase)); font-weight: 700; text-align: left; padding-left: 5px; letter-spacing: 0; }
           .top-fill { background: #cce8c8; border-left: 0; }
           .meta-label, .meta-cell { font-weight: 700; text-align: right; background: #fff; }
           .meta-value { font-weight: 400; background: #fff; }
-          .parallel { font-size: 16px; font-weight: 400; }
+          .parallel { font-size: calc(16px + var(--print-font-increase)); font-weight: 400; }
           .school-block { height: 72px; background: #fff; }
           .school-block img { display: block; width: 72px; height: 72px; object-fit: contain; margin: 1px auto; }
-          .school-title { font-size: 8px; font-weight: 700; }
-          .school-name { margin-top: 1px; font-size: 10.5px; font-weight: 700; }
+          .school-title { font-size: calc(8px + var(--print-font-increase)); font-weight: 700; }
+          .school-name { margin-top: 1px; font-size: calc(10.5px + var(--print-font-increase)); font-weight: 700; }
           .group { font-weight: 700; color: #111; }
           .ser-group, .ser-col { background: #fff; }
           .saber-group { background: #f8dfc2; }
@@ -281,55 +282,55 @@ export function printDocument(payload, subjects) {
             transform: rotate(180deg);
             white-space: nowrap;
             overflow: hidden;
-            font-size: 7.2px;
+            font-size: calc(7.2px + var(--print-font-increase));
             font-weight: 400;
             line-height: 1;
             letter-spacing: 0;
           }
           .activity-head { height: 122px; }
-          .activity-title { max-height: 116px; font-size: 6.8px; }
-          .activity-title.medium-title { max-height: 116px; font-size: 6.2px; }
-          .activity-title.long-title { max-height: 116px; font-size: 5.7px; }
+          .activity-title { max-height: 116px; font-size: calc(6.8px + var(--print-font-increase)); }
+          .activity-title.medium-title { max-height: 116px; font-size: calc(6.2px + var(--print-font-increase)); }
+          .activity-title.long-title { max-height: 116px; font-size: calc(5.7px + var(--print-font-increase)); }
           .prom .vertical-text { font-weight: 700; }
           .thin-header { height: 9px; background: #f8f8f8; }
-          .col-header { font-size: 8px; font-weight: 700; background: #fff; }
-          .student-name { text-align: left; white-space: nowrap; overflow: hidden; font-size: 8.4px; font-weight: 400; }
+          .col-header { font-size: calc(8px + var(--print-font-increase)); font-weight: 700; background: #fff; }
+          .student-name { text-align: left; white-space: nowrap; overflow: hidden; font-size: calc(8.4px + var(--print-font-increase)); font-weight: 400; }
           .low-note { color: #d91f26; }
           .score { background: #fef3c7; }
           .total-score { background: #fde8d1; }
           .final-ok { background: #e7f7df; color: #111; }
           .final-low { background: #fde7e7; color: #d91f26; }
-          .status-ok { background: #edf8ff; color: #166534; font-size: 6.8px; }
-          .status-low { background: #edf8ff; color: #d91f26; font-size: 6.8px; }
-          .signatures { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 8px 34px 0; text-align: center; font-size: 7.5px; }
+          .status-ok { background: #edf8ff; color: #166534; font-size: calc(6.8px + var(--print-font-increase)); }
+          .status-low { background: #edf8ff; color: #d91f26; font-size: calc(6.8px + var(--print-font-increase)); }
+          .signatures { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 34px; padding: 8px 34px 0; text-align: center; font-size: calc(7.5px + var(--print-font-increase)); }
           .signatures span { display: block; border-top: 1px solid #111; margin: 0 auto 2px; width: 145px; }
-          .signatures strong { display: block; font-size: 7.5px; font-weight: 700; }
-          .signatures small { display: block; font-size: 6.4px; }
-          .print-dense th, .print-dense td { height: 11px; font-size: 7.4px; }
-          .print-dense th { font-size: 7px; }
+          .signatures strong { display: block; font-size: calc(7.5px + var(--print-font-increase)); font-weight: 700; }
+          .signatures small { display: block; font-size: calc(6.4px + var(--print-font-increase)); }
+          .print-dense th, .print-dense td { height: 11px; font-size: calc(7.4px + var(--print-font-increase)); }
+          .print-dense th { font-size: calc(7px + var(--print-font-increase)); }
           .print-dense .vertical { height: 76px; }
-          .print-dense .vertical-text { max-height: 72px; font-size: 6.6px; }
+          .print-dense .vertical-text { max-height: 72px; font-size: calc(6.6px + var(--print-font-increase)); }
           .print-dense .activity-head { height: 114px; }
-          .print-dense .activity-title { max-height: 108px; font-size: 6.2px; }
-          .print-dense .activity-title.medium-title { max-height: 108px; font-size: 5.7px; }
-          .print-dense .activity-title.long-title { max-height: 108px; font-size: 5.3px; }
-          .print-dense .student-name { font-size: 7.4px; }
+          .print-dense .activity-title { max-height: 108px; font-size: calc(6.2px + var(--print-font-increase)); }
+          .print-dense .activity-title.medium-title { max-height: 108px; font-size: calc(5.7px + var(--print-font-increase)); }
+          .print-dense .activity-title.long-title { max-height: 108px; font-size: calc(5.3px + var(--print-font-increase)); }
+          .print-dense .student-name { font-size: calc(7.4px + var(--print-font-increase)); }
           .print-dense .school-block { height: 64px; }
           .print-dense .school-block img { width: 64px; height: 64px; }
           .print-dense .signatures { padding-top: 5px; }
-          .print-ultra th, .print-ultra td { height: 10px; font-size: 6.6px; }
-          .print-ultra th { font-size: 6.4px; }
+          .print-ultra th, .print-ultra td { height: 10px; font-size: calc(6.6px + var(--print-font-increase)); }
+          .print-ultra th { font-size: calc(6.4px + var(--print-font-increase)); }
           .print-ultra .vertical { height: 70px; }
-          .print-ultra .vertical-text { max-height: 66px; font-size: 6px; }
+          .print-ultra .vertical-text { max-height: 66px; font-size: calc(6px + var(--print-font-increase)); }
           .print-ultra .activity-head { height: 108px; }
-          .print-ultra .activity-title { max-height: 102px; font-size: 5.6px; }
-          .print-ultra .activity-title.medium-title { max-height: 102px; font-size: 5.2px; }
-          .print-ultra .activity-title.long-title { max-height: 102px; font-size: 4.9px; }
-          .print-ultra .student-name { font-size: 6.6px; }
+          .print-ultra .activity-title { max-height: 102px; font-size: calc(5.6px + var(--print-font-increase)); }
+          .print-ultra .activity-title.medium-title { max-height: 102px; font-size: calc(5.2px + var(--print-font-increase)); }
+          .print-ultra .activity-title.long-title { max-height: 102px; font-size: calc(4.9px + var(--print-font-increase)); }
+          .print-ultra .student-name { font-size: calc(6.6px + var(--print-font-increase)); }
           .print-ultra .school-block { height: 58px; }
           .print-ultra .school-block img { width: 60px; height: 60px; }
-          .print-ultra .brand-top { font-size: 10px; }
-          .print-ultra .school-name { font-size: 9px; }
+          .print-ultra .brand-top { font-size: calc(10px + var(--print-font-increase)); }
+          .print-ultra .school-name { font-size: calc(9px + var(--print-font-increase)); }
           .print-ultra .signatures { padding-top: 4px; }
         </style>
       </head>
@@ -340,6 +341,19 @@ export function printDocument(payload, subjects) {
         <script>
           window.addEventListener("load", () => {
             setTimeout(() => {
+              // Keep wider marks inside dense columns without reducing their printed height.
+              document.querySelectorAll("tbody td:not(.student-name)").forEach((cell) => {
+                if (!cell.textContent.trim()) return;
+                const text = document.createRange();
+                text.selectNodeContents(cell);
+                const width = text.getBoundingClientRect().width;
+                const available = cell.clientWidth - 0.5;
+                if (width <= available || available <= 0) return;
+                const label = document.createElement("span");
+                label.textContent = cell.textContent;
+                label.style.cssText = "display:block;width:max-content;position:relative;left:50%;white-space:nowrap;transform:translateX(-50%) scaleX(" + (available / width) + ");transform-origin:center";
+                cell.replaceChildren(label);
+              });
               window.focus();
               window.print();
             }, 250);
