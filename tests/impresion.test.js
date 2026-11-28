@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import vm from "node:vm";
 import { formatoCarta } from "../src/ui/impresion.js";
 import { documentosImpresionPrueba } from "./fixturesImpresion.js";
 
@@ -245,7 +246,7 @@ test("registro imprime el trimestre seleccionado que envia el modulo de notas", 
 test("asistencia conserva carta vertical, margen de anillado, letra legible y firmas al pie", async () => {
   const { asistencia } = await documentosImpresionPrueba({ cantidad: 16 });
   assert.match(asistencia, /size: letter portrait; margin: 10mm 10mm 10mm 25mm/);
-  assert.match(asistencia, /min-height: calc\(259\.4mm - 1px\)/);
+  assert.match(asistencia, /height: calc\(259\.4mm - 4mm\)/);
   assert.match(asistencia, /font-size: 8\.5pt/);
   assert.match(asistencia, /font-size: 8\.2pt/);
   assert.match(asistencia, /margin-top: auto;/);
@@ -253,6 +254,29 @@ test("asistencia conserva carta vertical, margen de anillado, letra legible y fi
   assert.match(asistencia, /document\.fonts\?\.ready/);
   assert.match(asistencia, /dataset\.printReady = "true"/);
   assert.doesNotMatch(asistencia, /Arial Narrow|overflow: hidden|class="activity-cell"|class="bottom-table"/);
+});
+
+test("asistencia reajusta las filas antes de imprimir para incluir las firmas sin reducir la letra", async () => {
+  const { asistencia } = await documentosImpresionPrueba({ cantidad: 40 });
+  const script = asistencia.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const events = {};
+  const rowHeights = new Map();
+  const sheets = [0, 1].map((id) => ({
+    style: { setProperty(name, value) { assert.equal(name, "--attendance-row-height"); rowHeights.set(id, Number(value.replace("px", ""))); } },
+    getBoundingClientRect: () => ({ bottom: 965 }),
+    querySelector: () => ({ getBoundingClientRect: () => ({ bottom: Math.max(965, id === 0 ? 950 : 978 - 40 * (15 - rowHeights.get(id))) }) })
+  }));
+  const document = { fonts: { ready: Promise.resolve() }, documentElement: { dataset: {} }, querySelectorAll: (selector) => selector === ".sheet" ? sheets : [] };
+  vm.runInNewContext(script, { document, window: { addEventListener(name, handler) { events[name] = handler; }, focus() {}, print() {} }, setTimeout: (callback) => callback() });
+  await events.load();
+  assert.equal(rowHeights.get(0), 15);
+  assert.equal(rowHeights.get(1), 14.5);
+  assert.equal(document.documentElement.dataset.printReady, "true");
+  rowHeights.set(1, 15);
+  events.beforeprint();
+  assert.equal(rowHeights.get(1), 14.5);
+  assert.match(asistencia, /font-size: 8\.5pt/);
+  assert.match(asistencia, /\.sheet \{ margin: 0; max-width: none;/);
 });
 
 test("asistencia resuelve el escudo dentro de la carpeta de GitHub Pages", async () => {

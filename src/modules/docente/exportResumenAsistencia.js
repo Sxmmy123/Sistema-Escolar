@@ -258,7 +258,7 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
           .sheet {
             width: ${page.ancho}mm;
             max-width: 100%;
-            min-height: calc(${page.alto}mm - 1px);
+            height: calc(${page.alto}mm - 4mm);
             margin: 0 auto 18px;
             display: flex;
             flex-direction: column;
@@ -322,7 +322,7 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
             line-height: 1.1;
           }
           .attendance-table { font-size: 8.5pt; flex-shrink: 0; }
-          .attendance-table tbody tr { height: 15px; }
+          .attendance-table tbody tr { height: var(--attendance-row-height, 15px); }
           .attendance-table tr { break-inside: avoid; page-break-inside: avoid; }
           .school-head {
             height: 144px;
@@ -425,13 +425,25 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
           .signatures small { margin-top: 2px; font-size: 6.5pt; }
           @media print {
             body { background: #fff; }
-            .sheet { margin: 0; box-shadow: none; }
+            .sheet { margin: 0; max-width: none; box-shadow: none; }
           }
         </style>
       </head>
       <body>
         ${groups.flatMap((group) => studentPages.map((studentPage, index) => sheetHtml({ group, course, trimesterLabel, teacherName, ...studentPage, byStudent, pageNumber: index + 1, pageCount: studentPages.length }))).join("")}
         <script>
+          function fitAttendanceSheets() {
+            document.querySelectorAll(".sheet").forEach((sheet) => {
+              let rowHeight = 15;
+              sheet.style.setProperty("--attendance-row-height", rowHeight + "px");
+              const footer = sheet.querySelector(".signatures");
+              while (footer.getBoundingClientRect().bottom > sheet.getBoundingClientRect().bottom + 0.5 && rowHeight > 13.5) {
+                rowHeight = Math.max(13.5, rowHeight - 0.25);
+                sheet.style.setProperty("--attendance-row-height", rowHeight + "px");
+              }
+            });
+          }
+          window.addEventListener("beforeprint", fitAttendanceSheets);
           window.addEventListener("load", async () => {
             if (document.fonts?.ready) await document.fonts.ready;
             document.querySelectorAll("tbody .student-cell").forEach((cell) => {
@@ -447,6 +459,7 @@ export function printAttendanceSummaryByMonth({ course, trimesterLabel, teacherN
               }
               text.style.whiteSpace = "normal";
             });
+            fitAttendanceSheets();
             document.documentElement.dataset.printReady = "true";
             setTimeout(() => {
               window.focus();
