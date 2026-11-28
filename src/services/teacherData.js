@@ -320,27 +320,27 @@ export function getTeacherScheduleCacheMeta(context) {
   };
 }
 
-export async function refreshTeacherScheduleCache(context) {
+async function refreshTeacherSchedules(context) {
   return sharedRead(`${revisionCachePrivada()}:${scheduleCacheKey(context)}`, async () => {
     const revision = revisionCachePrivada();
     const schedules = await loadTeacherSchedulesRemote(context);
     if (revision !== revisionCachePrivada()) throw new Error("La sesion cambio.");
     writeScheduleCache(context, schedules);
-    return getTeacherScheduleCacheMeta(context);
+    return schedules;
   });
 }
 
+export async function refreshTeacherScheduleCache(context) {
+  await refreshTeacherSchedules(context);
+  return getTeacherScheduleCacheMeta(context);
+}
+
 export async function getTeacherScheduleRows(context, dayId = null, options = {}) {
-  const cache = readScheduleCache(context);
+  const cache = options.forceRemote ? null : readScheduleCache(context);
   if (cache) return rowsFromSchedules(context, cache.schedules, dayId);
-  if (options.forceRemote) {
-    const revision = revisionCachePrivada();
-    const schedules = await loadTeacherSchedulesRemote(context);
-    if (revision !== revisionCachePrivada()) throw new Error("La sesion cambio.");
-    writeScheduleCache(context, schedules);
-    return rowsFromSchedules(context, schedules, dayId);
-  }
-  return [];
+  if (options.cacheOnly && !options.forceRemote) return [];
+  const schedules = await refreshTeacherSchedules(context);
+  return rowsFromSchedules(context, schedules, dayId);
 }
 
 export async function refreshTeacherNotesSnapshot(context, course, trimesterId = "t1", options = {}) {
@@ -458,7 +458,7 @@ export function todayDayId(offset = 0) {
   const date = new Date();
   date.setDate(date.getDate() + offset);
   const map = [null, "lunes", "martes", "miercoles", "jueves", "viernes", null];
-  return map[date.getDay()] || "lunes";
+  return map[date.getDay()] || "";
 }
 
 export function nextSchoolDayInfo() {

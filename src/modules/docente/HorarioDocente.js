@@ -102,9 +102,7 @@ function renderScheduleContent(context, rows, { loading = false, loaded = false,
             detail: scheduleCache ? `Copia local: ${scheduleCache.label}` : "Sin copia local"
           })}
           <div class="flex flex-col gap-2 lg:max-w-xl lg:items-end">
-            <button type="button" data-refresh-teacher-schedule ${loading ? "disabled" : ""} class="inline-flex items-center justify-center gap-2 rounded-2xl bg-school-navy px-4 py-2 text-sm font-black text-white shadow-soft transition hover:bg-school-green disabled:opacity-50">
-              ${icon(loading ? "loader-2" : "refresh-cw", "h-4 w-4")} ${loading ? "Cargando horario..." : error ? "Reintentar" : "Actualizar horario"}
-            </button>
+            ${error ? `<button type="button" data-refresh-teacher-schedule class="inline-flex items-center justify-center gap-2 rounded-2xl bg-school-navy px-4 py-2 text-sm font-black text-white shadow-soft transition hover:bg-school-green">${icon("refresh-cw", "h-4 w-4")} Reintentar</button>` : ""}
             <div class="${showCourseColors ? "flex" : "hidden"} flex-wrap gap-2 lg:justify-end">
               ${context.courses.map((courseItem) => {
                 const courseNumber = String(courseItem.corto || courseItem.nombre || "").replace(/\D/g, "") || "I";

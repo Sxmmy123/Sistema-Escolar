@@ -12,6 +12,39 @@ import {
 import { persistActiveTrimester, selectedTrimester, teacherState } from "./EstadoDocente.js";
 import { puedeRegistrarTrimestre } from "../../services/relevoDocente.js";
 import { emptyState, escapeHtml, refreshIcons, scheduleList, setHtml, setText } from "./UtilidadesDocente.js";
+import { cargarVistaDocente } from "./CargaVistaDocente.js";
+import { icon } from "../../ui/dom.js";
+
+export async function renderDashboardSchedule(context, {
+  readCache = (current) => getTeacherScheduleCacheMeta(current) ? getTeacherScheduleRows(current, null, { cacheOnly: true }) : null,
+  refresh = (current) => getTeacherScheduleRows(current, null, { forceRemote: true }),
+  force = false
+} = {}) {
+  const container = document.querySelector("[data-teacher-today]");
+  if (!container) return;
+  const nextSchoolDay = nextSchoolDayInfo();
+  const reload = () => renderDashboardSchedule(context, { readCache, refresh, force: true });
+  setText("[data-teacher-next-title]", nextSchoolDay.label);
+  return cargarVistaDocente({
+    container, force,
+    isCurrent: () => document.querySelector("[data-teacher-today]") === container &&
+      (!teacherState.context?.uid || teacherState.context.uid === context.uid),
+    readCache: () => readCache(context),
+    refresh: () => refresh(context),
+    draw: (rows, { loading = false, error = "" } = {}) => {
+      const todayRows = (rows || []).filter((row) => row.diaId === todayDayId(0));
+      const tomorrowRows = (rows || []).filter((row) => row.diaId === nextSchoolDay.dayId);
+      const unavailable = loading ? "Cargando horario..." : "Horario no disponible.";
+      const status = error ? `<p role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">${escapeHtml(error)}</p><button type="button" data-retry-dashboard-schedule class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-school-green">${icon("refresh-cw", "h-3.5 w-3.5")}Reintentar</button>` : "";
+      container.setAttribute?.("aria-busy", String(loading));
+      container.innerHTML = status + scheduleList(todayRows, rows ? "No hay clases asignadas para hoy." : unavailable);
+      setHtml("[data-teacher-tomorrow]", scheduleList(tomorrowRows, rows ? `No hay clases asignadas para ${nextSchoolDay.label.toLowerCase()}.` : unavailable));
+      setText('[data-teacher-count="classesToday"]', rows ? String(todayRows.length) : "—");
+      container.querySelector("[data-retry-dashboard-schedule]")?.addEventListener("click", reload);
+      refreshIcons();
+    }
+  });
+}
 
 function teacherCoursesCards(context) {
   if (!context.courses.length) {
@@ -109,24 +142,23 @@ export async function renderDashboard(context) {
   setText('[data-teacher-count="subjects"]', String(context.subjectIds.length));
   setHtml("[data-teacher-courses]", teacherCoursesCards(context));
 
-  const studentLists = await Promise.all(context.courses.map((course) => getTeacherStudents(course.id)));
-  setText('[data-teacher-count="students"]', String(studentLists.flat().length));
-
-  const nextSchoolDay = nextSchoolDayInfo();
-  const scheduleCache = getTeacherScheduleCacheMeta(context);
-  const todayRows = await getTeacherScheduleRows(context, todayDayId(0), { cacheOnly: true });
-  const tomorrowRows = await getTeacherScheduleRows(context, nextSchoolDay.dayId, { cacheOnly: true });
   const courseById = Object.fromEntries(context.courses.map((course) => [course.id, course]));
-  const activities = (await Promise.all(context.courses.map((course) => listActivities(course.id, teacherState.trimesterId))))
+  const trimesterId = teacherState.trimesterId;
+  const container = document.querySelector("[data-teacher-today]");
+  const [studentLists, activityLists] = await Promise.all([
+    Promise.all(context.courses.map((course) => getTeacherStudents(course.id))),
+    Promise.all(context.courses.map((course) => listActivities(course.id, trimesterId))),
+    renderDashboardSchedule(context)
+  ]);
+  if (document.querySelector("[data-teacher-today]") !== container || teacherState.trimesterId !== trimesterId ||
+    teacherState.context?.uid && teacherState.context.uid !== context.uid) return;
+  setText('[data-teacher-count="students"]', String(studentLists.flat().length));
+  const activities = activityLists
     .flat()
     .filter((activity) => courseById[activity.cursoId]?.materias.includes(activity.materiaId));
   const pendingTasks = activities.filter((activity) => !["material", "materiales"].includes(String(activity.tipo || "").toLowerCase()) && String(activity.fecha || "") >= todayIso()).length;
-  setText('[data-teacher-count="classesToday"]', String(todayRows.length));
   setText('[data-teacher-count="activities"]', String(activities.length));
   setText('[data-teacher-count="tasks"]', String(pendingTasks));
-  setHtml("[data-teacher-today]", scheduleList(todayRows, scheduleCache ? "No hay clases asignadas para hoy." : "Carga el horario desde el modulo Horario."));
-  setText("[data-teacher-next-title]", nextSchoolDay.label);
-  setHtml("[data-teacher-tomorrow]", scheduleList(tomorrowRows, scheduleCache ? `No hay clases asignadas para ${nextSchoolDay.label.toLowerCase()}.` : "Carga el horario desde el modulo Horario."));
   refreshIcons();
 }
 
